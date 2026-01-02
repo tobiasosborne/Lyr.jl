@@ -1,53 +1,54 @@
 # Masks.jl - Immutable fixed-size bitmask types
 
 """
-    Mask{N}
+    Mask{N,W}
 
 An immutable fixed-size bitmask with N bits.
-Stored as a tuple of UInt64 words.
+Stored as a tuple of W UInt64 words where W = cld(N, 64).
 """
-struct Mask{N}
-    words::NTuple{cld(N, 64), UInt64}
+struct Mask{N,W}
+    words::NTuple{W, UInt64}
 end
 
+# Helper to compute number of words needed
+@inline nwords(::Val{N}) where N = cld(N, 64)
+
 # Type aliases for VDB node masks
-const LeafMask = Mask{512}         # 8x8x8 = 512 voxels
-const Internal1Mask = Mask{4096}   # 16x16x16 = 4096 children
-const Internal2Mask = Mask{32768}  # 32x32x32 = 32768 children
+const LeafMask = Mask{512, 8}          # 8x8x8 = 512 voxels, 8 words
+const Internal1Mask = Mask{4096, 64}   # 16x16x16 = 4096 children, 64 words
+const Internal2Mask = Mask{32768, 512} # 32x32x32 = 32768 children, 512 words
 
 """
-    Mask{N}()
+    Mask{N,W}()
 
 Construct a mask with all bits off (zeros).
 """
-function Mask{N}() where N
-    nwords = cld(N, 64)
-    Mask{N}(ntuple(_ -> UInt64(0), nwords))
+function Mask{N,W}() where {N,W}
+    Mask{N,W}(ntuple(_ -> UInt64(0), W))
 end
 
 """
-    Mask{N}(::Val{:ones})
+    Mask{N,W}(::Val{:ones})
 
 Construct a mask with all bits on (ones).
 """
-function Mask{N}(::Val{:ones}) where N
-    nwords = cld(N, 64)
+function Mask{N,W}(::Val{:ones}) where {N,W}
     # Handle the last word which may have fewer than 64 valid bits
     remainder = N % 64
     if remainder == 0
-        Mask{N}(ntuple(_ -> ~UInt64(0), nwords))
+        Mask{N,W}(ntuple(_ -> ~UInt64(0), W))
     else
         last_mask = (UInt64(1) << remainder) - 1
-        Mask{N}(ntuple(i -> i < nwords ? ~UInt64(0) : last_mask, nwords))
+        Mask{N,W}(ntuple(i -> i < W ? ~UInt64(0) : last_mask, W))
     end
 end
 
 """
-    is_on(m::Mask{N}, i::Int) -> Bool
+    is_on(m::Mask{N,W}, i::Int) -> Bool
 
 Check if bit at index `i` (0-indexed) is on.
 """
-function is_on(m::Mask{N}, i::Int)::Bool where N
+function is_on(m::Mask{N,W}, i::Int)::Bool where {N,W}
     @boundscheck 0 <= i < N || throw(BoundsError(m, i))
     word_idx = (i >> 6) + 1  # Divide by 64, 1-indexed
     bit_idx = i & 63         # Mod 64
@@ -55,85 +56,83 @@ function is_on(m::Mask{N}, i::Int)::Bool where N
 end
 
 """
-    is_off(m::Mask{N}, i::Int) -> Bool
+    is_off(m::Mask{N,W}, i::Int) -> Bool
 
 Check if bit at index `i` (0-indexed) is off.
 """
-is_off(m::Mask{N}, i::Int) where N = !is_on(m, i)
+is_off(m::Mask{N,W}, i::Int) where {N,W} = !is_on(m, i)
 
 """
-    is_empty(m::Mask{N}) -> Bool
+    is_empty(m::Mask{N,W}) -> Bool
 
 Check if all bits are off.
 """
-function is_empty(m::Mask{N})::Bool where N
+function is_empty(m::Mask{N,W})::Bool where {N,W}
     all(w -> w == 0, m.words)
 end
 
 """
-    is_full(m::Mask{N}) -> Bool
+    is_full(m::Mask{N,W}) -> Bool
 
 Check if all N bits are on.
 """
-function is_full(m::Mask{N})::Bool where N
-    nwords = cld(N, 64)
+function is_full(m::Mask{N,W})::Bool where {N,W}
     remainder = N % 64
 
     # Check all but last word
-    for i in 1:(nwords - 1)
+    for i in 1:(W - 1)
         m.words[i] == ~UInt64(0) || return false
     end
 
     # Check last word
     if remainder == 0
-        m.words[nwords] == ~UInt64(0)
+        m.words[W] == ~UInt64(0)
     else
         expected = (UInt64(1) << remainder) - 1
-        m.words[nwords] == expected
+        m.words[W] == expected
     end
 end
 
 """
-    count_on(m::Mask{N}) -> Int
+    count_on(m::Mask{N,W}) -> Int
 
 Count the number of bits that are on.
 """
-function count_on(m::Mask{N})::Int where N
+function count_on(m::Mask{N,W})::Int where {N,W}
     sum(count_ones, m.words)
 end
 
 """
-    count_off(m::Mask{N}) -> Int
+    count_off(m::Mask{N,W}) -> Int
 
 Count the number of bits that are off.
 """
-count_off(m::Mask{N}) where N = N - count_on(m)
+count_off(m::Mask{N,W}) where {N,W} = N - count_on(m)
 
 """
-    OnIndicesIterator{N}
+    OnIndicesIterator{N,W}
 
 Iterator over indices of on bits in a mask.
 """
-struct OnIndicesIterator{N}
-    mask::Mask{N}
+struct OnIndicesIterator{N,W}
+    mask::Mask{N,W}
 end
 
 """
-    on_indices(m::Mask{N})
+    on_indices(m::Mask{N,W})
 
 Return an iterator over all indices (0-indexed) where bits are on.
 Iteration order is ascending.
 """
-on_indices(m::Mask{N}) where N = OnIndicesIterator{N}(m)
+on_indices(m::Mask{N,W}) where {N,W} = OnIndicesIterator{N,W}(m)
 
-Base.IteratorSize(::Type{OnIndicesIterator{N}}) where N = Base.SizeUnknown()
-Base.eltype(::Type{OnIndicesIterator{N}}) where N = Int
+Base.IteratorSize(::Type{OnIndicesIterator{N,W}}) where {N,W} = Base.SizeUnknown()
+Base.eltype(::Type{OnIndicesIterator{N,W}}) where {N,W} = Int
 
-function Base.iterate(it::OnIndicesIterator{N}, state=(1, 0)) where N
+function Base.iterate(it::OnIndicesIterator{N,W}, state=(1, 0)) where {N,W}
     word_idx, bit_offset = state
-    nwords = cld(N, 64)
 
-    while word_idx <= nwords
+    while word_idx <= W
         word = it.mask.words[word_idx]
         # Skip already-checked bits
         word >>= bit_offset
@@ -157,26 +156,26 @@ function Base.iterate(it::OnIndicesIterator{N}, state=(1, 0)) where N
 end
 
 """
-    OffIndicesIterator{N}
+    OffIndicesIterator{N,W}
 
 Iterator over indices of off bits in a mask.
 """
-struct OffIndicesIterator{N}
-    mask::Mask{N}
+struct OffIndicesIterator{N,W}
+    mask::Mask{N,W}
 end
 
 """
-    off_indices(m::Mask{N})
+    off_indices(m::Mask{N,W})
 
 Return an iterator over all indices (0-indexed) where bits are off.
 Iteration order is ascending.
 """
-off_indices(m::Mask{N}) where N = OffIndicesIterator{N}(m)
+off_indices(m::Mask{N,W}) where {N,W} = OffIndicesIterator{N,W}(m)
 
-Base.IteratorSize(::Type{OffIndicesIterator{N}}) where N = Base.SizeUnknown()
-Base.eltype(::Type{OffIndicesIterator{N}}) where N = Int
+Base.IteratorSize(::Type{OffIndicesIterator{N,W}}) where {N,W} = Base.SizeUnknown()
+Base.eltype(::Type{OffIndicesIterator{N,W}}) where {N,W} = Int
 
-function Base.iterate(it::OffIndicesIterator{N}, state=0) where N
+function Base.iterate(it::OffIndicesIterator{N,W}, state=0) where {N,W}
     i = state
     while i < N
         if is_off(it.mask, i)
@@ -188,17 +187,16 @@ function Base.iterate(it::OffIndicesIterator{N}, state=0) where N
 end
 
 """
-    read_mask(::Type{Mask{N}}, bytes::Vector{UInt8}, pos::Int) -> Tuple{Mask{N}, Int}
+    read_mask(::Type{Mask{N,W}}, bytes::Vector{UInt8}, pos::Int) -> Tuple{Mask{N,W}, Int}
 
 Parse a mask from bytes. Masks are stored as consecutive 64-bit words in little-endian.
 """
-function read_mask(::Type{Mask{N}}, bytes::Vector{UInt8}, pos::Int)::Tuple{Mask{N}, Int} where N
-    nwords = cld(N, 64)
-    words = Vector{UInt64}(undef, nwords)
+function read_mask(::Type{Mask{N,W}}, bytes::Vector{UInt8}, pos::Int)::Tuple{Mask{N,W}, Int} where {N,W}
+    words = Vector{UInt64}(undef, W)
 
-    for i in 1:nwords
+    for i in 1:W
         words[i], pos = read_u64_le(bytes, pos)
     end
 
-    (Mask{N}(NTuple{nwords, UInt64}(words)), pos)
+    (Mask{N,W}(NTuple{W, UInt64}(words)), pos)
 end

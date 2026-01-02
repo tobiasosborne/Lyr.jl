@@ -114,6 +114,13 @@
         # Empty string
         bytes = UInt8[0x00, 0x00, 0x00, 0x00]
         @test read_string_with_size(bytes, 1)[1] == ""
+
+        # String with embedded null bytes (valid for size-prefixed strings)
+        bytes = UInt8[0x05, 0x00, 0x00, 0x00, 0x41, 0x00, 0x42, 0x00, 0x43]  # "A\0B\0C"
+        str, pos = read_string_with_size(bytes, 1)
+        @test str == "A\0B\0C"
+        @test length(str) == 5
+        @test pos == 10
     end
 
     @testset "Insufficient bytes" begin

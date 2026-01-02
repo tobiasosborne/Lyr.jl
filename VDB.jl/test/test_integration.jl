@@ -2,7 +2,7 @@
     # Integration tests for parsing official VDB sample files
     # These tests are skipped if sample files are not present
 
-    const SAMPLE_DIR = joinpath(@__DIR__, "fixtures", "samples")
+    SAMPLE_DIR = joinpath(@__DIR__, "fixtures", "samples")
 
     @testset "Sample files parsing" begin
         # Skip if no samples directory
@@ -46,7 +46,7 @@
         # Test against known reference values from sample files
         # These would be pre-computed and stored in fixtures
 
-        const REF_FILE = joinpath(@__DIR__, "fixtures", "reference_values.json")
+        REF_FILE = joinpath(@__DIR__, "fixtures", "reference_values.json")
 
         if !isfile(REF_FILE)
             @info "Skipping reference value tests: $REF_FILE not found"

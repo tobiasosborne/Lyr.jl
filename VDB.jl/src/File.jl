@@ -150,19 +150,19 @@ end
 Parse the value type from a grid type string.
 """
 function parse_value_type(grid_type::String)::DataType
-    if contains(grid_type, "float") || contains(grid_type, "Float")
+    if Base.contains(grid_type, "float") || Base.contains(grid_type, "Float")
         Float32
-    elseif contains(grid_type, "double") || contains(grid_type, "Double")
+    elseif Base.contains(grid_type, "double") || Base.contains(grid_type, "Double")
         Float64
-    elseif contains(grid_type, "int32") || contains(grid_type, "Int32")
+    elseif Base.contains(grid_type, "int32") || Base.contains(grid_type, "Int32")
         Int32
-    elseif contains(grid_type, "int64") || contains(grid_type, "Int64")
+    elseif Base.contains(grid_type, "int64") || Base.contains(grid_type, "Int64")
         Int64
-    elseif contains(grid_type, "Vec3f") || contains(grid_type, "vec3f")
+    elseif Base.contains(grid_type, "Vec3f") || Base.contains(grid_type, "vec3f")
         NTuple{3, Float32}
-    elseif contains(grid_type, "Vec3d") || contains(grid_type, "vec3d")
+    elseif Base.contains(grid_type, "Vec3d") || Base.contains(grid_type, "vec3d")
         NTuple{3, Float64}
-    elseif contains(grid_type, "bool") || contains(grid_type, "Bool")
+    elseif Base.contains(grid_type, "bool") || Base.contains(grid_type, "Bool")
         Bool
     else
         Float32  # Default to Float32

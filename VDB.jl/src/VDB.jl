@@ -63,11 +63,13 @@ export read_transform
 
 # Exports - Grid
 export GridClass, GRID_LEVEL_SET, GRID_FOG_VOLUME, GRID_STAGGERED, GRID_UNKNOWN
+export parse_grid_class
 export Grid, read_grid
 
 # Exports - File
 export VDBHeader, GridDescriptor, VDBFile
 export VDB_MAGIC
+export parse_value_type
 export read_header, read_grid_descriptor, parse_vdb
 
 # Exports - Accessors
@@ -79,6 +81,6 @@ export sample_nearest, sample_trilinear, sample_world
 export gradient
 
 # Exports - Ray
-export Ray, intersect_bbox, intersect_leaves
+export Ray, LeafIntersection, intersect_bbox, intersect_leaves
 
 end # module

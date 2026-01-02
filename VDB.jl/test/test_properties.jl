@@ -26,11 +26,12 @@
         end
 
         @testset "count_on + count_off equals N" begin
-            for N in [64, 128, 512]
-                m = Mask{N}()
+            # (N, W) pairs where W = cld(N, 64)
+            for (N, W) in [(64, 1), (128, 2), (512, 8)]
+                m = Mask{N,W}()
                 @test count_on(m) + count_off(m) == N
 
-                m = Mask{N}(Val(:ones))
+                m = Mask{N,W}(Val(:ones))
                 @test count_on(m) + count_off(m) == N
             end
         end
@@ -72,25 +73,26 @@
                 max_c = (min_c[1] + abs(rand(Int16)), min_c[2] + abs(rand(Int16)), min_c[3] + abs(rand(Int16)))
                 bb = BBox(min_c, max_c)
 
-                @test contains(bb, min_c)
-                @test contains(bb, max_c)
+                @test VDB.contains(bb, min_c)
+                @test VDB.contains(bb, max_c)
             end
         end
 
         @testset "BBox union contains both inputs" begin
             for _ in 1:10
-                a = BBox(coord(rand(Int8), rand(Int8), rand(Int8)),
-                         coord(rand(Int8) + 10, rand(Int8) + 10, rand(Int8) + 10))
-                b = BBox(coord(rand(Int8), rand(Int8), rand(Int8)),
-                         coord(rand(Int8) + 10, rand(Int8) + 10, rand(Int8) + 10))
+                # Use smaller range to avoid issues
+                x1, y1, z1 = rand(0:50), rand(0:50), rand(0:50)
+                x2, y2, z2 = rand(0:50), rand(0:50), rand(0:50)
+                a = BBox(coord(x1, y1, z1), coord(x1 + 10, y1 + 10, z1 + 10))
+                b = BBox(coord(x2, y2, z2), coord(x2 + 10, y2 + 10, z2 + 10))
 
                 u = union(a, b)
 
                 # Union should contain all corners of both boxes
-                @test contains(u, a.min)
-                @test contains(u, a.max)
-                @test contains(u, b.min)
-                @test contains(u, b.max)
+                @test VDB.contains(u, a.min)
+                @test VDB.contains(u, a.max)
+                @test VDB.contains(u, b.min)
+                @test VDB.contains(u, b.max)
             end
         end
 

@@ -1,6 +1,6 @@
 # Compression.jl - Codec abstraction for VDB compression
 
-using CodecBlosc
+using Blosc
 using CodecZlib
 
 """
@@ -47,7 +47,7 @@ function decompress(::BloscCodec, bytes::Vector{UInt8})::Vector{UInt8}
     if isempty(bytes)
         return UInt8[]
     end
-    transcode(BloscDecompressor, bytes)
+    Blosc.decompress(UInt8, bytes)
 end
 
 """

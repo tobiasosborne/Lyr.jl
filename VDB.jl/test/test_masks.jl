@@ -1,55 +1,55 @@
 @testset "Masks" begin
     @testset "Construction" begin
-        # All zeros
-        m = Mask{64}()
+        # All zeros (64 bits = 1 word)
+        m = Mask{64,1}()
         @test is_empty(m)
         @test count_on(m) == 0
         @test count_off(m) == 64
 
         # All ones
-        m = Mask{64}(Val(:ones))
+        m = Mask{64,1}(Val(:ones))
         @test is_full(m)
         @test count_on(m) == 64
         @test count_off(m) == 0
 
-        # Non-64-multiple size
-        m = Mask{100}()
+        # Non-64-multiple size (100 bits = 2 words)
+        m = Mask{100,2}()
         @test count_off(m) == 100
 
-        m = Mask{100}(Val(:ones))
+        m = Mask{100,2}(Val(:ones))
         @test count_on(m) == 100
     end
 
     @testset "Bit access" begin
         # Create mask with single bit set
         words = (UInt64(1),)
-        m = Mask{64}(words)
+        m = Mask{64,1}(words)
         @test is_on(m, 0)
         @test is_off(m, 1)
 
         # Bit at position 63
         words = (UInt64(1) << 63,)
-        m = Mask{64}(words)
+        m = Mask{64,1}(words)
         @test is_on(m, 63)
         @test is_off(m, 0)
 
-        # Multi-word: bit at position 64
+        # Multi-word: bit at position 64 (128 bits = 2 words)
         words = (UInt64(0), UInt64(1))
-        m = Mask{128}(words)
+        m = Mask{128,2}(words)
         @test is_off(m, 63)
         @test is_on(m, 64)
         @test is_off(m, 65)
 
         # Bit at position 65
         words = (UInt64(0), UInt64(2))
-        m = Mask{128}(words)
+        m = Mask{128,2}(words)
         @test is_on(m, 65)
     end
 
     @testset "Counts" begin
         # Alternating bits
         words = (0x5555555555555555,)
-        m = Mask{64}(words)
+        m = Mask{64,1}(words)
         @test count_on(m) == 32
         @test count_off(m) == 32
 
@@ -64,41 +64,41 @@
     @testset "Iteration - on_indices" begin
         # Single bit
         words = (UInt64(1),)
-        m = Mask{64}(words)
+        m = Mask{64,1}(words)
         indices = collect(on_indices(m))
         @test indices == [0]
 
         # Multiple bits
         words = (UInt64(0b1010),)  # bits 1 and 3
-        m = Mask{64}(words)
+        m = Mask{64,1}(words)
         indices = collect(on_indices(m))
         @test indices == [1, 3]
 
         # Cross word boundary
         words = (UInt64(1) << 63, UInt64(1))  # bits 63 and 64
-        m = Mask{128}(words)
+        m = Mask{128,2}(words)
         indices = collect(on_indices(m))
         @test indices == [63, 64]
 
         # Empty mask
-        m = Mask{64}()
+        m = Mask{64,1}()
         @test isempty(collect(on_indices(m)))
 
-        # Full mask
-        m = Mask{8}(Val(:ones))
+        # Full mask (8 bits = 1 word)
+        m = Mask{8,1}(Val(:ones))
         @test collect(on_indices(m)) == [0, 1, 2, 3, 4, 5, 6, 7]
     end
 
     @testset "Iteration - off_indices" begin
         words = (UInt64(0b1010),)
-        m = Mask{4}(words)
+        m = Mask{4,1}(words)
         indices = collect(off_indices(m))
         @test indices == [0, 2]
     end
 
     @testset "Iteration order" begin
-        # Verify ascending order
-        m = Mask{512}(Val(:ones))
+        # Verify ascending order using LeafMask (512 bits = 8 words)
+        m = Mask{512,8}(Val(:ones))
         indices = collect(on_indices(m))
         @test issorted(indices)
         @test indices == collect(0:511)
@@ -106,16 +106,27 @@
 
     @testset "Count consistency" begin
         # count_on should equal length of on_indices
-        for N in [64, 100, 512]
-            m = Mask{N}(Val(:ones))
+        # 64 bits = 1 word, 100 bits = 2 words, 512 bits = 8 words
+        for (N, W) in [(64, 1), (100, 2), (512, 8)]
+            m = Mask{N,W}(Val(:ones))
             @test count_on(m) == length(collect(on_indices(m)))
         end
     end
 
     @testset "Type aliases" begin
-        @test LeafMask == Mask{512}
-        @test Internal1Mask == Mask{4096}
-        @test Internal2Mask == Mask{32768}
+        @test LeafMask == Mask{512, 8}
+        @test Internal1Mask == Mask{4096, 64}
+        @test Internal2Mask == Mask{32768, 512}
+    end
+
+    @testset "Word boundary 127-128" begin
+        # Bits at 127 and 128 (crosses second word boundary)
+        words = (UInt64(0), UInt64(1) << 63, UInt64(1))  # bits 127 and 128
+        m = Mask{192,3}(words)
+        @test is_off(m, 126)
+        @test is_on(m, 127)
+        @test is_on(m, 128)
+        @test is_off(m, 129)
     end
 
     @testset "read_mask" begin
@@ -123,7 +134,7 @@
         bytes = zeros(UInt8, 8)
         bytes[1] = 0x01  # Bit 0 set
 
-        m, pos = read_mask(Mask{64}, bytes, 1)
+        m, pos = read_mask(Mask{64,1}, bytes, 1)
         @test is_on(m, 0)
         @test count_on(m) == 1
         @test pos == 9
@@ -135,5 +146,25 @@
         m, pos = read_mask(LeafMask, bytes, 1)
         @test count_on(m) == 8
         @test pos == 65
+    end
+
+    @testset "Round-trip: read what you write" begin
+        # Create a mask with known pattern
+        original_words = (0xdeadbeefcafebabe, 0x123456789abcdef0)
+        original = Mask{128,2}(original_words)
+
+        # Convert to bytes (little-endian)
+        bytes = zeros(UInt8, 16)
+        for (i, word) in enumerate(original_words)
+            for j in 0:7
+                bytes[(i-1)*8 + j + 1] = UInt8((word >> (8*j)) & 0xff)
+            end
+        end
+
+        # Read back
+        recovered, pos = read_mask(Mask{128,2}, bytes, 1)
+        @test pos == 17
+        @test recovered.words == original.words
+        @test count_on(recovered) == count_on(original)
     end
 end

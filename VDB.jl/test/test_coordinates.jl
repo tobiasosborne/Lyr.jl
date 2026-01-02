@@ -95,11 +95,11 @@
     @testset "BBox" begin
         bb = BBox(coord(0, 0, 0), coord(10, 10, 10))
 
-        @test contains(bb, coord(5, 5, 5))
-        @test contains(bb, coord(0, 0, 0))
-        @test contains(bb, coord(10, 10, 10))
-        @test !contains(bb, coord(-1, 0, 0))
-        @test !contains(bb, coord(11, 0, 0))
+        @test VDB.contains(bb, coord(5, 5, 5))
+        @test VDB.contains(bb, coord(0, 0, 0))
+        @test VDB.contains(bb, coord(10, 10, 10))
+        @test !VDB.contains(bb, coord(-1, 0, 0))
+        @test !VDB.contains(bb, coord(11, 0, 0))
     end
 
     @testset "BBox intersects" begin

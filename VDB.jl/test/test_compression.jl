@@ -3,12 +3,11 @@
         codec = NoCompression()
         data = UInt8[1, 2, 3, 4, 5]
 
-        result = decompress(codec, data)
+        result = VDB.decompress(codec, data)
         @test result == data
-        @test result !== data  # Should be a copy or the same reference is fine
 
         # Empty data
-        @test decompress(codec, UInt8[]) == UInt8[]
+        @test VDB.decompress(codec, UInt8[]) == UInt8[]
     end
 
     @testset "BloscCodec" begin
@@ -17,15 +16,15 @@
         # Test with known compressible data
         original = repeat(UInt8[1, 2, 3, 4], 100)
 
-        # Compress then decompress
-        using CodecBlosc
-        compressed = transcode(BloscCompressor, original)
-        decompressed = decompress(codec, compressed)
+        # Compress then decompress using Blosc.jl
+        import Blosc
+        compressed = Blosc.compress(original)
+        decompressed = VDB.decompress(codec, compressed)
 
         @test decompressed == original
 
         # Empty data
-        @test decompress(codec, UInt8[]) == UInt8[]
+        @test VDB.decompress(codec, UInt8[]) == UInt8[]
     end
 
     @testset "ZipCodec" begin
@@ -35,14 +34,14 @@
         original = repeat(UInt8[1, 2, 3, 4], 100)
 
         # Compress then decompress
-        using CodecZlib
+        import CodecZlib: ZlibCompressor, transcode
         compressed = transcode(ZlibCompressor, original)
-        decompressed = decompress(codec, compressed)
+        decompressed = VDB.decompress(codec, compressed)
 
         @test decompressed == original
 
         # Empty data
-        @test decompress(codec, UInt8[]) == UInt8[]
+        @test VDB.decompress(codec, UInt8[]) == UInt8[]
     end
 
     @testset "Incompressible data" begin
@@ -52,15 +51,15 @@
         original = rand(UInt8, 1000)
 
         # Blosc
-        using CodecBlosc
-        compressed = transcode(BloscCompressor, original)
-        decompressed = decompress(BloscCodec(), compressed)
+        import Blosc
+        compressed = Blosc.compress(original)
+        decompressed = VDB.decompress(BloscCodec(), compressed)
         @test decompressed == original
 
         # Zlib
-        using CodecZlib
+        import CodecZlib: ZlibCompressor, transcode
         compressed = transcode(ZlibCompressor, original)
-        decompressed = decompress(ZipCodec(), compressed)
+        decompressed = VDB.decompress(ZipCodec(), compressed)
         @test decompressed == original
     end
 
@@ -68,19 +67,21 @@
         # Create a compressed block with size prefix
         original = repeat(UInt8[0xab], 100)
 
-        # No compression
-        bytes = vcat(
-            reinterpret(UInt8, [UInt64(100)]),  # size
-            original                             # data
-        )
+        # No compression - build bytes properly
+        size_bytes = Vector{UInt8}(undef, 8)
+        size_val = UInt64(100)
+        for i in 0:7
+            size_bytes[i+1] = UInt8((size_val >> (8*i)) & 0xff)
+        end
+        bytes = vcat(size_bytes, original)
 
         result, pos = read_compressed_bytes(bytes, 1, NoCompression(), 100)
         @test result == original
         @test pos == 109  # 8 bytes size + 100 bytes data + 1
 
         # Empty block
-        bytes = reinterpret(UInt8, [UInt64(0)])
-        result, pos = read_compressed_bytes(bytes, 1, NoCompression(), 0)
+        empty_size_bytes = zeros(UInt8, 8)
+        result, pos = read_compressed_bytes(empty_size_bytes, 1, NoCompression(), 0)
         @test result == UInt8[]
     end
 end
