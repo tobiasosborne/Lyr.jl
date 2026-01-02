@@ -1,0 +1,20 @@
+using Test
+using VDB
+
+@testset "VDB.jl" begin
+    include("test_binary.jl")
+    include("test_masks.jl")
+    include("test_coordinates.jl")
+    include("test_compression.jl")
+    include("test_tree_types.jl")
+    include("test_topology.jl")
+    include("test_values.jl")
+    include("test_transforms.jl")
+    include("test_grid.jl")
+    include("test_file.jl")
+    include("test_accessors.jl")
+    include("test_interpolation.jl")
+    include("test_ray.jl")
+    include("test_integration.jl")
+    include("test_properties.jl")
+end

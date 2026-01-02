@@ -1,0 +1,127 @@
+# Binary.jl - Pure functions for reading primitive types from byte vectors
+#
+# All functions have signature: (bytes::Vector{UInt8}, pos::Int) -> (result, new_pos::Int)
+# Positions are 1-indexed (Julia convention)
+# All multi-byte types are little-endian
+
+"""
+    read_u8(bytes::Vector{UInt8}, pos::Int) -> Tuple{UInt8, Int}
+
+Read a single unsigned byte at position `pos`.
+Returns the value and the next position.
+"""
+function read_u8(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt8, Int}
+    @boundscheck checkbounds(bytes, pos)
+    @inbounds val = bytes[pos]
+    (val, pos + 1)
+end
+
+"""
+    read_u32_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{UInt32, Int}
+
+Read a 32-bit unsigned integer in little-endian format.
+"""
+function read_u32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt32, Int}
+    @boundscheck checkbounds(bytes, pos:pos+3)
+    @inbounds val = reinterpret(UInt32, bytes[pos:pos+3])[1]
+    (ltoh(val), pos + 4)
+end
+
+"""
+    read_u64_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{UInt64, Int}
+
+Read a 64-bit unsigned integer in little-endian format.
+"""
+function read_u64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt64, Int}
+    @boundscheck checkbounds(bytes, pos:pos+7)
+    @inbounds val = reinterpret(UInt64, bytes[pos:pos+7])[1]
+    (ltoh(val), pos + 8)
+end
+
+"""
+    read_i32_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{Int32, Int}
+
+Read a 32-bit signed integer in little-endian format.
+"""
+function read_i32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int32, Int}
+    @boundscheck checkbounds(bytes, pos:pos+3)
+    @inbounds val = reinterpret(Int32, bytes[pos:pos+3])[1]
+    (ltoh(val), pos + 4)
+end
+
+"""
+    read_i64_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{Int64, Int}
+
+Read a 64-bit signed integer in little-endian format.
+"""
+function read_i64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int64, Int}
+    @boundscheck checkbounds(bytes, pos:pos+7)
+    @inbounds val = reinterpret(Int64, bytes[pos:pos+7])[1]
+    (ltoh(val), pos + 8)
+end
+
+"""
+    read_f32_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float32, Int}
+
+Read a 32-bit float in little-endian format.
+"""
+function read_f32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float32, Int}
+    @boundscheck checkbounds(bytes, pos:pos+3)
+    @inbounds val = reinterpret(Float32, bytes[pos:pos+3])[1]
+    (ltoh(val), pos + 4)
+end
+
+"""
+    read_f64_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float64, Int}
+
+Read a 64-bit float in little-endian format.
+"""
+function read_f64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
+    @boundscheck checkbounds(bytes, pos:pos+7)
+    @inbounds val = reinterpret(Float64, bytes[pos:pos+7])[1]
+    (ltoh(val), pos + 8)
+end
+
+"""
+    read_bytes(bytes::Vector{UInt8}, pos::Int, n::Int) -> Tuple{Vector{UInt8}, Int}
+
+Read `n` bytes starting at position `pos`.
+"""
+function read_bytes(bytes::Vector{UInt8}, pos::Int, n::Int)::Tuple{Vector{UInt8}, Int}
+    @boundscheck checkbounds(bytes, pos:pos+n-1)
+    @inbounds val = bytes[pos:pos+n-1]
+    (val, pos + n)
+end
+
+"""
+    read_cstring(bytes::Vector{UInt8}, pos::Int) -> Tuple{String, Int}
+
+Read a null-terminated C string starting at position `pos`.
+Returns the string (without null terminator) and position after the null byte.
+"""
+function read_cstring(bytes::Vector{UInt8}, pos::Int)::Tuple{String, Int}
+    start = pos
+    while pos <= length(bytes) && bytes[pos] != 0x00
+        pos += 1
+    end
+    if pos > length(bytes)
+        throw(BoundsError(bytes, pos))
+    end
+    str = String(bytes[start:pos-1])
+    (str, pos + 1)  # Skip the null terminator
+end
+
+"""
+    read_string_with_size(bytes::Vector{UInt8}, pos::Int) -> Tuple{String, Int}
+
+Read a size-prefixed string. The size is a 32-bit little-endian integer.
+"""
+function read_string_with_size(bytes::Vector{UInt8}, pos::Int)::Tuple{String, Int}
+    size, pos = read_u32_le(bytes, pos)
+    if size == 0
+        return ("", pos)
+    end
+    @boundscheck checkbounds(bytes, pos:pos+Int(size)-1)
+    @inbounds str = String(bytes[pos:pos+Int(size)-1])
+    (str, pos + Int(size))
+end
