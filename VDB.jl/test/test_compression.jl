@@ -64,24 +64,34 @@
     end
 
     @testset "read_compressed_bytes" begin
-        # Create a compressed block with size prefix
+        # NoCompression - just raw data, no size prefix
         original = repeat(UInt8[0xab], 100)
+        
+        result, pos = read_compressed_bytes(original, 1, NoCompression(), 100)
+        @test result == original
+        @test pos == 101  # 100 bytes data + 1
 
-        # No compression - build bytes properly
+        # Test signed size prefix (negative = uncompressed) with fake codec
+        # We'll use BloscCodec but provide uncompressed data indicated by negative size
+        
+        # -100 in Int64 LE
+        size_val = Int64(-100)
         size_bytes = Vector{UInt8}(undef, 8)
-        size_val = UInt64(100)
         for i in 0:7
             size_bytes[i+1] = UInt8((size_val >> (8*i)) & 0xff)
         end
+        
+        # Data is uncompressed
         bytes = vcat(size_bytes, original)
-
-        result, pos = read_compressed_bytes(bytes, 1, NoCompression(), 100)
+        
+        # Should read uncompressed data despite codec being Blosc
+        result, pos = read_compressed_bytes(bytes, 1, BloscCodec(), 100)
         @test result == original
-        @test pos == 109  # 8 bytes size + 100 bytes data + 1
-
-        # Empty block
+        @test pos == 109 # 8 bytes size + 100 bytes data + 1
+        
+        # Empty block (size 0)
         empty_size_bytes = zeros(UInt8, 8)
-        result, pos = read_compressed_bytes(empty_size_bytes, 1, NoCompression(), 0)
+        result, pos = read_compressed_bytes(empty_size_bytes, 1, BloscCodec(), 0)
         @test result == UInt8[]
     end
 end

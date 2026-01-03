@@ -63,31 +63,60 @@ function decompress(::ZipCodec, bytes::Vector{UInt8})::Vector{UInt8}
 end
 
 """
+    read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int) -> Tuple{Vector{UInt8}, Int}
+
+Read uncompressed data directly (no size prefix).
+"""
+function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int)::Tuple{Vector{UInt8}, Int}
+    read_bytes(bytes, pos, expected_size)
+end
+
+"""
     read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, expected_size::Int) -> Tuple{Vector{UInt8}, Int}
 
 Read a size-prefixed compressed block and decompress it.
-The block format is: compressed_size (u64) | compressed_data
+The block format is: compressed_size (i64) | data
 
-For NoCompression, the compressed_size equals expected_size.
+- If compressed_size < 0: Data is uncompressed. Read abs(compressed_size) bytes.
+- If compressed_size > 0: Data is compressed. Read compressed_size bytes then decompress.
+- If compressed_size = 0: Empty.
+
+For NoCompression, the format is just raw bytes (this function shouldn't be called typically, or handled by size=expected).
 """
 function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, expected_size::Int)::Tuple{Vector{UInt8}, Int}
-    # Read compressed size
-    compressed_size, pos = read_u64_le(bytes, pos)
+    # Read chunk size (signed Int64)
+    chunk_size, pos = read_i64_le(bytes, pos)
 
-    if compressed_size == 0
+    if chunk_size == 0
         return (UInt8[], pos)
     end
 
-    # Read compressed data
-    compressed_data, pos = read_bytes(bytes, pos, Int(compressed_size))
+    if chunk_size < 0
+        # Uncompressed data
+        # Size is -chunk_size
+        raw_size = -chunk_size
+        if raw_size != expected_size
+            error("Uncompressed chunk size mismatch: expected $expected_size, got $raw_size")
+        end
+        
+        # Read raw bytes directly
+        data, pos = read_bytes(bytes, pos, Int(raw_size))
+        return (data, pos)
+    else
+        # Compressed data
+        compressed_size = chunk_size
+        
+        # Read compressed data
+        compressed_data, pos = read_bytes(bytes, pos, Int(compressed_size))
 
-    # Decompress
-    decompressed = decompress(codec, compressed_data)
+        # Decompress
+        decompressed = decompress(codec, compressed_data)
 
-    # Verify expected size
-    if length(decompressed) != expected_size
-        error("Decompressed size mismatch: expected $expected_size, got $(length(decompressed))")
+        # Verify expected size
+        if length(decompressed) != expected_size
+            error("Decompressed size mismatch: expected $expected_size, got $(length(decompressed))")
+        end
+
+        return (decompressed, pos)
     end
-
-    (decompressed, pos)
 end

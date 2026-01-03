@@ -21,37 +21,44 @@ end
 """
     read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T) -> Tuple{InternalNode2{T}, Int}
 
-Read a complete Internal2 subtree (topology then values).
-
-VDB format for Internal2 subtree:
-1. Internal2 child_mask + value_mask (8192 bytes)
-2. For each Internal1 child: child_mask + value_mask (1024 bytes each)
-3. For each Leaf (nested): value_mask (64 bytes each)
-4. Internal2 tile values
-5. For each Internal1: tile values + leaf compressed values
+Read a complete Internal2 subtree.
+Format (verified against OpenVDB source for 222+):
+1. I2 Masks (Child + Value)
+2. I2 Tile Values (Compressed, Dense) - Note: In 222, tiles are stored here!
+3. For each active I1 child:
+    a. I1 Masks (Child + Value)
+    b. I1 Tile Values (Compressed, Dense)
+    c. For each active Leaf child:
+        i. Leaf Value Mask
+4. Phase 2 (Leaf Values):
+    a. For each active I1 child:
+        i. For each active Leaf child:
+            1. Leaf Values (Compressed)
 """
 function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T)::Tuple{InternalNode2{T}, Int} where T
-    # Phase 1: Read all topology
+    # --- Phase 1: Topology and Internal Values ---
 
-    # Read Internal2 masks
+    # 1. Read Internal2 Masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
-    i2_child_count = count_on(i2_child_mask)
-    i2_tile_count = count_on(i2_value_mask)
+    # 2. Read Internal2 Tile Values (Compressed Dense Array)
+    i2_dense_vals, pos = read_dense_values(T, bytes, pos, codec, i2_value_mask, background)
 
-    # Collect Internal1 topology and Leaf topology
-    # Structure: Vector of (Internal1 info, Vector of Leaf info)
-    internal1_data = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{Tuple{Coord, LeafMask}}}}()
+    # Collect Internal1 children data
+    internal1_data = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{T}, Vector{Tuple{Coord, LeafMask}}}}()
 
     for child_idx in on_indices(i2_child_mask)
         i1_origin = child_origin_internal2(origin, child_idx)
 
-        # Read Internal1 masks
+        # 3a. Read Internal1 Masks
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
-        # Read Leaf masks for this Internal1
+        # 3b. Read Internal1 Tile Values (Compressed Dense Array)
+        i1_dense_vals, pos = read_dense_values(T, bytes, pos, codec, i1_value_mask, background)
+
+        # 3c. Read Leaf Masks
         leaves = Vector{Tuple{Coord, LeafMask}}()
         for leaf_idx in on_indices(i1_child_mask)
             leaf_origin = child_origin_internal1(i1_origin, leaf_idx)
@@ -59,60 +66,59 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
             push!(leaves, (leaf_origin, leaf_mask))
         end
 
-        push!(internal1_data, (i1_origin, i1_child_mask, i1_value_mask, leaves))
+        push!(internal1_data, (i1_origin, i1_child_mask, i1_value_mask, i1_dense_vals, leaves))
     end
 
-    # Phase 2: Read all values
+    # --- Phase 2: Leaf Values ---
 
-    # Read Internal2 tile values
-    i2_tiles = Vector{Tile{T}}()
-    for _ in 1:i2_tile_count
-        value, pos = read_tile_value(T, bytes, pos)
-        active_byte, pos = read_u8(bytes, pos)
-        push!(i2_tiles, Tile{T}(value, active_byte != 0))
-    end
-
-    # Read Internal1 children with their values
     i1_children = Vector{InternalNode1{T}}()
 
-    for (i1_origin, i1_child_mask, i1_value_mask, leaf_topos) in internal1_data
-        i1_child_count = count_on(i1_child_mask)
-        i1_tile_count = count_on(i1_value_mask)
-
-        # Read Internal1 tile values
-        i1_tiles = Vector{Tile{T}}()
-        for _ in 1:i1_tile_count
-            value, pos = read_tile_value(T, bytes, pos)
-            active_byte, pos = read_u8(bytes, pos)
-            push!(i1_tiles, Tile{T}(value, active_byte != 0))
-        end
-
-        # Read leaf values (compressed)
+    for (i1_origin, i1_child_mask, i1_value_mask, i1_dense_vals, leaf_topos) in internal1_data
+        
+        # Construct Leaf Nodes
         leaves = Vector{LeafNode{T}}()
         for (leaf_origin, leaf_mask) in leaf_topos
             values, pos = read_leaf_values(T, bytes, pos, codec, leaf_mask, background)
             push!(leaves, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 
-        # Build Internal1 table
+        # Construct Internal1 Node
+        i1_child_count = count_on(i1_child_mask)
+        i1_tile_count = count_on(i1_value_mask)
         i1_table = Vector{Union{LeafNode{T}, Tile{T}}}(undef, i1_child_count + i1_tile_count)
+
+        # Add children (Leaves)
         for (i, leaf) in enumerate(leaves)
             i1_table[i] = leaf
         end
-        for (i, tile) in enumerate(i1_tiles)
-            i1_table[i1_child_count + i] = tile
+
+        # Add tiles (from dense values)
+        tile_idx = 1
+        for idx in on_indices(i1_value_mask)
+            val = i1_dense_vals[idx + 1] # 1-based
+            i1_table[i1_child_count + tile_idx] = Tile{T}(val, true)
+            tile_idx += 1
         end
 
         push!(i1_children, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table))
     end
 
-    # Build Internal2 table
+    # Construct Internal2 Node
+    i2_child_count = count_on(i2_child_mask)
+    i2_tile_count = count_on(i2_value_mask)
     i2_table = Vector{Union{InternalNode1{T}, Tile{T}}}(undef, i2_child_count + i2_tile_count)
+
+    # Add children (Internal1s)
     for (i, child) in enumerate(i1_children)
         i2_table[i] = child
     end
-    for (i, tile) in enumerate(i2_tiles)
-        i2_table[i2_child_count + i] = tile
+
+    # Add tiles (from dense values)
+    tile_idx = 1
+    for idx in on_indices(i2_value_mask)
+        val = i2_dense_vals[idx + 1] # 1-based
+        i2_table[i2_child_count + tile_idx] = Tile{T}(val, true)
+        tile_idx += 1
     end
 
     node = InternalNode2{T}(origin, i2_child_mask, i2_value_mask, i2_table)

@@ -1,13 +1,15 @@
 # Values.jl - Parse values and combine with topology
 
 """
-    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T) -> Tuple{NTuple{512,T}, Int}
+    read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T) -> Tuple{Vector{T}, Int}
 
-Read leaf voxel values from bytes using VDB's internal compression schemes.
+Read node values from bytes using VDB's internal compression schemes. Returns a dense vector of size N.
+Used for both LeafNodes and InternalNodes.
 """
-function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T)::Tuple{NTuple{512,T}, Int} where T
+function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T)::Tuple{Vector{T}, Int} where {T,N,W}
     # 1. Read metadata byte
     metadata, pos = read_u8(bytes, pos)
+    # println("DEBUG: read_dense_values pos=$(pos-1) metadata=$metadata N=$N")
 
     # Inactive values based on metadata
     inactive_val1 = background
@@ -16,8 +18,7 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
     if metadata == 0 # NO_MASK_OR_INACTIVE_VALS
         inactive_val1 = background
     elseif metadata == 1 # NO_MASK_AND_MINUS_BG
-        # For floats, this is -background. For others, maybe not defined?
-        # VDB spec says it's for level sets where background is usually positive
+        # For floats, this is -background.
         inactive_val1 = -background
     elseif metadata == 2 # NO_MASK_AND_ONE_INACTIVE_VAL
         inactive_val1, pos = read_tile_value(T, bytes, pos)
@@ -32,48 +33,62 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
         inactive_val2, pos = read_tile_value(T, bytes, pos)
     end
 
-    # 3. Read selection mask if metadata is 3, 4, or 5 (64 bytes)
+    # 3. Read selection mask if metadata is 3, 4, or 5
     selection_mask = nothing
     if 3 <= metadata <= 5
-        selection_mask, pos = read_mask(LeafMask, bytes, pos)
+        selection_mask, pos = read_mask(Mask{N,W}, bytes, pos)
     end
 
     # 4. Read active values
     active_count = count_on(mask)
     
-    active_values = if metadata == 6 # NO_MASK_AND_ALL_VALS
-        # Read all 512 values
-        expected_size = 512 * sizeof(T)
-        data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
-        reinterpret(T, data)
-    elseif active_count == 0
-        T[]
+    expected_size = if metadata == 6 # NO_MASK_AND_ALL_VALS
+        N * sizeof(T)
     else
-        # Read active_count values
-        expected_size = active_count * sizeof(T)
-        data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
-        reinterpret(T, data)
+        active_count * sizeof(T)
     end
 
+    # Always call read_compressed_bytes to handle stream structure (e.g. size prefix)
+    data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
+    active_values = reinterpret(T, data)
+
     # 5. Assemble final values array
-    all_values = Vector{T}(undef, 512)
-    active_idx = 1
+    all_values = Vector{T}(undef, N)
     
-    for i in 0:511
-        if is_on(mask, i)
-            all_values[i+1] = active_values[active_idx]
-            active_idx += 1
-        else
-            # Inactive value
-            if selection_mask !== nothing
-                all_values[i+1] = is_on(selection_mask, i) ? inactive_val2 : inactive_val1
+    if metadata == 6 # NO_MASK_AND_ALL_VALS
+        # All values are stored densely, regardless of mask
+        for i in 1:N
+            all_values[i] = active_values[i]
+        end
+    else
+        # Sparse storage: only active values are stored
+        active_idx = 1
+        for i in 0:(N-1)
+            if is_on(mask, i)
+                all_values[i+1] = active_values[active_idx]
+                active_idx += 1
             else
-                all_values[i+1] = inactive_val1
+                # Inactive value reconstruction
+                if selection_mask !== nothing
+                    all_values[i+1] = is_on(selection_mask, i) ? inactive_val2 : inactive_val1
+                else
+                    all_values[i+1] = inactive_val1
+                end
             end
         end
     end
 
-    (NTuple{512, T}(all_values), pos)
+    (all_values, pos)
+end
+
+"""
+    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T) -> Tuple{NTuple{512,T}, Int}
+
+Wrapper for read_dense_values for LeafNodes.
+"""
+function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T)::Tuple{NTuple{512,T}, Int} where T
+    values, pos = read_dense_values(T, bytes, pos, codec, mask, background)
+    (NTuple{512, T}(values), pos)
 end
 
 """
