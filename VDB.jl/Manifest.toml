@@ -1,0 +1,90 @@
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.3"
+manifest_format = "2.0"
+project_hash = "08e646be88129be81c7112ac342153e824615ef2"
+
+[[deps.Artifacts]]
+uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
+version = "1.11.0"
+
+[[deps.Blosc]]
+deps = ["Blosc_jll"]
+git-tree-sha1 = "310b77648d38c223d947ff3f50f511d08690b8d5"
+uuid = "a74b3585-a348-5f62-a45c-50e91977d574"
+version = "0.7.3"
+
+[[deps.Blosc_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Lz4_jll", "Zlib_jll", "Zstd_jll"]
+git-tree-sha1 = "535c80f1c0847a4c967ea945fca21becc9de1522"
+uuid = "0b7ba130-8d10-5ba8-a3d6-c5182647fed9"
+version = "1.21.7+0"
+
+[[deps.CodecZlib]]
+deps = ["TranscodingStreams", "Zlib_jll"]
+git-tree-sha1 = "962834c22b66e32aa10f7611c08c8ca4e20749a9"
+uuid = "944b1d66-785c-5afd-91f1-9de20f533193"
+version = "0.7.8"
+
+[[deps.Dates]]
+deps = ["Printf"]
+uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
+version = "1.11.0"
+
+[[deps.JLLWrappers]]
+deps = ["Artifacts", "Preferences"]
+git-tree-sha1 = "0533e564aae234aff59ab625543145446d8b6ec2"
+uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
+version = "1.7.1"
+
+[[deps.Libdl]]
+uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+version = "1.11.0"
+
+[[deps.Lz4_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "191686b1ac1ea9c89fc52e996ad15d1d241d1e33"
+uuid = "5ced341a-0733-55b8-9ab6-a4889d929147"
+version = "1.10.1+0"
+
+[[deps.Preferences]]
+deps = ["TOML"]
+git-tree-sha1 = "522f093a29b31a93e34eaea17ba055d850edea28"
+uuid = "21216c6a-2e73-6563-6e65-726566657250"
+version = "1.5.1"
+
+[[deps.Printf]]
+deps = ["Unicode"]
+uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.TOML]]
+deps = ["Dates"]
+uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+version = "1.0.3"
+
+[[deps.TranscodingStreams]]
+git-tree-sha1 = "0c45878dcfdcfa8480052b6ab162cdd138781742"
+uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
+version = "0.11.3"
+
+[[deps.Unicode]]
+uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
+version = "1.11.0"
+
+[[deps.VDB]]
+deps = ["CodecZlib"]
+path = "."
+uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+version = "0.1.0"
+
+[[deps.Zlib_jll]]
+deps = ["Libdl"]
+uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
+version = "1.3.1+2"
+
+[[deps.Zstd_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "446b23e73536f84e8037f5dce465e92275f6a308"
+uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
+version = "1.5.7+1"

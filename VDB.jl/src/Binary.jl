@@ -23,7 +23,9 @@ Read a 32-bit unsigned integer in little-endian format.
 """
 function read_u32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt32, Int}
     @boundscheck checkbounds(bytes, pos:pos+3)
-    @inbounds val = reinterpret(UInt32, bytes[pos:pos+3])[1]
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{UInt32}(pointer(bytes, pos)))
+    end
     (ltoh(val), pos + 4)
 end
 
@@ -34,7 +36,9 @@ Read a 64-bit unsigned integer in little-endian format.
 """
 function read_u64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt64, Int}
     @boundscheck checkbounds(bytes, pos:pos+7)
-    @inbounds val = reinterpret(UInt64, bytes[pos:pos+7])[1]
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{UInt64}(pointer(bytes, pos)))
+    end
     (ltoh(val), pos + 8)
 end
 
@@ -45,7 +49,9 @@ Read a 32-bit signed integer in little-endian format.
 """
 function read_i32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int32, Int}
     @boundscheck checkbounds(bytes, pos:pos+3)
-    @inbounds val = reinterpret(Int32, bytes[pos:pos+3])[1]
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{Int32}(pointer(bytes, pos)))
+    end
     (ltoh(val), pos + 4)
 end
 
@@ -56,7 +62,9 @@ Read a 64-bit signed integer in little-endian format.
 """
 function read_i64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int64, Int}
     @boundscheck checkbounds(bytes, pos:pos+7)
-    @inbounds val = reinterpret(Int64, bytes[pos:pos+7])[1]
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{Int64}(pointer(bytes, pos)))
+    end
     (ltoh(val), pos + 8)
 end
 
@@ -67,7 +75,9 @@ Read a 32-bit float in little-endian format.
 """
 function read_f32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float32, Int}
     @boundscheck checkbounds(bytes, pos:pos+3)
-    @inbounds val = reinterpret(Float32, bytes[pos:pos+3])[1]
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{Float32}(pointer(bytes, pos)))
+    end
     (ltoh(val), pos + 4)
 end
 
@@ -78,7 +88,9 @@ Read a 64-bit float in little-endian format.
 """
 function read_f64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
     @boundscheck checkbounds(bytes, pos:pos+7)
-    @inbounds val = reinterpret(Float64, bytes[pos:pos+7])[1]
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{Float64}(pointer(bytes, pos)))
+    end
     (ltoh(val), pos + 8)
 end
 
