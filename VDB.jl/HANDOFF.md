@@ -1,6 +1,37 @@
 # VDB.jl Handoff Document
 
-## Session Summary
+## Latest Session (2026-01-03)
+
+**Fixed critical VDB header and metadata parsing issues.**
+
+### Issues Closed
+- `path-tracer-tb4` [P0]: VDB_MAGIC endianness (0x20424456 → 0x56444220)
+- `path-tracer-2c4` [P0]: Header format (8-byte magic, 36-byte UUID, u32 compression)
+- `path-tracer-m9h` [P0]: Metadata has no count prefix (created & closed)
+
+### Key Changes (commit `32225a3`)
+- Fixed VDB_MAGIC constant endianness
+- 8-byte magic field (4 magic + 4 padding)
+- UUID: 16-byte tuple → 36-byte ASCII string
+- Compression: 1 byte → 4-byte u32
+- Added half_float flag for version 220-221
+- Heuristic-based metadata detection (no count prefix)
+
+### Test Status
+| File | Result |
+|------|--------|
+| torus.vdb | ✅ 5/5 pass |
+| bunny_cloud.vdb | ⚠️ 2/3 pass (grid properties issue) |
+| smoke.vdb | ❌ Error (Topology.jl format - see path-tracer-70n) |
+
+### Next Priority Issues
+1. `path-tracer-70n` [P0]: Topology.jl format (blocks smoke.vdb)
+2. `path-tracer-xxk` [P0]: Grid parsing ignores byte offsets
+3. Other P0 bugs: Binary.jl allocations, Transforms.jl, Accessors.jl
+
+---
+
+## Previous Session Summary
 
 Completed **Step 0: Project Setup** for VDB.jl, a pure Julia parser for OpenVDB files.
 
