@@ -65,8 +65,14 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
         active_idx = 1
         for i in 0:(N-1)
             if is_on(mask, i)
-                all_values[i+1] = active_values[active_idx]
-                active_idx += 1
+                # Safely access active values
+                if active_idx <= length(active_values)
+                    all_values[i+1] = active_values[active_idx]
+                    active_idx += 1
+                else
+                    # Fallback if active values are missing (e.g. chunk_size=0)
+                    all_values[i+1] = inactive_val1
+                end
             else
                 # Inactive value reconstruction
                 if selection_mask !== nothing

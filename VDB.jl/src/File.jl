@@ -110,10 +110,10 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     uuid = String(uuid_bytes)
 
     # Read compression (4 bytes u32 LE) if version >= 222
-    compression = NoCompression()
-    if format_version >= 222
+    # For older versions, default to ZipCodec (standard OpenVDB behavior)
+    compression = if format_version >= 222
         compression_u32, pos = read_u32_le(bytes, pos)
-        compression = if compression_u32 == 0
+        if compression_u32 == 0
             NoCompression()
         elseif compression_u32 == 1
             ZipCodec()
@@ -122,6 +122,8 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
         else
             NoCompression()  # Unknown, assume none
         end
+    else
+        ZipCodec()
     end
 
     header = VDBHeader(format_version, library_major, library_minor, has_grid_offsets, compression, uuid)
@@ -278,63 +280,153 @@ function read_grid_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,A
     metadata = Dict{String,Any}()
     metadata["_tree_version"] = tree_version
 
-    for _ in 1:metadata_count
-        # Read key - in some VDB versions, keys are NOT size-prefixed
-        # Strategy: keys are known to be "class", "file_*", etc. - all ASCII
-        # We'll find the key by looking for where type_size makes sense
+    # Read metadata entries
+    # Note: In some VDB versions (e.g. 220), the metadata count might exclude
+    # certain entries (like "class") or be off. We continue reading as long
+    # as we see valid metadata entries.
+        entries_read = 0
+        while entries_read < metadata_count || true
+            # Stop if we've read enough AND the next bytes don't look like metadata
+            if entries_read >= metadata_count
+                # check heuristic
+                looks_like_metadata = false
+                                        peek_pos = pos
+                                        # println("DEBUG: Checking extra metadata at $peek_pos")
+                                        
+                                        # Check for size-prefixed key
+                                        if peek_pos + 4 <= length(bytes)
+                                             k_size = ltoh(reinterpret(UInt32, @view bytes[peek_pos:peek_pos+3])[1])
+                                             # println("DEBUG: Potential k_size=$k_size")
+                                             if k_size > 0 && k_size < 256 && peek_pos + 4 + k_size + 4 <= length(bytes)
+                                                 # Check key ascii
+                                                 if is_printable_ascii(bytes, peek_pos + 4, Int(k_size))
+                                                     # Check type size
+                                                     t_pos = peek_pos + 4 + Int(k_size)
+                                                     t_size = ltoh(reinterpret(UInt32, @view bytes[t_pos:t_pos+3])[1])
+                                                     # println("DEBUG: Potential t_size=$t_size at $t_pos")
+                                                     if t_size > 0 && t_size < 32 && t_pos + 4 + t_size <= length(bytes)
+                                                         if is_printable_ascii(bytes, t_pos + 4, Int(t_size))
+                                                             looks_like_metadata = true
+                                                             # println("DEBUG: Size-prefixed metadata detected")
+                                                         end
+                                                     end
+                                                 end
+                                             end
+                                        end
+                                        
+                                        # Check for non-size-prefixed key (heuristic search)
+                                        if !looks_like_metadata
+                                            # Try to find a key/type pattern
+                                            for k_len in 1:min(32, length(bytes) - peek_pos)
+                                                # Key must be ascii
+                                                if !is_printable_ascii(bytes, peek_pos, k_len)
+                                                    continue
+                                                end
+                                                
+                                                # Check type size
+                                                t_pos = peek_pos + k_len
+                                                if t_pos + 4 <= length(bytes)
+                                                    t_size = ltoh(reinterpret(UInt32, @view bytes[t_pos:t_pos+3])[1])
+                                                    if t_size > 0 && t_size < 32 && t_pos + 4 + t_size <= length(bytes)
+                                                         if is_printable_ascii(bytes, t_pos + 4, Int(t_size))
+                                                             looks_like_metadata = true
+                                                             # println("DEBUG: Non-size-prefixed metadata detected, k_len=$k_len")
+                                                             break
+                                                         end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                        
+                                        if !looks_like_metadata
+                                            # println("DEBUG: Stopping metadata read at $pos")
+                                            break
+                                        end            end
+    
+            entries_read += 1
         key_start = pos
         key = ""
         
-        # Search for the pattern: {ascii_bytes} [type_size_u32] {type_name}
-        # Known keys are relatively short (< 32 bytes)
-        best_key_len = 0
-        for key_len in 1:min(32, length(bytes) - pos)
-            test_pos = key_start + key_len
+        # Hybrid approach:
+        # 1. Check if we have a standard size-prefixed key
+        # 2. If not, use heuristic for non-prefixed key (e.g. "class" in v220)
+        
+        is_size_prefixed = false
+        if pos + 4 <= length(bytes)
+            potential_size = ltoh(reinterpret(UInt32, @view bytes[pos:pos+3])[1])
             
-            # All key bytes must be printable ASCII
-            all_ascii = true
-            for j in 0:key_len-1
-                b = bytes[key_start + j]
-                if !(b >= 32 && b <= 126) || b in (0x00,)  # Exclude null, must be printable
-                    all_ascii = false
-                    break
+            # Check if size is reasonable (< 256) and positive
+            if potential_size > 0 && potential_size < 256 && pos + 4 + potential_size <= length(bytes)
+                # Check if the potential key bytes are all printable ASCII
+                is_ascii = true
+                for j in 0:potential_size-1
+                    b = bytes[pos + 4 + j]
+                    if !(b >= 32 && b <= 126)
+                        is_ascii = false
+                        break
+                    end
+                end
+                
+                if is_ascii
+                    is_size_prefixed = true
+                    key = String(bytes[pos+4:pos+4+potential_size-1])
+                    pos += 4 + potential_size
                 end
             end
-            
-            if !all_ascii
-                continue
-            end
-            
-            # Check if next 4 bytes form a reasonable type_size
-            if test_pos + 3 <= length(bytes)
-                type_size, _ = read_u32_le(bytes, test_pos)
+        end
+        
+        if !is_size_prefixed
+            # Fallback: heuristic for non-size-prefixed keys
+            # Search for the pattern: {ascii_bytes} [type_size_u32] {type_name}
+            best_key_len = 0
+            for key_len in 1:min(32, length(bytes) - pos)
+                test_pos = key_start + key_len
                 
-                # Type size should match known type string lengths (3-25 bytes)
-                # AND the type bytes should all be ASCII
-                if type_size >= 3 && type_size <= 25 && test_pos + 4 + type_size <= length(bytes)
-                    valid_type = true
-                    for j in 0:type_size-1
-                        b = bytes[test_pos + 4 + j]
-                        if !(b >= 32 && b <= 126) || b in (0x00,)
-                            valid_type = false
-                            break
+                # All key bytes must be printable ASCII
+                all_ascii = true
+                for j in 0:key_len-1
+                    b = bytes[key_start + j]
+                    if !(b >= 32 && b <= 126) || b in (0x00,)  # Exclude null, must be printable
+                        all_ascii = false
+                        break
+                    end
+                end
+                
+                if !all_ascii
+                    continue
+                end
+                
+                # Check if next 4 bytes form a reasonable type_size
+                if test_pos + 3 <= length(bytes)
+                    type_size, _ = read_u32_le(bytes, test_pos)
+                    
+                    # Type size should match known type string lengths (3-25 bytes)
+                    # AND the type bytes should all be ASCII
+                    if type_size >= 3 && type_size <= 25 && test_pos + 4 + type_size <= length(bytes)
+                        valid_type = true
+                        for j in 0:type_size-1
+                            b = bytes[test_pos + 4 + j]
+                            if !(b >= 32 && b <= 126) || b in (0x00,)
+                                valid_type = false
+                                break
+                            end
+                        end
+                        
+                        if valid_type
+                            best_key_len = key_len
+                            break  # Found it!
                         end
                     end
-                    
-                    if valid_type
-                        best_key_len = key_len
-                        break  # Found it!
-                    end
                 end
             end
+            
+            if best_key_len == 0
+                error("Could not parse grid metadata key at position $key_start")
+            end
+            
+            key = String(bytes[key_start:key_start+best_key_len-1])
+            pos = key_start + best_key_len
         end
-        
-        if best_key_len == 0
-            error("Could not parse grid metadata key at position $key_start")
-        end
-        
-        key = String(bytes[key_start:key_start+best_key_len-1])
-        pos = key_start + best_key_len
 
         # Read type
         type_name, pos = read_string_with_size(bytes, pos)
@@ -471,13 +563,13 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
 
         # Parse the grid
         if T == Float32
-            grid, pos = read_grid(Float32, bytes, pos, header.compression, desc.name, grid_class)
+            grid, pos = read_grid(Float32, bytes, pos, header.compression, desc.name, grid_class, header.format_version)
             push!(grids_temp, grid)
         elseif T == Float64
-            grid, pos = read_grid(Float64, bytes, pos, header.compression, desc.name, grid_class)
+            grid, pos = read_grid(Float64, bytes, pos, header.compression, desc.name, grid_class, header.format_version)
             push!(grids_temp, grid)
         elseif T == NTuple{3, Float32}
-            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, desc.name, grid_class)
+            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, desc.name, grid_class, header.format_version)
             push!(grids_temp, grid)
         end
     end

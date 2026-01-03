@@ -38,14 +38,14 @@ struct Grid{T}
 end
 
 """
-    read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass) -> Tuple{Grid{T}, Int}
+    read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass, version::UInt32) -> Tuple{Grid{T}, Int}
 
 Parse a complete grid from bytes.
 
 VDB files interleave topology and values at the subtree level. For each Internal2
 subtree, all topology comes first (masks), then all values (tiles + compressed leaves).
 """
-function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass)::Tuple{Grid{T}, Int} where T
+function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass, version::UInt32)::Tuple{Grid{T}, Int} where T
     # Read transform
     transform, pos = read_transform(bytes, pos)
 
@@ -53,7 +53,7 @@ function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name
     background, pos = read_tile_value(T, bytes, pos)
 
     # Read tree with interleaved topology + values
-    tree, pos = read_tree(T, bytes, pos, codec, background, grid_class)
+    tree, pos = read_tree(T, bytes, pos, codec, background, grid_class, version)
 
     grid = Grid{T}(name, grid_class, transform, tree)
     (grid, pos)

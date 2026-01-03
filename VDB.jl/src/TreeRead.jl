@@ -35,15 +35,23 @@ Format (verified against OpenVDB source for 222+):
         i. For each active Leaf child:
             1. Leaf Values (Compressed)
 """
-function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T)::Tuple{InternalNode2{T}, Int} where T
+function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
     # --- Phase 1: Topology and Internal Values ---
+
+    # For v220, InternalNode tiles seem to be uncompressed (no chunk size prefix)
+    # or follow a different compression scheme that matches NoCompression logic (raw data or metadata-only)
+    tile_codec = if version < 222
+        NoCompression()
+    else
+        codec
+    end
 
     # 1. Read Internal2 Masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
     # 2. Read Internal2 Tile Values (Compressed Dense Array)
-    i2_dense_vals, pos = read_dense_values(T, bytes, pos, codec, i2_value_mask, background)
+    i2_dense_vals, pos = read_dense_values(T, bytes, pos, tile_codec, i2_value_mask, background)
 
     # Collect Internal1 children data
     internal1_data = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{T}, Vector{Tuple{Coord, LeafMask}}}}()
@@ -56,7 +64,7 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
         # 3b. Read Internal1 Tile Values (Compressed Dense Array)
-        i1_dense_vals, pos = read_dense_values(T, bytes, pos, codec, i1_value_mask, background)
+        i1_dense_vals, pos = read_dense_values(T, bytes, pos, tile_codec, i1_value_mask, background)
 
         # 3c. Read Leaf Masks
         leaves = Vector{Tuple{Coord, LeafMask}}()
@@ -126,12 +134,12 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
 end
 
 """
-    read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, grid_class::GridClass) -> Tuple{Tree{T}, Int}
+    read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32) -> Tuple{Tree{T}, Int}
 
 Read a complete VDB tree structure, handling interleaved topology and values.
 
 Root format (interleaved - each entry is complete before the next):
-- background_active (1 byte, only for fog volumes)
+- background_active (1 byte, only for fog volumes AND version >= 222)
 - tile_count (4 bytes)
 - child_count (4 bytes)
 - For each tile: origin (12 bytes) + value (sizeof(T)) + active (1 byte)
@@ -139,10 +147,11 @@ Root format (interleaved - each entry is complete before the next):
 
 Note: Tiles come first, then children. Each entry is complete before the next.
 """
-function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass)::Tuple{Tree{T}, Int} where T
+function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
     # Read background_active (only for fog volumes)
+    # Appears to be absent in v220 files (bunny_cloud.vdb)
     background_active = false
-    if grid_class == GRID_FOG_VOLUME || grid_class == GRID_UNKNOWN
+    if (grid_class == GRID_FOG_VOLUME || grid_class == GRID_UNKNOWN) && version >= 222
         bg_byte, pos = read_u8(bytes, pos)
         background_active = bg_byte != 0
     end
@@ -173,7 +182,7 @@ function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, back
         z, pos = read_i32_le(bytes, pos)
         origin = coord(x, y, z)
 
-        child, pos = read_internal2_subtree(T, bytes, pos, codec, origin, background)
+        child, pos = read_internal2_subtree(T, bytes, pos, codec, origin, background, version)
         table[origin] = child
     end
 

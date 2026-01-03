@@ -19,6 +19,13 @@ const Internal1Mask = Mask{4096, 64}   # 16x16x16 = 4096 children, 64 words
 const Internal2Mask = Mask{32768, 512} # 32x32x32 = 32768 children, 512 words
 
 """
+    Base.length(m::Mask{N,W}) -> Int
+
+Return the number of bits in the mask (N).
+"""
+Base.length(::Mask{N,W}) where {N,W} = N
+
+"""
     Mask{N,W}()
 
 Construct a mask with all bits off (zeros).
