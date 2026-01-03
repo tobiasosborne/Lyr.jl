@@ -1,6 +1,7 @@
 @testset "File" begin
     @testset "VDB_MAGIC" begin
-        @test VDB_MAGIC == 0x20424456  # " BDV" in little-endian
+        # Bytes [0x20, 0x42, 0x44, 0x56] = " BDV" read as little-endian u32 = 0x56444220
+        @test VDB_MAGIC == 0x56444220
     end
 
     @testset "read_header invalid magic" begin
@@ -9,16 +10,24 @@
     end
 
     @testset "read_header valid" begin
-        # Construct a minimal valid header
-        # Magic + version + lib_major + lib_minor
+        # VDB header format (from torus.vdb analysis):
+        # - Magic (4 bytes) + padding (4 bytes) = 8 bytes
+        # - Format version (4 bytes u32 LE)
+        # - Library major (4 bytes u32 LE)
+        # - Library minor (4 bytes u32 LE)
+        # - Has grid offsets (1 byte) if version >= 212
+        # - UUID (36 bytes ASCII string)
+        # - Compression (4 bytes u32 LE) if version >= 222
+        uuid_str = "a2313abf-7b19-4669-a9ea-f4a83e6bf20d"
         bytes = vcat(
-            reinterpret(UInt8, [UInt32(VDB_MAGIC)]),      # Magic
-            reinterpret(UInt8, [UInt32(222)]),            # Format version
-            reinterpret(UInt8, [UInt32(9)]),              # Library major
-            reinterpret(UInt8, [UInt32(0)]),              # Library minor
-            UInt8[0x01],                                   # Has grid offsets
-            UInt8[0x00],                                   # No compression
-            zeros(UInt8, 16)                               # UUID
+            reinterpret(UInt8, [UInt32(VDB_MAGIC)]),       # Magic (4 bytes)
+            zeros(UInt8, 4),                               # Padding (4 bytes)
+            reinterpret(UInt8, [UInt32(222)]),             # Format version
+            reinterpret(UInt8, [UInt32(9)]),               # Library major
+            reinterpret(UInt8, [UInt32(0)]),               # Library minor
+            UInt8[0x01],                                    # Has grid offsets
+            Vector{UInt8}(uuid_str),                        # UUID (36 bytes)
+            reinterpret(UInt8, [UInt32(0)]),               # No compression (u32)
         )
 
         header, pos = read_header(bytes, 1)
@@ -28,6 +37,8 @@
         @test header.library_minor == 0
         @test header.has_grid_offsets == true
         @test header.compression isa NoCompression
+        @test header.uuid == uuid_str
+        @test pos == length(bytes) + 1  # Position should be right after header
     end
 
     @testset "VDBHeader types" begin
@@ -37,11 +48,12 @@
             UInt32(0),
             true,
             BloscCodec(),
-            ntuple(_ -> UInt8(0), 16)
+            "a2313abf-7b19-4669-a9ea-f4a83e6bf20d"
         )
 
         @test header isa VDBHeader
         @test header.compression isa BloscCodec
+        @test length(header.uuid) == 36
     end
 
     @testset "GridDescriptor" begin
@@ -75,7 +87,7 @@
         header = VDBHeader(
             UInt32(222), UInt32(9), UInt32(0),
             true, NoCompression(),
-            ntuple(_ -> UInt8(0), 16)
+            "00000000-0000-0000-0000-000000000000"
         )
 
         file = VDBFile(header, [])

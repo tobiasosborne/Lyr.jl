@@ -1,9 +1,9 @@
 # File.jl - Top-level VDB file parsing
 
 """
-VDB file magic number: " BDV" in little-endian (0x56444220)
+VDB file magic number: bytes [0x20, 0x42, 0x44, 0x56] (" BDV") read as little-endian u32.
 """
-const VDB_MAGIC = 0x20424456
+const VDB_MAGIC = 0x56444220
 
 """
     VDBHeader
@@ -16,7 +16,7 @@ Header information from a VDB file.
 - `library_minor::UInt32` - Library minor version
 - `has_grid_offsets::Bool` - Whether grid offsets are stored
 - `compression::Codec` - File-level compression codec
-- `uuid::NTuple{16, UInt8}` - Unique file identifier
+- `uuid::String` - Unique file identifier (36-char ASCII UUID string)
 """
 struct VDBHeader
     format_version::UInt32
@@ -24,7 +24,7 @@ struct VDBHeader
     library_minor::UInt32
     has_grid_offsets::Bool
     compression::Codec
-    uuid::NTuple{16, UInt8}
+    uuid::String
 end
 
 """
@@ -66,14 +66,24 @@ end
 """
     read_header(bytes::Vector{UInt8}, pos::Int) -> Tuple{VDBHeader, Int}
 
-Parse VDB file header.
+Parse VDB file header. Format (verified against OpenVDB samples):
+- Magic (4 bytes) + padding (4 bytes) = 8 bytes total
+- Format version (4 bytes u32 LE)
+- Library major (4 bytes u32 LE)
+- Library minor (4 bytes u32 LE)
+- Has grid offsets (1 byte) if version >= 212
+- UUID (36 bytes ASCII string, e.g., "a2313abf-7b19-4669-a9ea-f4a83e6bf20d")
+- Compression (4 bytes u32 LE) if version >= 222: 0=none, 1=zlib, 2=blosc
 """
 function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
-    # Read and verify magic number
+    # Read and verify magic number (4 bytes)
     magic, pos = read_u32_le(bytes, pos)
     if magic != VDB_MAGIC
         error("Invalid VDB magic number: expected 0x$(string(VDB_MAGIC, base=16)), got 0x$(string(magic, base=16))")
     end
+
+    # Skip 4 bytes of padding after magic
+    _, pos = read_u32_le(bytes, pos)
 
     # Read format version
     format_version, pos = read_u32_le(bytes, pos)
@@ -82,33 +92,37 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     library_major, pos = read_u32_le(bytes, pos)
     library_minor, pos = read_u32_le(bytes, pos)
 
-    # Read flags
+    # Read has_grid_offsets flag (1 byte) if version >= 212
     has_grid_offsets = false
-    compression = NoCompression()
-
     if format_version >= 212
-        # Grid offsets flag
         offsets_byte, pos = read_u8(bytes, pos)
         has_grid_offsets = offsets_byte != 0
     end
 
+    # Version 220-221 has a half_float flag (1 byte) before UUID
+    # This was removed in version 222+ (moved to per-grid metadata)
+    if format_version >= 220 && format_version < 222
+        _, pos = read_u8(bytes, pos)  # half_float flag (skip)
+    end
+
+    # Read UUID (36 bytes ASCII string)
+    uuid_bytes, pos = read_bytes(bytes, pos, 36)
+    uuid = String(uuid_bytes)
+
+    # Read compression (4 bytes u32 LE) if version >= 222
+    compression = NoCompression()
     if format_version >= 222
-        # Compression flag
-        compression_byte, pos = read_u8(bytes, pos)
-        compression = if compression_byte == 0
+        compression_u32, pos = read_u32_le(bytes, pos)
+        compression = if compression_u32 == 0
             NoCompression()
-        elseif compression_byte == 1
+        elseif compression_u32 == 1
             ZipCodec()
-        elseif compression_byte == 2
+        elseif compression_u32 == 2
             BloscCodec()
         else
             NoCompression()  # Unknown, assume none
         end
     end
-
-    # Read UUID (16 bytes)
-    uuid_bytes, pos = read_bytes(bytes, pos, 16)
-    uuid = NTuple{16, UInt8}(uuid_bytes)
 
     header = VDBHeader(format_version, library_major, library_minor, has_grid_offsets, compression, uuid)
     (header, pos)
@@ -170,6 +184,85 @@ function parse_value_type(grid_type::String)::DataType
 end
 
 """
+    is_printable_ascii(bytes::Vector{UInt8}, start::Int, len::Int) -> Bool
+
+Check if bytes in range [start, start+len-1] are all printable ASCII (0x20-0x7e).
+"""
+function is_printable_ascii(bytes::Vector{UInt8}, start::Int, len::Int)::Bool
+    for i in start:(start + len - 1)
+        b = bytes[i]
+        if b < 0x20 || b > 0x7e
+            return false
+        end
+    end
+    return true
+end
+
+"""
+    is_metadata_entry(bytes::Vector{UInt8}, pos::Int) -> Bool
+
+Heuristic to detect if current position is at a metadata entry (vs grid count).
+VDB metadata has no count prefix; entries are sequential until grid count.
+Returns true if this looks like a metadata key (small size + printable ASCII).
+"""
+function is_metadata_entry(bytes::Vector{UInt8}, pos::Int)::Bool
+    # Peek at potential key size without advancing
+    if pos + 3 > length(bytes)
+        return false
+    end
+    key_size = ltoh(reinterpret(UInt32, @view bytes[pos:pos+3])[1])
+
+    # Key sizes > 256 are unreasonably large for metadata keys
+    if key_size == 0 || key_size > 256
+        return false
+    end
+
+    # Check if we have enough bytes and they're printable ASCII
+    key_start = pos + 4
+    if key_start + Int(key_size) - 1 > length(bytes)
+        return false
+    end
+
+    return is_printable_ascii(bytes, key_start, Int(key_size))
+end
+
+"""
+    skip_metadata_value(bytes::Vector{UInt8}, pos::Int, type_name::String) -> Int
+
+Skip a metadata value based on its type, returning the new position.
+"""
+function skip_metadata_value(bytes::Vector{UInt8}, pos::Int, type_name::String)::Int
+    if type_name == "string"
+        _, pos = read_string_with_size(bytes, pos)
+    elseif type_name == "int32"
+        _, pos = read_i32_le(bytes, pos)
+    elseif type_name == "int64"
+        _, pos = read_i64_le(bytes, pos)
+    elseif type_name == "float"
+        _, pos = read_f32_le(bytes, pos)
+    elseif type_name == "double"
+        _, pos = read_f64_le(bytes, pos)
+    elseif type_name == "bool"
+        _, pos = read_u8(bytes, pos)
+    elseif type_name == "vec3i"
+        _, pos = read_i32_le(bytes, pos)
+        _, pos = read_i32_le(bytes, pos)
+        _, pos = read_i32_le(bytes, pos)
+    elseif type_name == "vec3f" || type_name == "vec3s"
+        _, pos = read_f32_le(bytes, pos)
+        _, pos = read_f32_le(bytes, pos)
+        _, pos = read_f32_le(bytes, pos)
+    elseif type_name == "vec3d"
+        _, pos = read_f64_le(bytes, pos)
+        _, pos = read_f64_le(bytes, pos)
+        _, pos = read_f64_le(bytes, pos)
+    else
+        error("Unknown metadata type: $type_name")
+    end
+    return pos
+end
+
+"""
     parse_vdb(bytes::Vector{UInt8}) -> VDBFile
 
 Parse a complete VDB file from bytes.
@@ -180,41 +273,12 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
     # Read header
     header, pos = read_header(bytes, pos)
 
-    # Read metadata (skip for now - just read past it)
-    # Metadata is stored as a count followed by key-value pairs
-    metadata_count, pos = read_u32_le(bytes, pos)
-    for _ in 1:metadata_count
-        key, pos = read_string_with_size(bytes, pos)
-        type_name, pos = read_string_with_size(bytes, pos)
-        # Skip the value based on type
-        if type_name == "string"
-            _, pos = read_string_with_size(bytes, pos)
-        elseif type_name == "int32"
-            _, pos = read_i32_le(bytes, pos)
-        elseif type_name == "int64"
-            _, pos = read_i64_le(bytes, pos)
-        elseif type_name == "float"
-            _, pos = read_f32_le(bytes, pos)
-        elseif type_name == "double"
-            _, pos = read_f64_le(bytes, pos)
-        elseif type_name == "bool"
-            _, pos = read_u8(bytes, pos)
-        elseif type_name == "vec3i"
-            _, pos = read_i32_le(bytes, pos)
-            _, pos = read_i32_le(bytes, pos)
-            _, pos = read_i32_le(bytes, pos)
-        elseif type_name == "vec3f" || type_name == "vec3s"
-            _, pos = read_f32_le(bytes, pos)
-            _, pos = read_f32_le(bytes, pos)
-            _, pos = read_f32_le(bytes, pos)
-        elseif type_name == "vec3d"
-            _, pos = read_f64_le(bytes, pos)
-            _, pos = read_f64_le(bytes, pos)
-            _, pos = read_f64_le(bytes, pos)
-        else
-            # Unknown type, try to skip
-            error("Unknown metadata type: $type_name")
-        end
+    # Read metadata entries (no count prefix - read until we hit grid count)
+    # Each entry is: key_size, key, type_size, type, value
+    while is_metadata_entry(bytes, pos)
+        _, pos = read_string_with_size(bytes, pos)  # key
+        type_name, pos = read_string_with_size(bytes, pos)  # type
+        pos = skip_metadata_value(bytes, pos, type_name)  # value
     end
 
     # Read grid count
@@ -233,6 +297,7 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
 
         # Skip instanced grids for now
         if !isempty(desc.instance_parent)
+            grids[i] = nothing
             continue
         end
 
