@@ -202,7 +202,24 @@ function read_mask(::Type{Mask{N,W}}, bytes::Vector{UInt8}, pos::Int)::Tuple{Mas
     words = Vector{UInt64}(undef, W)
 
     for i in 1:W
-        words[i], pos = read_u64_le(bytes, pos)
+        if pos + 7 <= length(bytes)
+            words[i], pos = read_u64_le(bytes, pos)
+        else
+            # Handle truncation/EOF gracefully
+            # Read remaining bytes and pad with zeros
+            remaining = length(bytes) - pos + 1
+            if remaining > 0
+                # Construct UInt64 from remaining bytes
+                val = UInt64(0)
+                for b_idx in 0:(remaining-1)
+                    val |= (UInt64(bytes[pos + b_idx]) << (b_idx * 8))
+                end
+                words[i] = val
+                pos += remaining
+            else
+                words[i] = UInt64(0)
+            end
+        end
     end
 
     (Mask{N,W}(NTuple{W, UInt64}(words)), pos)

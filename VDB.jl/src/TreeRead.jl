@@ -19,6 +19,33 @@ function read_leaf_node(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin::Coord
 end
 
 """
+    read_internal_tiles(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T, version::UInt32) -> Tuple{Vector{T}, Int}
+
+Read tile values for an internal node.
+For v220: Reads active values directly (no metadata/compression header).
+For v222+: Uses read_dense_values.
+Returns a vector of active values only (corresponding to set bits in mask).
+"""
+function read_internal_tiles(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T, version::UInt32)::Tuple{Vector{T}, Int} where {T,N,W}
+    if version < 222
+        # v220: Raw active values, no metadata
+        count = count_on(mask)
+        read_active_values(T, bytes, pos, count)
+    else
+        # v222+: Leaf-style compressed values
+        dense_vals, pos = read_dense_values(T, bytes, pos, codec, mask, background)
+        
+        # Extract only active values to match interface
+        active_vals = Vector{T}()
+        sizehint!(active_vals, count_on(mask))
+        for idx in on_indices(mask)
+            push!(active_vals, dense_vals[idx + 1])
+        end
+        (active_vals, pos)
+    end
+end
+
+"""
     read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T) -> Tuple{InternalNode2{T}, Int}
 
 Read a complete Internal2 subtree.
@@ -38,20 +65,12 @@ Format (verified against OpenVDB source for 222+):
 function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
     # --- Phase 1: Topology and Internal Values ---
 
-    # For v220, InternalNode tiles seem to be uncompressed (no chunk size prefix)
-    # or follow a different compression scheme that matches NoCompression logic (raw data or metadata-only)
-    tile_codec = if version < 222
-        NoCompression()
-    else
-        codec
-    end
-
     # 1. Read Internal2 Masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
-    # 2. Read Internal2 Tile Values (Compressed Dense Array)
-    i2_dense_vals, pos = read_dense_values(T, bytes, pos, tile_codec, i2_value_mask, background)
+    # 2. Read Internal2 Tile Values
+    i2_active_vals, pos = read_internal_tiles(T, bytes, pos, codec, i2_value_mask, background, version)
 
     # Collect Internal1 children data
     internal1_data = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{T}, Vector{Tuple{Coord, LeafMask}}}}()
@@ -63,8 +82,8 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
-        # 3b. Read Internal1 Tile Values (Compressed Dense Array)
-        i1_dense_vals, pos = read_dense_values(T, bytes, pos, tile_codec, i1_value_mask, background)
+        # 3b. Read Internal1 Tile Values
+        i1_active_vals, pos = read_internal_tiles(T, bytes, pos, codec, i1_value_mask, background, version)
 
         # 3c. Read Leaf Masks
         leaves = Vector{Tuple{Coord, LeafMask}}()
@@ -74,19 +93,19 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
             push!(leaves, (leaf_origin, leaf_mask))
         end
 
-        push!(internal1_data, (i1_origin, i1_child_mask, i1_value_mask, i1_dense_vals, leaves))
+        push!(internal1_data, (i1_origin, i1_child_mask, i1_value_mask, i1_active_vals, leaves))
     end
 
     # --- Phase 2: Leaf Values ---
 
     i1_children = Vector{InternalNode1{T}}()
 
-    for (i1_origin, i1_child_mask, i1_value_mask, i1_dense_vals, leaf_topos) in internal1_data
+    for (i1_origin, i1_child_mask, i1_value_mask, i1_active_vals, leaf_topos) in internal1_data
         
         # Construct Leaf Nodes
         leaves = Vector{LeafNode{T}}()
         for (leaf_origin, leaf_mask) in leaf_topos
-            values, pos = read_leaf_values(T, bytes, pos, codec, leaf_mask, background)
+            values, pos = read_leaf_values(T, bytes, pos, codec, leaf_mask, background, version)
             push!(leaves, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 
@@ -100,12 +119,10 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
             i1_table[i] = leaf
         end
 
-        # Add tiles (from dense values)
-        tile_idx = 1
-        for idx in on_indices(i1_value_mask)
-            val = i1_dense_vals[idx + 1] # 1-based
-            i1_table[i1_child_count + tile_idx] = Tile{T}(val, true)
-            tile_idx += 1
+        # Add tiles (from active values)
+        # i1_active_vals contains values in order of on_indices
+        for (i, val) in enumerate(i1_active_vals)
+            i1_table[i1_child_count + i] = Tile{T}(val, true)
         end
 
         push!(i1_children, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table))
@@ -121,12 +138,9 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
         i2_table[i] = child
     end
 
-    # Add tiles (from dense values)
-    tile_idx = 1
-    for idx in on_indices(i2_value_mask)
-        val = i2_dense_vals[idx + 1] # 1-based
-        i2_table[i2_child_count + tile_idx] = Tile{T}(val, true)
-        tile_idx += 1
+    # Add tiles (from active values)
+    for (i, val) in enumerate(i2_active_vals)
+        i2_table[i2_child_count + i] = Tile{T}(val, true)
     end
 
     node = InternalNode2{T}(origin, i2_child_mask, i2_value_mask, i2_table)

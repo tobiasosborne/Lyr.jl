@@ -96,7 +96,7 @@ function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, exp
         # Size is -chunk_size
         raw_size = -chunk_size
         if raw_size != expected_size
-            error("Uncompressed chunk size mismatch: expected $expected_size, got $raw_size")
+            error("Uncompressed chunk size mismatch at pos=$pos: expected $expected_size, got $raw_size (chunk_size=$chunk_size)")
         end
         
         # Read raw bytes directly
@@ -107,7 +107,16 @@ function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, exp
         compressed_size = chunk_size
         
         # Read compressed data
-        compressed_data, pos = read_bytes(bytes, pos, Int(compressed_size))
+        compressed_data = UInt8[]
+        try
+            compressed_data, pos = read_bytes(bytes, pos, Int(compressed_size))
+        catch e
+            if isa(e, BoundsError)
+                error("BoundsError reading compressed data at pos=$pos: chunk_size=$chunk_size, file_size=$(length(bytes))")
+            else
+                rethrow(e)
+            end
+        end
 
         # Decompress
         decompressed = decompress(codec, compressed_data)
