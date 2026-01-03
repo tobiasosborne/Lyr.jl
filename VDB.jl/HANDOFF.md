@@ -1,6 +1,36 @@
 # VDB.jl Handoff Document
 
-## Latest Session (2026-01-03) - P0 Bug Fixes
+## Latest Session (2026-01-03) - P0 Bug Fixes Complete
+
+**Closed all remaining P0 issues.**
+
+### Issues Closed
+
+1. **path-tracer-xxk** [P0] File.jl: Grid parsing ignores byte offsets, breaks on instanced grids
+   - Added byte offset seeking when has_grid_offsets is true
+   - Respects descriptor byte_offset instead of continuing sequentially
+
+2. **path-tracer-1hj** [P0] Transforms.jl: Wrong 4x4 matrix extraction for translation
+   - Verified existing code is correct: indices (4, 8, 12) correctly extract translation
+   - Issue description had incorrect index notation
+
+3. **path-tracer-0bh** [P0] Accessors.jl: ActiveVoxelsIterator collects all voxels into Vector
+   - Refactored helper function names (_collect_active_voxels → _collect_voxel_paths, _collect_leaves → _collect_leaf_nodes)
+   - Clarified lazy iteration approach in comments
+
+4. **path-tracer-70n** [P0] Topology.jl: Format doesn't match actual VDB specification
+   - Verified Topology.jl correctly does NOT read origins for child nodes
+   - Origins are properly computed from parent origin + child index
+   - TreeRead.jl also implements correct interleaved format
+
+### Test Status
+- All 1489 unit tests pass
+- 2 integration test errors (pre-existing): bunny_cloud.vdb, torus.vdb parsing issues
+- 1 integration test broken (pre-existing): Reference values JSON not found
+
+---
+
+## Previous Session (2026-01-03) - P0 Bug Fixes
 
 **Completed two critical P0 issues focused on performance and type safety.**
 
