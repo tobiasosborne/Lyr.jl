@@ -1,6 +1,38 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-03 Session 9) - Official Release: VDB.jl → Lyr.jl
+## Latest Session (2026-01-03 Session 10) - Addressing v220 BoundsError and BD Tool
+
+**Status**: Reverted changes to test/test_integration.jl to ensure tests pass. Investigated `bd` tool configuration issue. All tests pass (1 broken as expected). Ready for next development.
+
+### Work Completed
+1. **Reverted `test/test_integration.jl`**: Un-skipped and then re-skipped v220 parsing to ensure test suite stability.
+2. **Removed `test/repro_issue.jl`**: Cleaned up temporary test file.
+3. **Identified `bd` tool misconfiguration**: `bd ready` and `bd update` failed due to database mismatch, preventing issue tracking updates.
+
+### Test Results
+- **Total tests**: 1487
+- **Passing**: 1486
+- **Broken**: 1 (v220 integration test - known issue)
+- **Time**: 7.4s
+
+All tests terminate cleanly. Working tree clean after reverts.
+
+### Repository State
+- **Local**: clean, all tests passing (except 1 broken)
+- **Remote**: synced to github.com/tobiasosborne/Lyr.jl.git
+- **Beads**: Configuration issue prevents update. Current state in `HANDOFF.md`.
+- **Commits**: Latest = "Remove all VDB sample files from tracking" (pushed)
+
+### Next Steps
+1. **High Priority**: Investigate and fix `bd` tool configuration (`database mismatch`) to re-enable issue tracking.
+2. Continue fixing v220 `read_active_values` BoundsError (path-tracer-t0q).
+   - This requires deep dive into v220 mask reading, file position tracking, and compression stream size calculation.
+3. Monitor GitHub issues/discussions.
+4. Consider GitHub Actions CI/CD setup.
+
+---
+
+## Previous Session (2026-01-03 Session 9) - Official Release: VDB.jl → Lyr.jl
 
 **Status**: Project officially renamed to Lyr.jl and connected to GitHub. All tests pass. Ready for development.
 
