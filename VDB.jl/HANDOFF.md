@@ -1,6 +1,32 @@
 # VDB.jl Handoff Document
 
-## Latest Session (2026-01-03) - VDB Format Investigation
+## Latest Session (2026-01-03) - P0 Bug Fixes
+
+**Completed two critical P0 issues focused on performance and type safety.**
+
+### Issues Closed
+
+1. **path-tracer-1w8** [P0] Binary.jl: Fix allocation on every primitive read
+   - Replaced slice allocations in all primitive readers with `GC.@preserve` + `unsafe_load`
+   - Functions fixed: `read_u32_le`, `read_u64_le`, `read_i32_le`, `read_i64_le`, `read_f32_le`, `read_f64_le`
+   - Previously: Each read did `bytes[pos:pos+n-1]` (allocates new vector) then `reinterpret`
+   - Now: Direct pointer-based read via `unsafe_load(Ptr{T}(pointer(bytes, pos)))`
+   - Zero-copy, no allocations in hot path
+
+2. **path-tracer-z8y** [P0] VDBFile.grids uses Vector{Any} - type erasure disaster
+   - Changed `grids::Vector{Any}` to `grids::Vector{Union{Grid{Float32}, Grid{Float64}, Grid{NTuple{3, Float32}}}}`
+   - Updated parsing logic to use type-safe `push!` instead of pre-allocating with `nothing` values
+   - Eliminates type erasure - compiler can now specialize grid access code
+   - Preserves runtime type information while maintaining static typing
+
+### Test Status
+- All unit tests pass (1489 passed)
+- Integration tests: 2 errors, 1 broken (pre-existing, related to VDB format parsing)
+- No regression from changes
+
+---
+
+## Previous Session (2026-01-03) - VDB Format Investigation
 
 **Investigating critical VDB value storage format issue.** smoke.vdb parses successfully but torus.vdb fails with BoundsError during leaf value reading.
 
