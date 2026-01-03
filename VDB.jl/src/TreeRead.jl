@@ -19,7 +19,7 @@ function read_leaf_node(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin::Coord
 end
 
 """
-    read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord) -> Tuple{InternalNode2{T}, Int}
+    read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T) -> Tuple{InternalNode2{T}, Int}
 
 Read a complete Internal2 subtree (topology then values).
 
@@ -30,7 +30,7 @@ VDB format for Internal2 subtree:
 4. Internal2 tile values
 5. For each Internal1: tile values + leaf compressed values
 """
-function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord)::Tuple{InternalNode2{T}, Int} where T
+function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T)::Tuple{InternalNode2{T}, Int} where T
     # Phase 1: Read all topology
 
     # Read Internal2 masks
@@ -90,7 +90,7 @@ function read_internal2_subtree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec
         # Read leaf values (compressed)
         leaves = Vector{LeafNode{T}}()
         for (leaf_origin, leaf_mask) in leaf_topos
-            values, pos = read_leaf_values(T, bytes, pos, codec, leaf_mask)
+            values, pos = read_leaf_values(T, bytes, pos, codec, leaf_mask, background)
             push!(leaves, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 
@@ -167,7 +167,7 @@ function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, back
         z, pos = read_i32_le(bytes, pos)
         origin = coord(x, y, z)
 
-        child, pos = read_internal2_subtree(T, bytes, pos, codec, origin)
+        child, pos = read_internal2_subtree(T, bytes, pos, codec, origin, background)
         table[origin] = child
     end
 

@@ -1,21 +1,79 @@
 # Values.jl - Parse values and combine with topology
 
 """
-    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask) -> Tuple{NTuple{512,T}, Int}
+    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T) -> Tuple{NTuple{512,T}, Int}
 
-Read leaf voxel values from bytes.
+Read leaf voxel values from bytes using VDB's internal compression schemes.
 """
-function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask)::Tuple{NTuple{512,T}, Int} where T
-    # Calculate expected size
-    expected_size = 512 * sizeof(T)
+function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T)::Tuple{NTuple{512,T}, Int} where T
+    # 1. Read metadata byte
+    metadata, pos = read_u8(bytes, pos)
 
-    # Read and decompress
-    data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
+    # Inactive values based on metadata
+    inactive_val1 = background
+    inactive_val2 = background
 
-    # Convert to values
-    values = reinterpret(T, data)
+    if metadata == 0 # NO_MASK_OR_INACTIVE_VALS
+        inactive_val1 = background
+    elseif metadata == 1 # NO_MASK_AND_MINUS_BG
+        # For floats, this is -background. For others, maybe not defined?
+        # VDB spec says it's for level sets where background is usually positive
+        inactive_val1 = -background
+    elseif metadata == 2 # NO_MASK_AND_ONE_INACTIVE_VAL
+        inactive_val1, pos = read_tile_value(T, bytes, pos)
+    elseif metadata == 3 # MASK_AND_NO_INACTIVE_VALS
+        inactive_val1 = background
+        inactive_val2 = -background
+    elseif metadata == 4 # MASK_AND_ONE_INACTIVE_VAL
+        inactive_val1 = background
+        inactive_val2, pos = read_tile_value(T, bytes, pos)
+    elseif metadata == 5 # MASK_AND_TWO_INACTIVE_VALS
+        inactive_val1, pos = read_tile_value(T, bytes, pos)
+        inactive_val2, pos = read_tile_value(T, bytes, pos)
+    end
 
-    (NTuple{512, T}(values), pos)
+    # 3. Read selection mask if metadata is 3, 4, or 5 (64 bytes)
+    selection_mask = nothing
+    if 3 <= metadata <= 5
+        selection_mask, pos = read_mask(LeafMask, bytes, pos)
+    end
+
+    # 4. Read active values
+    active_count = count_on(mask)
+    
+    active_values = if metadata == 6 # NO_MASK_AND_ALL_VALS
+        # Read all 512 values
+        expected_size = 512 * sizeof(T)
+        data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
+        reinterpret(T, data)
+    elseif active_count == 0
+        T[]
+    else
+        # Read active_count values
+        expected_size = active_count * sizeof(T)
+        data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
+        reinterpret(T, data)
+    end
+
+    # 5. Assemble final values array
+    all_values = Vector{T}(undef, 512)
+    active_idx = 1
+    
+    for i in 0:511
+        if is_on(mask, i)
+            all_values[i+1] = active_values[active_idx]
+            active_idx += 1
+        else
+            # Inactive value
+            if selection_mask !== nothing
+                all_values[i+1] = is_on(selection_mask, i) ? inactive_val2 : inactive_val1
+            else
+                all_values[i+1] = inactive_val1
+            end
+        end
+    end
+
+    (NTuple{512, T}(all_values), pos)
 end
 
 """
@@ -48,11 +106,11 @@ function materialize_leaf(::Type{T}, topo::LeafTopology, values::NTuple{512,T}):
 end
 
 """
-    materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec) -> Tuple{InternalNode1{T}, Int}
+    materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T) -> Tuple{InternalNode1{T}, Int}
 
 Create an InternalNode1 from topology, reading values from bytes.
 """
-function materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec)::Tuple{InternalNode1{T}, Int} where T
+function materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T)::Tuple{InternalNode1{T}, Int} where T
     child_count = count_on(topo.child_mask)
     tile_count = count_on(topo.value_mask)
 
@@ -70,7 +128,7 @@ function materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector
     # Materialize children
     for (i, child_topo) in enumerate(topo.children)
         if child_topo !== nothing
-            values, pos = read_leaf_values(T, bytes, pos, codec, child_topo.value_mask)
+            values, pos = read_leaf_values(T, bytes, pos, codec, child_topo.value_mask, background)
             table[i] = materialize_leaf(T, child_topo, values)
         end
     end
@@ -80,11 +138,11 @@ function materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector
 end
 
 """
-    materialize_internal2(::Type{T}, topo::Internal2Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec) -> Tuple{InternalNode2{T}, Int}
+    materialize_internal2(::Type{T}, topo::Internal2Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T) -> Tuple{InternalNode2{T}, Int}
 
 Create an InternalNode2 from topology, reading values from bytes.
 """
-function materialize_internal2(::Type{T}, topo::Internal2Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec)::Tuple{InternalNode2{T}, Int} where T
+function materialize_internal2(::Type{T}, topo::Internal2Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T)::Tuple{InternalNode2{T}, Int} where T
     child_count = count_on(topo.child_mask)
     tile_count = count_on(topo.value_mask)
 
@@ -102,7 +160,7 @@ function materialize_internal2(::Type{T}, topo::Internal2Topology, bytes::Vector
     # Materialize children
     for (i, child_topo) in enumerate(topo.children)
         if child_topo !== nothing
-            child, pos = materialize_internal1(T, child_topo, bytes, pos, codec)
+            child, pos = materialize_internal1(T, child_topo, bytes, pos, codec, background)
             table[i] = child
         end
     end
@@ -127,7 +185,7 @@ function materialize_tree(::Type{T}, topo::RootTopology, bytes::Vector{UInt8}, p
             table[origin] = Tile{T}(value, active_byte != 0)
         else
             # It's a child
-            child, pos = materialize_internal2(T, child_topo, bytes, pos, codec)
+            child, pos = materialize_internal2(T, child_topo, bytes, pos, codec, background)
             table[origin] = child
         end
     end
