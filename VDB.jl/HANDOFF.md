@@ -1,6 +1,59 @@
 # VDB.jl Handoff Document
 
-## Latest Session (2026-01-03 Session 5) - Compression & Topology Fixes
+## Latest Session (2026-01-03 Session 6) - Grid Metadata Format Investigation
+
+**Status**: Investigated root cause of bunny_cloud.vdb parsing failure. Identified grid metadata format discrepancy.
+
+### Key Findings
+
+**path-tracer-8ct**: Grid metadata parsing fails with BoundsError at position 188.
+
+Root cause identified: Grid metadata keys in **VDB v220 files are NOT size-prefixed**, contrary to the current code assumption.
+
+**Correct Format for v220 Grid Metadata**:
+```
+[tree_version: u32]
+[metadata_count: u32]
+For each entry:
+  [key_bytes: raw ASCII, no size prefix]  <- KEY INSIGHT
+  [type_size: u32]
+  [type_string: size-prefixed]
+  [value_size: u32]
+  [value_bytes: raw]
+```
+
+**Current Code Assumption** (incorrect for v220):
+```
+  [key_size: u32]
+  [key_bytes]
+```
+
+### Investigation Details
+
+1. Manually parsed bunny_cloud.vdb header and grid descriptors - both correct.
+2. At position 176 (after descriptors), found:
+   - tree_version = 12
+   - metadata_count = 5
+   - First entry: key="class" (5 bytes, NO size prefix), type="string", value="fog volume"
+3. Created heuristic to infer key length by searching for valid type_size patterns.
+4. First entry parsed successfully, but subsequent entries fail because assumption about key format may differ per entry or have special cases.
+
+### Next Steps
+
+1. **Consult OpenVDB source** for exact grid metadata format in v220 files
+2. **Check if keys have fixed sizes** or special terminators (null-byte, specific byte values)
+3. **Test on smoke.vdb** (v220) and torus.vdb (v222) to verify format differences
+4. **Create unit tests** for metadata parsing with known sample data
+5. **Consider format version dispatch**: read_grid_metadata_v220() vs read_grid_metadata_v222()
+
+### Code Changes
+- Created debug scripts to inspect file structure
+- Attempted heuristic key-length detection (needs refinement)
+- Did NOT commit these changes (reverted to maintain stability)
+
+---
+
+## Previous Session (2026-01-03 Session 5) - Compression & Topology Fixes
 
 **Major Progress: Fixed integer overflow in compression reading and implemented correct interleaved topology parsing.**
 
