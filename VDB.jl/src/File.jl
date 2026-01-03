@@ -279,8 +279,62 @@ function read_grid_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,A
     metadata["_tree_version"] = tree_version
 
     for _ in 1:metadata_count
-        # Read key
-        key, pos = read_string_with_size(bytes, pos)
+        # Read key - in some VDB versions, keys are NOT size-prefixed
+        # Strategy: keys are known to be "class", "file_*", etc. - all ASCII
+        # We'll find the key by looking for where type_size makes sense
+        key_start = pos
+        key = ""
+        
+        # Search for the pattern: {ascii_bytes} [type_size_u32] {type_name}
+        # Known keys are relatively short (< 32 bytes)
+        best_key_len = 0
+        for key_len in 1:min(32, length(bytes) - pos)
+            test_pos = key_start + key_len
+            
+            # All key bytes must be printable ASCII
+            all_ascii = true
+            for j in 0:key_len-1
+                b = bytes[key_start + j]
+                if !(b >= 32 && b <= 126) || b in (0x00,)  # Exclude null, must be printable
+                    all_ascii = false
+                    break
+                end
+            end
+            
+            if !all_ascii
+                continue
+            end
+            
+            # Check if next 4 bytes form a reasonable type_size
+            if test_pos + 3 <= length(bytes)
+                type_size, _ = read_u32_le(bytes, test_pos)
+                
+                # Type size should match known type string lengths (3-25 bytes)
+                # AND the type bytes should all be ASCII
+                if type_size >= 3 && type_size <= 25 && test_pos + 4 + type_size <= length(bytes)
+                    valid_type = true
+                    for j in 0:type_size-1
+                        b = bytes[test_pos + 4 + j]
+                        if !(b >= 32 && b <= 126) || b in (0x00,)
+                            valid_type = false
+                            break
+                        end
+                    end
+                    
+                    if valid_type
+                        best_key_len = key_len
+                        break  # Found it!
+                    end
+                end
+            end
+        end
+        
+        if best_key_len == 0
+            error("Could not parse grid metadata key at position $key_start")
+        end
+        
+        key = String(bytes[key_start:key_start+best_key_len-1])
+        pos = key_start + best_key_len
 
         # Read type
         type_name, pos = read_string_with_size(bytes, pos)
