@@ -56,11 +56,11 @@ A parsed VDB file containing header and grids.
 
 # Fields
 - `header::VDBHeader` - File header
-- `grids::Vector{Grid}` - Parsed grids (type-erased)
+- `grids::Vector` - Parsed grids (Grid{Float32}, Grid{Float64}, or Grid{NTuple{3, Float32}})
 """
 struct VDBFile
     header::VDBHeader
-    grids::Vector{Any}  # Vector of Grid{T} for various T
+    grids::Vector{Union{Grid{Float32}, Grid{Float64}, Grid{NTuple{3, Float32}}}}
 end
 
 """
@@ -389,14 +389,14 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
         descriptors[i], pos = read_grid_descriptor(bytes, pos, header.has_grid_offsets)
     end
 
-    # Parse each grid
-    grids = Vector{Any}(undef, grid_count)
+    # Parse each grid - collect into temporary vector then filter
+    grids_temp = Union{Grid{Float32}, Grid{Float64}, Grid{NTuple{3, Float32}}}[]
+    
     for i in 1:grid_count
         desc = descriptors[i]
 
         # Skip instanced grids for now
         if !isempty(desc.instance_parent)
-            grids[i] = nothing
             continue
         end
 
@@ -412,21 +412,18 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
 
         # Parse the grid
         if T == Float32
-            grids[i], pos = read_grid(Float32, bytes, pos, header.compression, desc.name, grid_class)
+            grid, pos = read_grid(Float32, bytes, pos, header.compression, desc.name, grid_class)
+            push!(grids_temp, grid)
         elseif T == Float64
-            grids[i], pos = read_grid(Float64, bytes, pos, header.compression, desc.name, grid_class)
+            grid, pos = read_grid(Float64, bytes, pos, header.compression, desc.name, grid_class)
+            push!(grids_temp, grid)
         elseif T == NTuple{3, Float32}
-            grids[i], pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, desc.name, grid_class)
-        else
-            # Skip unsupported types
-            grids[i] = nothing
+            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, desc.name, grid_class)
+            push!(grids_temp, grid)
         end
     end
 
-    # Filter out nothing entries
-    grids = filter(!isnothing, grids)
-
-    VDBFile(header, grids)
+    VDBFile(header, grids_temp)
 end
 
 """
