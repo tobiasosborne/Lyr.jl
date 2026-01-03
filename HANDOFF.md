@@ -1,6 +1,53 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-03 Session 8) - Fixed Parser Signature Mismatches
+## Latest Session (2026-01-03 Session 9) - Official Release: VDB.jl → Lyr.jl
+
+**Status**: Project officially renamed to Lyr.jl and connected to GitHub. All tests pass. Ready for development.
+
+### Work Completed
+1. **Project Renaming**: VDB.jl → Lyr.jl
+   - Renamed module in src/VDB.jl → src/Lyr.jl
+   - Updated Project.toml: name="Lyr", authors="Lyr.jl Contributors"
+   - Updated all test files: `using VDB` → `using Lyr`, `VDB.` → `Lyr.`
+   - Updated AGENTS.md (4 references)
+   
+2. **Repository Structure**: Flattened nested directories
+   - Removed Russian doll nesting (was Lyr.jl/Lyr.jl/)
+   - Moved all files from Lyr.jl/ to repo root
+   - Project.toml now at root (Julia convention)
+   
+3. **GitHub Connection**: Connected to remote
+   - Added remote: git@github.com:tobiasosborne/Lyr.jl.git
+   - Fixed large file issues: removed test_output.log (481MB) from history
+   - Ignored all .vdb files: test/fixtures/samples/*.vdb
+   - Re-downloaded bunny_cloud.vdb from ASWF
+   
+4. **Beads Integration**: Synced issue tracking
+   - `bd sync` now properly resolves GitHub upstream
+   - 67 issues protected and tracked locally
+
+### Test Results
+- **Total tests**: 1487
+- **Passing**: 1486
+- **Skipped**: 1 (v220 integration test - known issue)
+- **Time**: 8.1s
+
+All tests pass. Working tree clean.
+
+### Repository State
+- **Local**: clean, all tests passing
+- **Remote**: synced to github.com/tobiasosborne/Lyr.jl.git
+- **Beads**: synced, 67 issues tracked
+- **Commits**: Latest = "Remove all VDB sample files from tracking" (pushed)
+
+### Next Steps
+1. Continue fixing v220 read_active_values BoundsError (path-tracer-t0q)
+2. Monitor GitHub issues/discussions
+3. Consider GitHub Actions CI/CD setup
+
+---
+
+## Previous Session (2026-01-03 Session 8) - Fixed Parser Signature Mismatches
 
 **Status**: Fixed critical signature mismatches introduced by previous session. Test suite now terminates cleanly with 1486 passing tests + 1 skipped test.
 
