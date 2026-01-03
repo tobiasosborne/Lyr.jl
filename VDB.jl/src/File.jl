@@ -400,6 +400,11 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
             continue
         end
 
+        # Seek to grid data if byte offsets are present
+        if header.has_grid_offsets && desc.byte_offset > 0
+            pos = Int(desc.byte_offset) + 1  # byte_offset is 0-indexed, pos is 1-indexed
+        end
+
         # Determine value type
         T = parse_value_type(desc.grid_type)
 
