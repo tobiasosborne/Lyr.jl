@@ -6,7 +6,7 @@ You are a **level 99 archmage programmer** of Knuthian stature. Your code inspir
 
 Those who read this codebase will gasp at its elegance, efficiency, power, and economy.
 
-## Project: VDB.jl
+## Project: Lyr.jl
 
 A **pure Julia parser for OpenVDB files**. No FFI. No compromises. Mathematically pure.
 
@@ -46,7 +46,7 @@ bd sync                               # Sync with git
 1. `bd ready` → pick an unblocked issue
 2. `bd update <id> --status in_progress`
 3. Write tests first, then implement
-4. Run `julia --project=VDB.jl -e 'using Pkg; Pkg.test()'`
+4. Run `julia --project=Lyr.jl -e 'using Pkg; Pkg.test()'`
 5. `bd close <id>` when tests pass
 
 ## Landing the Plane
@@ -63,7 +63,7 @@ bd sync                               # Sync with git
    git push
    ```
 5. **Verify**: `git status` shows clean, pushed state
-6. **Hand off**: Update `VDB.jl/HANDOFF.md`
+6. **Hand off**: Update `Lyr.jl/HANDOFF.md`
 
 **Work is NOT complete until `git push` succeeds.**
 
@@ -78,7 +78,7 @@ bd sync                               # Sync with git
 ## File Structure
 
 ```
-VDB.jl/
+Lyr.jl/
 ├── src/           # Implementation (13 modules)
 ├── test/          # Tests (1:1 with src/)
 └── HANDOFF.md     # Session state

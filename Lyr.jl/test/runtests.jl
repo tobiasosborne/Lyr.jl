@@ -1,7 +1,7 @@
 using Test
-using VDB
+using Lyr
 
-@testset "VDB.jl" begin
+@testset "Lyr.jl" begin
     include("test_binary.jl")
     include("test_masks.jl")
     include("test_coordinates.jl")

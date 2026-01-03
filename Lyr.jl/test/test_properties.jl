@@ -73,8 +73,8 @@
                 max_c = (min_c[1] + abs(rand(Int16)), min_c[2] + abs(rand(Int16)), min_c[3] + abs(rand(Int16)))
                 bb = BBox(min_c, max_c)
 
-                @test VDB.contains(bb, min_c)
-                @test VDB.contains(bb, max_c)
+                @test Lyr.contains(bb, min_c)
+                @test Lyr.contains(bb, max_c)
             end
         end
 
@@ -89,10 +89,10 @@
                 u = union(a, b)
 
                 # Union should contain all corners of both boxes
-                @test VDB.contains(u, a.min)
-                @test VDB.contains(u, a.max)
-                @test VDB.contains(u, b.min)
-                @test VDB.contains(u, b.max)
+                @test Lyr.contains(u, a.min)
+                @test Lyr.contains(u, a.max)
+                @test Lyr.contains(u, b.min)
+                @test Lyr.contains(u, b.max)
             end
         end
 

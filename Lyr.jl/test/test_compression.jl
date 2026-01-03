@@ -3,11 +3,11 @@
         codec = NoCompression()
         data = UInt8[1, 2, 3, 4, 5]
 
-        result = VDB.decompress(codec, data)
+        result = Lyr.decompress(codec, data)
         @test result == data
 
         # Empty data
-        @test VDB.decompress(codec, UInt8[]) == UInt8[]
+        @test Lyr.decompress(codec, UInt8[]) == UInt8[]
     end
 
     @testset "BloscCodec" begin
@@ -19,12 +19,12 @@
         # Compress then decompress using Blosc.jl
         import Blosc
         compressed = Blosc.compress(original)
-        decompressed = VDB.decompress(codec, compressed)
+        decompressed = Lyr.decompress(codec, compressed)
 
         @test decompressed == original
 
         # Empty data
-        @test VDB.decompress(codec, UInt8[]) == UInt8[]
+        @test Lyr.decompress(codec, UInt8[]) == UInt8[]
     end
 
     @testset "ZipCodec" begin
@@ -36,12 +36,12 @@
         # Compress then decompress
         import CodecZlib: ZlibCompressor, transcode
         compressed = transcode(ZlibCompressor, original)
-        decompressed = VDB.decompress(codec, compressed)
+        decompressed = Lyr.decompress(codec, compressed)
 
         @test decompressed == original
 
         # Empty data
-        @test VDB.decompress(codec, UInt8[]) == UInt8[]
+        @test Lyr.decompress(codec, UInt8[]) == UInt8[]
     end
 
     @testset "Incompressible data" begin
@@ -53,13 +53,13 @@
         # Blosc
         import Blosc
         compressed = Blosc.compress(original)
-        decompressed = VDB.decompress(BloscCodec(), compressed)
+        decompressed = Lyr.decompress(BloscCodec(), compressed)
         @test decompressed == original
 
         # Zlib
         import CodecZlib: ZlibCompressor, transcode
         compressed = transcode(ZlibCompressor, original)
-        decompressed = VDB.decompress(ZipCodec(), compressed)
+        decompressed = Lyr.decompress(ZipCodec(), compressed)
         @test decompressed == original
     end
 

@@ -1,4 +1,4 @@
-# VDB.jl Handoff Document
+# Lyr.jl Handoff Document
 
 ## Latest Session (2026-01-03 Session 8) - Fixed Parser Signature Mismatches
 

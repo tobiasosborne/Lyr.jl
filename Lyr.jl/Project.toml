@@ -1,7 +1,7 @@
-name = "VDB"
+name = "Lyr"
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 version = "0.1.0"
-authors = ["VDB.jl Contributors"]
+authors = ["Lyr.jl Contributors"]
 
 [deps]
 Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"

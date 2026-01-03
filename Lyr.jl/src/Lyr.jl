@@ -1,4 +1,4 @@
-module VDB
+module Lyr
 
 # Binary primitives
 include("Binary.jl")
