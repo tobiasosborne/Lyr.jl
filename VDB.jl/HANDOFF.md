@@ -1,158 +1,43 @@
 # VDB.jl Handoff Document
 
-## Latest Session (2026-01-03 Session 6) - Grid Metadata Format Investigation
+## Latest Session (2026-01-03 Session 7) - v220 Support & bunny_cloud.vdb Progress
 
-**Status**: Investigated root cause of bunny_cloud.vdb parsing failure. Identified grid metadata format discrepancy.
-
-### Key Findings
-
-**path-tracer-8ct**: Grid metadata parsing fails with BoundsError at position 188.
-
-Root cause identified: Grid metadata keys in **VDB v220 files are NOT size-prefixed**, contrary to the current code assumption.
-
-**Correct Format for v220 Grid Metadata**:
-```
-[tree_version: u32]
-[metadata_count: u32]
-For each entry:
-  [key_bytes: raw ASCII, no size prefix]  <- KEY INSIGHT
-  [type_size: u32]
-  [type_string: size-prefixed]
-  [value_size: u32]
-  [value_bytes: raw]
-```
-
-**Current Code Assumption** (incorrect for v220):
-```
-  [key_size: u32]
-  [key_bytes]
-```
-
-### Investigation Details
-
-1. Manually parsed bunny_cloud.vdb header and grid descriptors - both correct.
-2. At position 176 (after descriptors), found:
-   - tree_version = 12
-   - metadata_count = 5
-   - First entry: key="class" (5 bytes, NO size prefix), type="string", value="fog volume"
-3. Created heuristic to infer key length by searching for valid type_size patterns.
-4. First entry parsed successfully, but subsequent entries fail because assumption about key format may differ per entry or have special cases.
-
-### Next Steps
-
-1. **Consult OpenVDB source** for exact grid metadata format in v220 files
-2. **Check if keys have fixed sizes** or special terminators (null-byte, specific byte values)
-3. **Test on smoke.vdb** (v220) and torus.vdb (v222) to verify format differences
-4. **Create unit tests** for metadata parsing with known sample data
-5. **Consider format version dispatch**: read_grid_metadata_v220() vs read_grid_metadata_v222()
-
-### Code Changes
-- Created debug scripts to inspect file structure
-- Attempted heuristic key-length detection (needs refinement)
-- Did NOT commit these changes (reverted to maintain stability)
-
----
-
-## Previous Session (2026-01-03 Session 5) - Compression & Topology Fixes
-
-**Major Progress: Fixed integer overflow in compression reading and implemented correct interleaved topology parsing.**
+**Status**: Fixed metadata parsing and root alignment for `bunny_cloud.vdb` (v220). Parsing now reaches Leaf Values.
 
 ### Commits
-- `fix`: Compression.jl: Use signed Int64 for size prefix (handles negative uncompressed size)
-- `feat`: Values.jl: Implement `read_dense_values` with correct Metadata 6 logic
-- `refactor`: TreeRead.jl: Implement interleaved "Node Topology" reading (Masks -> Compressed Tiles -> Children)
+- `fix`: v220 support (metadata, bg_active, internal tiles)
 
 ### Issues Resolved
-1. **path-tracer-dvy** [P1] `torus.vdb` throws `InexactError` in `read_compressed_bytes`
-   - **FIXED**: `read_compressed_bytes` now correctly reads signed `Int64` size prefixes. Negative values indicate uncompressed data.
-   - **Status**: Error changed from `InexactError` to `Uncompressed chunk size mismatch` (see below).
-
-2. **path-tracer-k63** [P1] Investigate VDB leaf compression format
-   - **COMPLETED**: `VDB_FORMAT.md` updated with authoritative findings from OpenVDB source code.
-
-3. **smoke.vdb parsing**
-   - **PASS**: `smoke.vdb` (Version 222) parses correctly with the new interleaved logic.
-
-### Current State
-- `smoke.vdb`: **PASS** (5/5 tests pass).
-- `torus.vdb`: **FAIL** (`Uncompressed chunk size mismatch: expected 232, got 1`).
-   - This indicates `chunk_size` was `-1` (uncompressed size 1).
-   - Expected size was 232 (58 floats).
-   - Suggests stream misalignment or incorrect `active_count` calculation (mask reading?).
-- `bunny_cloud.vdb`: **FAIL** (BoundsError in metadata).
-
-### Key Technical Findings
-- **Compression Size**: Is `Int64` (signed). Negative = uncompressed.
-- **InternalNode Tiles**: Are stored as **Compressed Dense Arrays** (same format as Leaf Values) inside the Topology Phase (interleaved with masks).
-- **Leaf Values**: Metadata 6 means "All 512 values stored densely" (ignoring mask for storage).
-
-### Next Steps
-1. **Debug `torus.vdb`**:
-   - The `size mismatch` (-1 vs 232) implies reading garbage size.
-   - Investigate alignment in `read_internal2_subtree`.
-   - Verify if `InternalNode` tiles in `torus.vdb` (Version 222) use a different format (Raw vs Compressed)?
-   - *Note*: `smoke.vdb` passed with Compressed Tiles logic, but it likely has no/few tiles. `torus.vdb` has tiles. If 222 uses Raw Tiles, `read_dense_values` (Compressed) would fail.
-2. **Fix `bunny_cloud.vdb`**:
-   - Debug metadata parsing offset.
-
----
-
-## Previous Session (2026-01-03 Session 4) - Documentation
-
-**Completed VDB Format Documentation. No code changes.**
-
-### Commits
-- docs: Create VDB_FORMAT.md specification
-
-### Issues Closed
-1. **path-tracer-zwb** [P1] Create VDB file format API reference document
-   - Created `VDB_FORMAT.md`.
-
-### Technical Progress
-- **Documentation**: Comprehensive guide to the VDB format.
-
-### Current State
-- `VDB_FORMAT.md`: **Exists**
-- `smoke.vdb`: **PASS**
-- `torus.vdb`: **FAIL** (InexactError)
-- `bunny_cloud.vdb`: **FAIL** (BoundsError in metadata)
-
----
-
-## Previous Session (2026-01-03 Session 3) - Leaf Value Refactoring
-
-**Partial success: Implemented metadata-aware leaf reading.**
-
-### Commits
-- `05b1dc1` refactor: Update read_leaf_values to handle compression metadata
+1. **path-tracer-8ct**: `bunny_cloud.vdb` BoundsError in metadata parsing
+   - **FIXED**: Implemented greedy metadata parsing to handle uncounted entries (like `is_local_space`) and non-prefixed keys in v220.
 
 ### Issues Created
-1. **path-tracer-dvy** [P1] `torus.vdb` throws `InexactError`
-2. **path-tracer-8ct** [P1] `bunny_cloud.vdb` BoundsError
-3. **path-tracer-k63** [P1] Investigate compression format
+1. **path-tracer-rhk** [P1] `bunny_cloud.vdb` parsing fails in Leaf Values (Uncompressed chunk size mismatch)
+   - Parsing now fails deep in the tree reading Leaf Values.
+   - Likely cause: Alignment issue or incorrect Leaf Value compression assumption for v220.
+2. **path-tracer-tka** [P2] Refactor File.jl into smaller modular units
+   - Split `File.jl` into `Header.jl`, `Metadata.jl`, `Transform.jl`, etc.
 
-### Technical Progress
-- **Values.jl**: `read_leaf_values` implements Metadata 0-6.
-- **TreeRead.jl**: Propagated background value.
+### Key Technical Findings (v220 vs v222)
+1. **Grid Metadata**:
+   - Keys are NOT size-prefixed (raw ASCII).
+   - `metadata_count` may exclude "standard" metadata (class, name, stats, etc.), so parsing must be greedy.
+2. **Root Node**:
+   - Does **NOT** have `background_active` byte (unlike v222 Fog Volumes).
+3. **Internal Node Tiles**:
+   - Appear to be **Uncompressed** in v220 (or use implicit background for empty masks).
+   - Currently using `NoCompression` for tiles if v<222.
 
 ### Current State
-- `smoke.vdb`: **PASS**
-- `torus.vdb`: **FAIL**
-- `bunny_cloud.vdb`: **FAIL**
+- `smoke.vdb` (v222): **PASS** (5/5 tests).
+- `torus.vdb` (v222): **FAIL** (Uncompressed chunk size mismatch: expected 232, got 1).
+- `bunny_cloud.vdb` (v220): **FAIL** (Uncompressed chunk size mismatch: expected 32, got 1107885508333142016).
 
----
-
-## Package Structure
-
-```
-VDB.jl/
-├── src/
-│   ├── VDB.jl           # Main module
-│   ├── Binary.jl        # Primitive readers
-│   ├── Masks.jl         # Bitmasks
-│   ├── Compression.jl   # Codec abstraction (Fixed Int64 size)
-│   ├── TreeTypes.jl     # Immutable tree nodes
-│   ├── TreeRead.jl      # Interleaved topology reading (Updated)
-│   ├── Values.jl        # Value parsing (read_dense_values)
-│   └── ...
-```
+### Next Steps
+1. **Debug `bunny_cloud.vdb` Leaf Values**:
+   - Investigate why `read_leaf_values` (ZipCodec) reads garbage chunk size.
+   - Verify if Internal Tiles consume 0, 1, or more bytes in v220.
+2. **Debug `torus.vdb`**:
+   - Error: `expected 232, got 1`. Chunk size 1 is weird for a compressed stream or raw chunk.
+3. **Refactor `File.jl`**:
+   - Break down the massive `File.jl` to improve maintainability.
