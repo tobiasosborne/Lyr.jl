@@ -1,6 +1,107 @@
 # VDB.jl Handoff Document
 
-## Latest Session (2026-01-03)
+## Latest Session (2026-01-03) - VDB Format Investigation
+
+**Investigating critical VDB value storage format issue.** smoke.vdb parses successfully but torus.vdb fails with BoundsError during leaf value reading.
+
+### Key Discovery: Interleaved Format
+
+VDB files store data **interleaved per root child**, NOT all topology then all values:
+
+```
+For each root child:
+  1. Origin (12 bytes: 3 × i32)
+  2. Topology (I2 masks → I1 masks → Leaf masks)
+  3. Values (I2 tiles → I1 tiles + leaf values)
+  4. Next root child...
+```
+
+### Current Status
+
+**Works:**
+- smoke.vdb (fog volume) - parses successfully because I2 has 0 children (only tiles, no leaves)
+
+**Fails:**
+- torus.vdb (level set) - BoundsError in `read_leaf_values` at position 5449010
+
+### Root Cause Identified
+
+The `read_leaf_values` function in Values.jl is **wrong**. It expects:
+```julia
+# WRONG: Expects u64 size prefix + compressed blob
+data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
+```
+
+But OpenVDB actually stores leaf values as:
+```
+1. Metadata byte (1 byte): 0-6 indicating compression scheme
+2. Inactive value(s) (0, 4, or 8 bytes depending on metadata)
+3. Selection mask (64 bytes if metadata is 3, 4, or 5)
+4. Active values only (count = valueMask.countOn())
+```
+
+Compression metadata meanings:
+| Value | Name | Description |
+|-------|------|-------------|
+| 0 | NO_MASK_OR_INACTIVE_VALS | All inactive = +background |
+| 1 | NO_MASK_AND_MINUS_BG | All inactive = -background |
+| 2 | NO_MASK_AND_ONE_INACTIVE_VAL | One non-bg inactive value |
+| 3 | MASK_AND_NO_INACTIVE_VALS | Selection mask for ±background |
+| 4 | MASK_AND_ONE_INACTIVE_VAL | Selection mask + one inactive |
+| 5 | MASK_AND_TWO_INACTIVE_VALS | Selection mask + two inactive |
+| 6 | NO_MASK_AND_ALL_VALS | All 512 values stored |
+
+### Investigation Data
+
+For torus.vdb first root child:
+- Position 706: Root child origin (-4096, -4096, -4096)
+- Position 718-8910: I2 masks (8192 bytes)
+- Position 8910-213710: I1 and leaf masks
+- Position 213710: VALUES phase starts
+
+At position 213710:
+```
++  0: 07 03 03 1f 1f 0f 0f 0f 07 07 03 3f 1f 1f 0f 0f
++ 16: 0f 07 07 3f 3f 1f 1f 0f 0f 0f 07 3f 3f 3f 1f 1f
+```
+
+First I1 structure: 73 leaves, 2 tiles
+
+**After 10 bytes (2 tiles × 5 bytes), byte is 0x03** - valid metadata (MASK_AND_NO_INACTIVE_VALS)!
+
+But tile values (bytes 0-9) look wrong - not recognizable Float32 values.
+
+### Issues Created for Documentation
+
+New beads created to properly document the VDB format:
+
+1. `path-tracer-98k` - Download OpenVDB documentation and specifications
+2. `path-tracer-3p9` - Download OpenVDB reference implementation source code
+3. `path-tracer-e3y` - Study and analyze VDB file format from docs and source (depends on 98k, 3p9)
+4. `path-tracer-zwb` - Create VDB file format API reference document (depends on e3y)
+
+### Files Modified This Session
+
+- **TreeRead.jl** - Created for combined topology+value parsing (interleaved format)
+- Verified Masks.jl, Compression.jl, File.jl are correct
+
+### Next Steps
+
+1. Complete format documentation (beads path-tracer-98k through path-tracer-zwb)
+2. Fix `read_leaf_values` to handle compression metadata byte format
+3. Verify internal node tile format (Float32 + active byte, or just Float32?)
+4. Test against all sample VDB files
+
+### Test Status
+| File | Result | Notes |
+|------|--------|-------|
+| smoke.vdb | ✅ Parses | Fog volume, I2 has 0 children |
+| torus.vdb | ❌ BoundsError | Level set, 3152 leaves to parse |
+| bunny_cloud.vdb | ⚠️ Untested | Large file |
+
+---
+
+## Previous Session (2026-01-03)
 
 **Fixed critical VDB header and metadata parsing issues.**
 
@@ -17,27 +118,9 @@
 - Added half_float flag for version 220-221
 - Heuristic-based metadata detection (no count prefix)
 
-### Test Status
-| File | Result |
-|------|--------|
-| torus.vdb | ✅ 5/5 pass |
-| bunny_cloud.vdb | ⚠️ 2/3 pass (grid properties issue) |
-| smoke.vdb | ❌ Error (Topology.jl format - see path-tracer-70n) |
-
-### Next Priority Issues
-1. `path-tracer-70n` [P0]: Topology.jl format (blocks smoke.vdb)
-2. `path-tracer-xxk` [P0]: Grid parsing ignores byte offsets
-3. Other P0 bugs: Binary.jl allocations, Transforms.jl, Accessors.jl
-
 ---
 
-## Previous Session Summary
-
-Completed **Step 0: Project Setup** for VDB.jl, a pure Julia parser for OpenVDB files.
-
-## What Was Done
-
-### Package Structure Created
+## Package Structure
 
 ```
 VDB.jl/
@@ -49,7 +132,8 @@ VDB.jl/
 │   ├── Compression.jl   # Codec abstraction (Blosc, Zlib)
 │   ├── TreeTypes.jl     # Immutable tree node types
 │   ├── Topology.jl      # Topology parsing (structure without values)
-│   ├── Values.jl        # Value parsing and tree materialization
+│   ├── Values.jl        # Value parsing *** NEEDS REWRITE ***
+│   ├── TreeRead.jl      # Combined topology+value reading (NEW)
 │   ├── Transforms.jl    # Coordinate transforms
 │   ├── Grid.jl          # Grid wrapper type
 │   ├── File.jl          # Top-level VDB file parsing
@@ -57,73 +141,9 @@ VDB.jl/
 │   ├── Interpolation.jl # Sampling (nearest, trilinear)
 │   └── Ray.jl           # Ray-tree intersection
 ├── test/
-│   ├── runtests.jl
-│   ├── test_binary.jl
-│   ├── test_masks.jl
-│   ├── test_coordinates.jl
-│   ├── test_compression.jl
-│   ├── test_tree_types.jl
-│   ├── test_topology.jl
-│   ├── test_values.jl
-│   ├── test_transforms.jl
-│   ├── test_grid.jl
-│   ├── test_file.jl
-│   ├── test_accessors.jl
-│   ├── test_interpolation.jl
-│   ├── test_ray.jl
-│   ├── test_integration.jl
-│   └── test_properties.jl
-├── test/fixtures/       # Empty, for test data
-└── Project.toml         # Dependencies: CodecBlosc, CodecZlib
+│   └── fixtures/samples/ # VDB sample files (torus.vdb, smoke.vdb, etc.)
+└── Project.toml
 ```
-
-### Implementation Status
-
-All source files contain **complete implementations** (not stubs):
-- Full parsing functions with proper signatures
-- Type definitions matching the spec
-- Iterator implementations for masks and tree traversal
-- Ray-box intersection using slab method
-
-All test files contain **comprehensive test cases** but may need refinement based on actual VDB file format details.
-
-## Beads Issues
-
-16 issues created with proper dependency chain:
-
-| Status | Issue ID | Step |
-|--------|----------|------|
-| ✅ Closed | path-tracer-6wi | Step 0: Project Setup |
-| ⏳ Ready | path-tracer-ci5 | Step 1: Binary Primitives |
-| 🔒 Blocked | path-tracer-1t8 | Step 2: Bitmasks |
-| 🔒 Blocked | path-tracer-bw9 | Step 3: Coordinates |
-| 🔒 Blocked | path-tracer-cny | Step 4: Compression |
-| 🔒 Blocked | path-tracer-tkb | Step 5: Tree Types |
-| 🔒 Blocked | path-tracer-4kn | Step 6: Topology Parsing |
-| 🔒 Blocked | path-tracer-cml | Step 7: Value Parsing |
-| 🔒 Blocked | path-tracer-7cm | Step 8: Transforms |
-| 🔒 Blocked | path-tracer-dgr | Step 9: Grid |
-| 🔒 Blocked | path-tracer-umt | Step 10: File Parsing |
-| 🔒 Blocked | path-tracer-3tl | Step 11: Accessors |
-| 🔒 Blocked | path-tracer-ntw | Step 12: Interpolation |
-| 🔒 Blocked | path-tracer-3wf | Step 13: Ray Utilities |
-| 🔒 Blocked | path-tracer-ksk | Step 14: Integration Tests |
-| 🔒 Blocked | path-tracer-19v | Step 15: Property Tests |
-
-## Next Steps
-
-1. **Run `bd ready`** to see available work (Step 1: Binary Primitives)
-2. **Run tests**: `cd VDB.jl && julia --project -e 'using Pkg; Pkg.test()'`
-3. Fix any issues found in tests
-4. Close `path-tracer-ci5` when Step 1 tests pass
-5. Continue with subsequent steps in dependency order
-
-## Known Limitations
-
-1. **File format accuracy**: The parsing code is based on the INITPROMPT.md spec and OpenVDB documentation, but may need adjustment when testing with real VDB files
-2. **Metadata parsing**: File.jl has simplified metadata handling that may need expansion
-3. **Grid type support**: Currently supports Float32, Float64, Vec3f - other types default to Float32
-4. **Integration tests**: Require downloading sample VDB files from ASWF
 
 ## Commands Reference
 
@@ -131,20 +151,16 @@ All test files contain **comprehensive test cases** but may need refinement base
 # View ready work
 bd ready
 
-# Start working on an issue
-bd update path-tracer-ci5 --status in_progress
-
-# Close completed work
-bd close path-tracer-ci5
-
 # Run Julia tests
-cd VDB.jl && julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+cd VDB.jl && julia --project -e 'using Pkg; Pkg.test()'
+
+# Test specific file parsing
+julia --project -e 'using VDB; vdb = parse_vdb("test/fixtures/samples/smoke.vdb"); println(length(vdb.grids))'
 ```
 
-## Design Principles (from INITPROMPT.md)
+## Design Principles
 
 1. **Pure functions**: `(bytes, pos) -> (result, new_pos)`
 2. **Immutable data**: All structs are immutable
 3. **Type safety**: Parameterized by value type
-4. **Explicit errors**: Typed exceptions with context
-5. **No stringly-typed dispatch**: Codecs/types are Julia types
+4. **Interleaved reading**: Topology + values per subtree, not separated

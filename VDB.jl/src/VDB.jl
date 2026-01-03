@@ -13,6 +13,7 @@ include("TreeTypes.jl")
 include("Topology.jl")
 include("Values.jl")
 include("Transforms.jl")
+include("TreeRead.jl")
 include("Grid.jl")
 include("File.jl")
 
@@ -47,10 +48,12 @@ export decompress, read_compressed_bytes
 # Exports - Tree Types
 export AbstractNode, LeafNode, Tile
 export InternalNode1, InternalNode2, RootNode, Tree
+export GridClass, GRID_LEVEL_SET, GRID_FOG_VOLUME, GRID_STAGGERED, GRID_UNKNOWN
 
 # Exports - Topology
 export LeafTopology, Internal1Topology, Internal2Topology, RootTopology
 export read_leaf_topology, read_internal1_topology, read_internal2_topology, read_root_topology
+export child_origin_internal2, child_origin_internal1
 
 # Exports - Values
 export read_leaf_values, read_tile_value
@@ -62,7 +65,6 @@ export index_to_world, world_to_index, world_to_index_float, voxel_size
 export read_transform
 
 # Exports - Grid
-export GridClass, GRID_LEVEL_SET, GRID_FOG_VOLUME, GRID_STAGGERED, GRID_UNKNOWN
 export parse_grid_class
 export Grid, read_grid
 

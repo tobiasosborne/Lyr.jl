@@ -227,11 +227,11 @@ function is_metadata_entry(bytes::Vector{UInt8}, pos::Int)::Bool
 end
 
 """
-    skip_metadata_value(bytes::Vector{UInt8}, pos::Int, type_name::String) -> Int
+    skip_metadata_value_heuristic(bytes::Vector{UInt8}, pos::Int, type_name::String) -> Int
 
-Skip a metadata value based on its type, returning the new position.
+Skip a metadata value based on its type (file-level metadata without size prefix).
 """
-function skip_metadata_value(bytes::Vector{UInt8}, pos::Int, type_name::String)::Int
+function skip_metadata_value_heuristic(bytes::Vector{UInt8}, pos::Int, type_name::String)::Int
     if type_name == "string"
         _, pos = read_string_with_size(bytes, pos)
     elseif type_name == "int32"
@@ -263,6 +263,100 @@ function skip_metadata_value(bytes::Vector{UInt8}, pos::Int, type_name::String):
 end
 
 """
+    read_grid_metadata(bytes::Vector{UInt8}, pos::Int) -> Tuple{Dict{String,Any}, Int}
+
+Read per-grid metadata section. Format:
+- tree_version (u32)
+- metadata_count (u32)
+- For each entry: key_size, key, type_size, type, value_size, value_bytes
+"""
+function read_grid_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,Any}, Int}
+    # Read tree version and metadata count
+    tree_version, pos = read_u32_le(bytes, pos)
+    metadata_count, pos = read_u32_le(bytes, pos)
+
+    metadata = Dict{String,Any}()
+    metadata["_tree_version"] = tree_version
+
+    for _ in 1:metadata_count
+        # Read key
+        key, pos = read_string_with_size(bytes, pos)
+
+        # Read type
+        type_name, pos = read_string_with_size(bytes, pos)
+
+        # Read value size (per-grid metadata has size prefix for ALL types)
+        value_size, pos = read_u32_le(bytes, pos)
+
+        # Read value based on type
+        if type_name == "string"
+            metadata[key] = String(bytes[pos:pos+value_size-1])
+            pos += value_size
+        elseif type_name == "int32" && value_size == 4
+            val, pos = read_i32_le(bytes, pos)
+            metadata[key] = val
+        elseif type_name == "int64" && value_size == 8
+            val, pos = read_i64_le(bytes, pos)
+            metadata[key] = val
+        elseif type_name == "float" && value_size == 4
+            val, pos = read_f32_le(bytes, pos)
+            metadata[key] = val
+        elseif type_name == "double" && value_size == 8
+            val, pos = read_f64_le(bytes, pos)
+            metadata[key] = val
+        elseif type_name == "bool" && value_size == 1
+            val = bytes[pos] != 0
+            pos += 1
+            metadata[key] = val
+        elseif type_name == "vec3i" && value_size == 12
+            x, pos = read_i32_le(bytes, pos)
+            y, pos = read_i32_le(bytes, pos)
+            z, pos = read_i32_le(bytes, pos)
+            metadata[key] = (x, y, z)
+        elseif type_name in ("vec3f", "vec3s") && value_size == 12
+            x, pos = read_f32_le(bytes, pos)
+            y, pos = read_f32_le(bytes, pos)
+            z, pos = read_f32_le(bytes, pos)
+            metadata[key] = (x, y, z)
+        elseif type_name == "vec3d" && value_size == 24
+            x, pos = read_f64_le(bytes, pos)
+            y, pos = read_f64_le(bytes, pos)
+            z, pos = read_f64_le(bytes, pos)
+            metadata[key] = (x, y, z)
+        else
+            # Unknown type, skip by value_size
+            pos += value_size
+            metadata[key] = nothing
+        end
+    end
+
+    (metadata, pos)
+end
+
+"""
+    read_file_metadata_v220(bytes::Vector{UInt8}, pos::Int) -> Int
+
+Read file-level metadata for VDB format version 220-221.
+These versions have a count prefix and size-prefixed values.
+"""
+function read_file_metadata_v220(bytes::Vector{UInt8}, pos::Int)::Int
+    # Read metadata count
+    meta_count, pos = read_u32_le(bytes, pos)
+
+    for _ in 1:meta_count
+        # Read key
+        _, pos = read_string_with_size(bytes, pos)
+        # Read type
+        type_name, pos = read_string_with_size(bytes, pos)
+        # Read value (with size prefix for all types)
+        value_size, pos = read_u32_le(bytes, pos)
+        pos += value_size
+    end
+
+    return pos
+end
+
+"""
     parse_vdb(bytes::Vector{UInt8}) -> VDBFile
 
 Parse a complete VDB file from bytes.
@@ -273,12 +367,17 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
     # Read header
     header, pos = read_header(bytes, pos)
 
-    # Read metadata entries (no count prefix - read until we hit grid count)
-    # Each entry is: key_size, key, type_size, type, value
-    while is_metadata_entry(bytes, pos)
-        _, pos = read_string_with_size(bytes, pos)  # key
-        type_name, pos = read_string_with_size(bytes, pos)  # type
-        pos = skip_metadata_value(bytes, pos, type_name)  # value
+    # Read file-level metadata
+    if header.format_version >= 222
+        # Version 222+: No count prefix, use heuristic detection
+        while is_metadata_entry(bytes, pos)
+            _, pos = read_string_with_size(bytes, pos)  # key
+            type_name, pos = read_string_with_size(bytes, pos)  # type
+            pos = skip_metadata_value_heuristic(bytes, pos, type_name)  # value
+        end
+    else
+        # Version 220-221: Has count prefix and size-prefixed values
+        pos = read_file_metadata_v220(bytes, pos)
     end
 
     # Read grid count
@@ -304,8 +403,11 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
         # Determine value type
         T = parse_value_type(desc.grid_type)
 
-        # Read grid class from metadata in grid
-        grid_class_str, pos = read_string_with_size(bytes, pos)
+        # Read per-grid metadata (includes "class" entry)
+        grid_metadata, pos = read_grid_metadata(bytes, pos)
+
+        # Extract grid class from metadata
+        grid_class_str = get(grid_metadata, "class", "unknown")
         grid_class = parse_grid_class(grid_class_str)
 
         # Parse the grid

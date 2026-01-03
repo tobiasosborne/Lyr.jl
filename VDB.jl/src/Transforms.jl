@@ -140,45 +140,98 @@ end
     read_transform(bytes::Vector{UInt8}, pos::Int) -> Tuple{AbstractTransform, Int}
 
 Parse a transform from bytes.
+
+OpenVDB MapBase format stores the full affine map data:
+- Translation (3 Float64)
+- Scale/voxel sizes (3 Float64, repeated several times)
+- Additional inverse data
+
+For UniformScaleTranslateMap: 18 Float64 values + 23 bytes of flags/padding.
 """
 function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{AbstractTransform, Int}
     # Read transform type string
     type_str, pos = read_string_with_size(bytes, pos)
 
-    if type_str == "UniformScaleMap" || type_str == "ScaleMap"
-        # Read scale values
-        sx, pos = read_f64_le(bytes, pos)
-        sy, pos = read_f64_le(bytes, pos)
-        sz, pos = read_f64_le(bytes, pos)
+    if type_str == "UniformScaleMap"
+        # UniformScaleMap format:
+        # - 6 scale values (3 for scale, 3 for voxel size)
+        # - 3 inverse scales
+        # - 3 inverse squared scales
+        # - 3 voxel sizes
+        # Total: 15 Float64 values + 4 bytes flags
 
-        # For uniform scale, all should be equal
-        if sx == sy == sz
-            return (UniformScaleTransform(sx), pos)
-        else
-            # Non-uniform scale: create as linear transform
-            mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
-            return (LinearTransform(mat, (0.0, 0.0, 0.0)), pos)
+        scale_x, pos = read_f64_le(bytes, pos)
+        _, pos = read_f64_le(bytes, pos)  # scale_y (same)
+        _, pos = read_f64_le(bytes, pos)  # scale_z (same)
+
+        # Skip remaining 12 Float64 values
+        for _ in 1:12
+            _, pos = read_f64_le(bytes, pos)
         end
+
+        # Skip 4 bytes of flags (not 23 like ScaleTranslateMap)
+        pos += 4
+
+        return (UniformScaleTransform(scale_x), pos)
+
     elseif type_str == "UniformScaleTranslateMap" || type_str == "ScaleTranslateMap"
-        # Read scale
-        sx, pos = read_f64_le(bytes, pos)
-        sy, pos = read_f64_le(bytes, pos)
-        sz, pos = read_f64_le(bytes, pos)
+        # UniformScaleTranslateMap format (18 Float64 values):
+        # - Translation (3 Float64)
+        # - Scale (3 Float64) - repeated
+        # - Inverse scale (3 Float64)
+        # - Inverse squared scale (3 Float64)
+        # - Voxel size (3 Float64)
+        # Total: 18 Float64 values + 23 bytes padding/flags
 
         # Read translation
         tx, pos = read_f64_le(bytes, pos)
         ty, pos = read_f64_le(bytes, pos)
         tz, pos = read_f64_le(bytes, pos)
 
+        # Read scale (first occurrence)
+        sx, pos = read_f64_le(bytes, pos)
+        sy, pos = read_f64_le(bytes, pos)
+        sz, pos = read_f64_le(bytes, pos)
+
+        # Skip remaining 12 Float64 values
+        for _ in 1:12
+            _, pos = read_f64_le(bytes, pos)
+        end
+
+        # Skip 23 bytes of padding/flags
+        pos += 23
+
         mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
         return (LinearTransform(mat, (tx, ty, tz)), pos)
+
+    elseif type_str == "ScaleMap"
+        # ScaleMap: 3 scale values + extras
+        sx, pos = read_f64_le(bytes, pos)
+        sy, pos = read_f64_le(bytes, pos)
+        sz, pos = read_f64_le(bytes, pos)
+
+        # Skip 9 more Float64s + 23 bytes
+        for _ in 1:9
+            _, pos = read_f64_le(bytes, pos)
+        end
+        pos += 23
+
+        mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
+        return (LinearTransform(mat, (0.0, 0.0, 0.0)), pos)
+
     else
-        # General affine transform
+        # General affine transform (AffineMap, etc.)
         # Read 4x4 matrix (row-major), extract 3x3 and translation
         mat_vals = Vector{Float64}(undef, 16)
         for i in 1:16
             mat_vals[i], pos = read_f64_le(bytes, pos)
         end
+
+        # Skip extras (6 Float64s for voxel sizes) + 23 bytes
+        for _ in 1:6
+            _, pos = read_f64_le(bytes, pos)
+        end
+        pos += 23
 
         mat = (mat_vals[1], mat_vals[2], mat_vals[3],
                mat_vals[5], mat_vals[6], mat_vals[7],

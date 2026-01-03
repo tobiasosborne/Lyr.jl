@@ -1,6 +1,19 @@
 # TreeTypes.jl - Immutable algebraic data types for VDB tree structure
 
 """
+    GridClass
+
+Enumeration of grid classification types.
+Defined here (before Topology.jl) so read_root_topology can use it.
+"""
+@enum GridClass begin
+    GRID_LEVEL_SET
+    GRID_FOG_VOLUME
+    GRID_STAGGERED
+    GRID_UNKNOWN
+end
+
+"""
     AbstractNode{T}
 
 Abstract type for all VDB tree nodes parameterized by value type T.

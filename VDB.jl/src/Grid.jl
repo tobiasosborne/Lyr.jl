@@ -1,16 +1,5 @@
 # Grid.jl - Grid wrapper combining tree, transform, and metadata
-
-"""
-    GridClass
-
-Enumeration of grid classification types.
-"""
-@enum GridClass begin
-    GRID_LEVEL_SET
-    GRID_FOG_VOLUME
-    GRID_STAGGERED
-    GRID_UNKNOWN
-end
+# Note: GridClass enum is defined in TreeTypes.jl for use in Topology.jl
 
 """
     parse_grid_class(s::String) -> GridClass
@@ -52,6 +41,9 @@ end
     read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass) -> Tuple{Grid{T}, Int}
 
 Parse a complete grid from bytes.
+
+VDB files interleave topology and values at the subtree level. For each Internal2
+subtree, all topology comes first (masks), then all values (tiles + compressed leaves).
 """
 function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass)::Tuple{Grid{T}, Int} where T
     # Read transform
@@ -60,11 +52,8 @@ function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name
     # Read background value
     background, pos = read_tile_value(T, bytes, pos)
 
-    # Read topology
-    topology, pos = read_root_topology(bytes, pos)
-
-    # Materialize tree with values
-    tree, pos = materialize_tree(T, topology, bytes, pos, codec, background)
+    # Read tree with interleaved topology + values
+    tree, pos = read_tree(T, bytes, pos, codec, background, grid_class)
 
     grid = Grid{T}(name, grid_class, transform, tree)
     (grid, pos)
