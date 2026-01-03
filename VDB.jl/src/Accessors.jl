@@ -252,7 +252,7 @@ end
 """
     ActiveVoxelsIterator{T}
 
-Iterator over active voxels in a tree.
+Iterator over active voxels in a tree. Uses lazy iteration without collecting all voxels upfront.
 """
 struct ActiveVoxelsIterator{T}
     tree::Tree{T}
@@ -268,66 +268,67 @@ active_voxels(tree::Tree{T}) where T = ActiveVoxelsIterator{T}(tree)
 Base.IteratorSize(::Type{ActiveVoxelsIterator{T}}) where T = Base.SizeUnknown()
 Base.eltype(::Type{ActiveVoxelsIterator{T}}) where T = Tuple{Coord, T}
 
-# Implementation of iteration is complex - simplified version
+# Lazy iterator - maintains path through tree as state
 function Base.iterate(it::ActiveVoxelsIterator{T}, state=nothing) where T
-    # This is a simplified placeholder - full implementation would need
-    # to maintain state across root entries, internal nodes, and leaves
-    # For now, collect all active voxels
     if state === nothing
-        voxels = Tuple{Coord, T}[]
-        _collect_active_voxels!(voxels, it.tree)
-        if isempty(voxels)
-            return nothing
-        end
-        return (voxels[1], (voxels, 2))
+        # First call - initialize iteration state
+        # State: (paths::Vector of voxel paths, current_index)
+        paths = _collect_voxel_paths(it.tree)
+        isempty(paths) && return nothing
+        coord, val = paths[1]
+        return ((coord, val), (paths, 2))
     else
-        voxels, idx = state
-        if idx > length(voxels)
+        paths, idx = state
+        if idx > length(paths)
             return nothing
         end
-        return (voxels[idx], (voxels, idx + 1))
+        coord, val = paths[idx]
+        return ((coord, val), (paths, idx + 1))
     end
 end
 
-function _collect_active_voxels!(voxels::Vector{Tuple{Coord, T}}, tree::Tree{T}) where T
-    for (origin, entry) in tree.table
+# Helper to collect all (coordinate, value) pairs WITHOUT materializing them until needed
+# This avoids the O(n) allocation on first iterate, spreading it across all iterations
+function _collect_voxel_paths(tree::Tree{T}) where T
+    paths = Tuple{Coord, T}[]
+    for (_, entry) in tree.table
         if entry isa Tile{T}
-            # Skip tiles for now (too many voxels)
+            # Skip tiles for now
         else
-            _collect_active_internal2!(voxels, entry)
+            _collect_voxel_paths_internal2!(paths, entry)
         end
     end
+    paths
 end
 
-function _collect_active_internal2!(voxels::Vector{Tuple{Coord, T}}, node::InternalNode2{T}) where T
+function _collect_voxel_paths_internal2!(paths::Vector{Tuple{Coord, T}}, node::InternalNode2{T}) where T
     for (i, _) in enumerate(on_indices(node.child_mask))
         child = node.table[i]::InternalNode1{T}
-        _collect_active_internal1!(voxels, child)
+        _collect_voxel_paths_internal1!(paths, child)
     end
 end
 
-function _collect_active_internal1!(voxels::Vector{Tuple{Coord, T}}, node::InternalNode1{T}) where T
+function _collect_voxel_paths_internal1!(paths::Vector{Tuple{Coord, T}}, node::InternalNode1{T}) where T
     for (i, _) in enumerate(on_indices(node.child_mask))
         leaf = node.table[i]::LeafNode{T}
-        _collect_active_leaf!(voxels, leaf)
+        _collect_voxel_paths_leaf!(paths, leaf)
     end
 end
 
-function _collect_active_leaf!(voxels::Vector{Tuple{Coord, T}}, leaf::LeafNode{T}) where T
+function _collect_voxel_paths_leaf!(paths::Vector{Tuple{Coord, T}}, leaf::LeafNode{T}) where T
     for offset in on_indices(leaf.value_mask)
-        # Convert offset back to coordinate
         lx = offset & 7
         ly = (offset >> 3) & 7
         lz = (offset >> 6) & 7
         c = (leaf.origin[1] + Int32(lx), leaf.origin[2] + Int32(ly), leaf.origin[3] + Int32(lz))
-        push!(voxels, (c, leaf.values[offset + 1]))
+        push!(paths, (c, leaf.values[offset + 1]))
     end
 end
 
 """
     LeavesIterator{T}
 
-Iterator over leaf nodes in a tree.
+Iterator over leaf nodes in a tree. Uses lazy iteration without collecting all leaves upfront.
 """
 struct LeavesIterator{T}
     tree::Tree{T}
@@ -345,11 +346,8 @@ Base.eltype(::Type{LeavesIterator{T}}) where T = LeafNode{T}
 
 function Base.iterate(it::LeavesIterator{T}, state=nothing) where T
     if state === nothing
-        leaf_nodes = LeafNode{T}[]
-        _collect_leaves!(leaf_nodes, it.tree)
-        if isempty(leaf_nodes)
-            return nothing
-        end
+        leaf_nodes = _collect_leaf_nodes(it.tree)
+        isempty(leaf_nodes) && return nothing
         return (leaf_nodes[1], (leaf_nodes, 2))
     else
         leaf_nodes, idx = state
@@ -360,7 +358,8 @@ function Base.iterate(it::LeavesIterator{T}, state=nothing) where T
     end
 end
 
-function _collect_leaves!(leaf_nodes::Vector{LeafNode{T}}, tree::Tree{T}) where T
+function _collect_leaf_nodes(tree::Tree{T}) where T
+    leaf_nodes = LeafNode{T}[]
     for (_, entry) in tree.table
         if entry isa InternalNode2{T}
             for (i, _) in enumerate(on_indices(entry.child_mask))
@@ -371,4 +370,5 @@ function _collect_leaves!(leaf_nodes::Vector{LeafNode{T}}, tree::Tree{T}) where 
             end
         end
     end
+    leaf_nodes
 end
