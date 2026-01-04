@@ -24,15 +24,27 @@
    - Fixed edge cases: subnormal floats, proper Coord type usage
    - Proper shrinking enabled for all properties
 
+4. **ly-xc3 (closed)**: Created benchmark suite with BenchmarkTools.jl
+   - Created benchmark/benchmarks.jl with comprehensive benchmarks
+   - Covers: parse_vdb, get_value, active_voxels, sample_trilinear, ray intersection
+   - Skips files that fail to parse (e.g., v220 format)
+
+5. **ly-0ej (closed)**: Added type stability tests
+   - Created test/test_type_stability.jl with @code_warntype checks
+   - Tests cover all critical hot-path functions
+   - Uses is_type_stable() helper for automated checking
+
 ### Test Results
-- **Total tests**: 381
-- **Passing**: 381
+- **Total tests**: 408
+- **Passing**: 408
 - **Broken**: 1 (v220 integration test - known limitation)
 
 ### Commits
 - `3a7f897`: feat: Add read_tile_value specializations for Vec3 types
 - `c56dd32`: test: Add comprehensive tests for read_compressed_bytes
 - `6942552`: test: Convert property tests to use PropCheck with generators and shrinking
+- `b205e64`: feat: Add benchmark suite with BenchmarkTools.jl
+- `5f7fb81`: test: Add type stability tests using @code_warntype
 
 ### Next Steps
 1. Continue with remaining P2 issues from `bd ready`
