@@ -1,11 +1,41 @@
 @testset "Coordinates" begin
+    @testset "Coord struct properties" begin
+        # Coord should be a proper struct, not a type alias
+        @test isa(Coord, DataType)
+        @test !isa(Coord, UnionAll)  # Not a type alias
+
+        c = coord(1, 2, 3)
+
+        # Named field access
+        @test c.x == Int32(1)
+        @test c.y == Int32(2)
+        @test c.z == Int32(3)
+
+        # Index access for backward compatibility
+        @test c[1] == Int32(1)
+        @test c[2] == Int32(2)
+        @test c[3] == Int32(3)
+
+        # Hashable (for use as Dict key)
+        d = Dict{Coord, Int}()
+        d[c] = 42
+        @test d[c] == 42
+        @test d[coord(1, 2, 3)] == 42  # Same values should hash the same
+
+        # Length and iteration
+        @test length(c) == 3
+        @test collect(c) == [Int32(1), Int32(2), Int32(3)]
+    end
+
     @testset "Construction" begin
         c = coord(1, 2, 3)
-        @test c == (Int32(1), Int32(2), Int32(3))
+        @test c == coord(1, 2, 3)
+        @test c.x == Int32(1) && c.y == Int32(2) && c.z == Int32(3)
 
         # Negative values
         c = coord(-1, -2, -3)
-        @test c == (Int32(-1), Int32(-2), Int32(-3))
+        @test c == coord(-1, -2, -3)
+        @test c.x == Int32(-1) && c.y == Int32(-2) && c.z == Int32(-3)
     end
 
     @testset "Arithmetic" begin

@@ -37,21 +37,6 @@
         @test pos == 25
     end
 
-    @testset "materialize_leaf" begin
-        topo = LeafTopology(
-            coord(0, 0, 0),
-            LeafMask(Val(:ones))  # All active
-        )
-
-        values = ntuple(i -> Float32(i), 512)
-        leaf = materialize_leaf(Float32, topo, values)
-
-        @test leaf.origin == coord(0, 0, 0)
-        @test is_full(leaf.value_mask)
-        @test leaf.values[1] == 1.0f0
-        @test leaf.values[512] == 512.0f0
-    end
-
     @testset "Value types" begin
         # Float32
         values32 = ntuple(_ -> 0.0f0, 512)

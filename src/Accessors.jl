@@ -315,7 +315,7 @@ function _collect_voxel_paths_leaf!(paths::Vector{Tuple{Coord, T}}, leaf::LeafNo
         lx = offset & 7
         ly = (offset >> 3) & 7
         lz = (offset >> 6) & 7
-        c = (leaf.origin[1] + Int32(lx), leaf.origin[2] + Int32(ly), leaf.origin[3] + Int32(lz))
+        c = Coord(leaf.origin.x + Int32(lx), leaf.origin.y + Int32(ly), leaf.origin.z + Int32(lz))
         push!(paths, (c, leaf.values[offset + 1]))
     end
 end

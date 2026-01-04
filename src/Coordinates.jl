@@ -3,22 +3,37 @@
 """
     Coord
 
-A 3D coordinate represented as a tuple of Int32 values.
+A 3D coordinate with Int32 components. This is a proper struct (not a type alias)
+to avoid type piracy when extending methods.
+
+# Fields
+- `x::Int32` - X component
+- `y::Int32` - Y component
+- `z::Int32` - Z component
 """
-const Coord = NTuple{3, Int32}
+struct Coord
+    x::Int32
+    y::Int32
+    z::Int32
+end
 
 """
     coord(x, y, z) -> Coord
 
 Construct a coordinate from x, y, z values.
 """
-coord(x, y, z)::Coord = (Int32(x), Int32(y), Int32(z))
+coord(x, y, z)::Coord = Coord(Int32(x), Int32(y), Int32(z))
+
+# Index access for backward compatibility
+Base.getindex(c::Coord, i::Int) = i == 1 ? c.x : i == 2 ? c.y : i == 3 ? c.z : throw(BoundsError(c, i))
+Base.length(::Coord) = 3
+Base.iterate(c::Coord, state=1) = state > 3 ? nothing : (c[state], state + 1)
 
 # Arithmetic operations
-Base.:+(a::Coord, b::Coord)::Coord = (a[1] + b[1], a[2] + b[2], a[3] + b[3])
-Base.:-(a::Coord, b::Coord)::Coord = (a[1] - b[1], a[2] - b[2], a[3] - b[3])
-Base.min(a::Coord, b::Coord)::Coord = (min(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3]))
-Base.max(a::Coord, b::Coord)::Coord = (max(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+Base.:+(a::Coord, b::Coord)::Coord = Coord(a.x + b.x, a.y + b.y, a.z + b.z)
+Base.:-(a::Coord, b::Coord)::Coord = Coord(a.x - b.x, a.y - b.y, a.z - b.z)
+Base.min(a::Coord, b::Coord)::Coord = Coord(min(a.x, b.x), min(a.y, b.y), min(a.z, b.z))
+Base.max(a::Coord, b::Coord)::Coord = Coord(max(a.x, b.x), max(a.y, b.y), max(a.z, b.z))
 
 # VDB tree dimensions
 const LEAF_DIM = Int32(8)      # 2^3 = 8
@@ -40,7 +55,7 @@ Round coordinate down to the origin of its containing leaf node (aligned to 8).
 """
 function leaf_origin(c::Coord)::Coord
     mask = ~Int32(LEAF_DIM - 1)  # ~7 = ...11111000
-    (c[1] & mask, c[2] & mask, c[3] & mask)
+    Coord(c.x & mask, c.y & mask, c.z & mask)
 end
 
 """
@@ -51,7 +66,7 @@ Round coordinate down to the origin of its containing Internal1 node (aligned to
 function internal1_origin(c::Coord)::Coord
     size = Int32(1) << INTERNAL1_TOTAL_LOG2  # 128
     mask = ~(size - 1)
-    (c[1] & mask, c[2] & mask, c[3] & mask)
+    Coord(c.x & mask, c.y & mask, c.z & mask)
 end
 
 """
@@ -62,7 +77,7 @@ Round coordinate down to the origin of its containing Internal2 node (aligned to
 function internal2_origin(c::Coord)::Coord
     size = Int32(1) << INTERNAL2_TOTAL_LOG2  # 4096
     mask = ~(size - 1)
-    (c[1] & mask, c[2] & mask, c[3] & mask)
+    Coord(c.x & mask, c.y & mask, c.z & mask)
 end
 
 """
@@ -73,9 +88,9 @@ Uses Morton/Z-order: offset = x + 8*y + 64*z (for coordinates within leaf).
 """
 function leaf_offset(c::Coord)::Int
     # Get local coordinates within the leaf (0-7 each)
-    lx = c[1] & (LEAF_DIM - 1)
-    ly = c[2] & (LEAF_DIM - 1)
-    lz = c[3] & (LEAF_DIM - 1)
+    lx = c.x & (LEAF_DIM - 1)
+    ly = c.y & (LEAF_DIM - 1)
+    lz = c.z & (LEAF_DIM - 1)
     Int(lx) + Int(ly) * 8 + Int(lz) * 64
 end
 
@@ -89,9 +104,9 @@ function internal1_child_index(c::Coord)::Int
     shift = LEAF_LOG2  # 3
     mask = INTERNAL1_DIM - 1  # 15
 
-    ix = (c[1] >> shift) & mask
-    iy = (c[2] >> shift) & mask
-    iz = (c[3] >> shift) & mask
+    ix = (c.x >> shift) & mask
+    iy = (c.y >> shift) & mask
+    iz = (c.z >> shift) & mask
 
     Int(ix) + Int(iy) * 16 + Int(iz) * 256
 end
@@ -106,9 +121,9 @@ function internal2_child_index(c::Coord)::Int
     shift = INTERNAL1_TOTAL_LOG2  # 7
     mask = INTERNAL2_DIM - 1  # 31
 
-    ix = (c[1] >> shift) & mask
-    iy = (c[2] >> shift) & mask
-    iz = (c[3] >> shift) & mask
+    ix = (c.x >> shift) & mask
+    iy = (c.y >> shift) & mask
+    iz = (c.z >> shift) & mask
 
     Int(ix) + Int(iy) * 32 + Int(iz) * 1024
 end
@@ -129,9 +144,9 @@ end
 Check if the bounding box contains the given coordinate.
 """
 function contains(bb::BBox, c::Coord)::Bool
-    bb.min[1] <= c[1] <= bb.max[1] &&
-    bb.min[2] <= c[2] <= bb.max[2] &&
-    bb.min[3] <= c[3] <= bb.max[3]
+    bb.min.x <= c.x <= bb.max.x &&
+    bb.min.y <= c.y <= bb.max.y &&
+    bb.min.z <= c.z <= bb.max.z
 end
 
 """
@@ -140,9 +155,9 @@ end
 Check if two bounding boxes intersect.
 """
 function intersects(a::BBox, b::BBox)::Bool
-    a.min[1] <= b.max[1] && a.max[1] >= b.min[1] &&
-    a.min[2] <= b.max[2] && a.max[2] >= b.min[2] &&
-    a.min[3] <= b.max[3] && a.max[3] >= b.min[3]
+    a.min.x <= b.max.x && a.max.x >= b.min.x &&
+    a.min.y <= b.max.y && a.max.y >= b.min.y &&
+    a.min.z <= b.max.z && a.max.z >= b.min.z
 end
 
 """
@@ -160,8 +175,8 @@ end
 Compute the volume of the bounding box.
 """
 function volume(bb::BBox)::Int64
-    dx = Int64(bb.max[1]) - Int64(bb.min[1]) + 1
-    dy = Int64(bb.max[2]) - Int64(bb.min[2]) + 1
-    dz = Int64(bb.max[3]) - Int64(bb.min[3]) + 1
+    dx = Int64(bb.max.x) - Int64(bb.min.x) + 1
+    dy = Int64(bb.max.y) - Int64(bb.min.y) + 1
+    dz = Int64(bb.max.z) - Int64(bb.min.z) + 1
     dx * dy * dz
 end
