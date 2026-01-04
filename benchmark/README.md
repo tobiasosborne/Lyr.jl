@@ -1,130 +1,155 @@
-# Lyr.jl Benchmarks and Profiling
+# Lyr.jl Benchmarks
 
-## Quick Start
+This directory contains benchmarking and profiling tools for Lyr.jl.
 
-```bash
-# Run benchmarks
-timeout 60 julia --project benchmark/benchmarks.jl
+## Files
 
-# Run profiling
-timeout 60 julia --project benchmark/profile.jl
-```
+- `benchmarks.jl` - Performance benchmark suite using BenchmarkTools.jl
+- `track_alloc.jl` - Allocation tracking script using `--track-allocation`
 
-## Profiling Workflow
+## Performance Benchmarks
 
-### 1. Basic Profiling (CLI)
+Run the full benchmark suite:
 
 ```bash
-# Full profiling suite (parse_vdb + get_value)
-timeout 60 julia --project benchmark/profile.jl
-
-# Profile only parse_vdb
-timeout 60 julia --project benchmark/profile.jl --parse-only
-
-# Profile only get_value
-timeout 60 julia --project benchmark/profile.jl --access-only
+julia --project benchmark/benchmarks.jl
 ```
 
-### 2. Interactive Visualization (requires GUI)
+This benchmarks:
+1. `parse_vdb` - File parsing throughput
+2. `get_value` - Random voxel access (10k queries)
+3. `active_voxels` - Iterator performance
+4. `sample_trilinear` - Interpolation (10k samples)
+5. `intersect_leaves` - Ray-tree intersection (1k rays)
 
-```julia
-using ProfileView
-include("benchmark/profile.jl")
-run_profiling(; view=true)
+Results are displayed for each available VDB sample file.
+
+## Allocation Tracking
+
+Julia's `--track-allocation` feature generates `.mem` files showing bytes
+allocated at each source line. Use this to find allocation hotspots.
+
+### Quick Start
+
+The workflow is two steps because `.mem` files are written when Julia exits:
+
+```bash
+# Step 1: Clean previous data and run with tracking
+find src -name "*.mem" -delete
+julia --project --track-allocation=user benchmark/track_alloc.jl
+# Wait for Julia to exit - this writes .mem files
+
+# Step 2: Analyze the generated .mem files
+julia --project benchmark/track_alloc.jl
+
+# (Optional) Specify a VDB file
+julia --project --track-allocation=user benchmark/track_alloc.jl path/to/file.vdb
 ```
 
-### 3. Manual Profiling in REPL
+### Understanding the Output
 
-```julia
-using Lyr
-using Profile
+The script reports:
+- **Top 20 Allocation Sites**: Sorted by bytes allocated
+- **Allocations by File**: Totals per source file
+- **Key Areas**: Specific functions to investigate
 
-# Load test file
-bytes = read("path/to/sample.vdb")
+Example output:
+```
+Top 20 Allocation Sites (by bytes)
+----------------------------------------------------------------------
 
-# Warmup
-parse_vdb(bytes)
+ 1.   1.25 MB (45.2%)  Binary.jl:104
+    → @inbounds val = bytes[pos:pos+n-1]
 
-# Profile
-Profile.clear()
-@profile for _ in 1:10
+ 2. 512.00 KB (18.5%)  Values.jl:55
+    → all_values = Vector{T}(undef, N)
+```
+
+### Interpreting .mem Files
+
+After running, `.mem` files appear next to source files:
+
+```
+src/Binary.jl      → src/Binary.jl.mem
+src/Masks.jl       → src/Masks.jl.mem
+```
+
+Each `.mem` file shows allocations per line:
+```
+        - function read_u8(bytes::Vector{UInt8}, pos::Int)
+        0     @boundscheck checkbounds(bytes, pos)
+        0     @inbounds val = bytes[pos]
+        0     (val, pos + 1)
+        - end
+```
+
+- `-` = line not executed or no tracking
+- `0` = executed, zero allocations (good!)
+- `123456` = bytes allocated (investigate)
+
+### Goals
+
+**Hot path functions should have zero allocations:**
+
+| Function | Module | Target |
+|----------|--------|--------|
+| `get_value` | Accessors.jl | 0 bytes |
+| `is_on` | Masks.jl | 0 bytes |
+| `count_on` | Masks.jl | 0 bytes |
+| `read_u32_le` | Binary.jl | 0 bytes |
+| `leaf_offset` | Coordinates.jl | 0 bytes |
+
+**Known allocation sites (acceptable):**
+
+- `parse_vdb` - Must allocate for tree structures
+- `Vector{T}(undef, N)` - Value array creation
+- String parsing - Metadata handling
+
+### Workflow for Reducing Allocations
+
+1. **Identify**: Run `track_alloc.jl`, find top sites
+2. **Understand**: Read the allocating line in context
+3. **Fix**: Common patterns:
+   - Replace slicing (`bytes[a:b]`) with unsafe_load
+   - Use `@inbounds` for bounds-checked hot paths
+   - Avoid creating intermediate arrays
+   - Use tuples instead of vectors for fixed-size data
+4. **Verify**: Re-run tracking, confirm reduction
+5. **Benchmark**: Ensure fix doesn't hurt performance
+
+### Advanced Usage
+
+**Track only specific files:**
+```bash
+# Julia tracks all loaded code, but you can filter analysis
+julia --project --track-allocation=user -e '
+    using Lyr
+    bytes = read("test/fixtures/samples/torus.vdb")
     parse_vdb(bytes)
-end
-
-# View results
-Profile.print(format=:flat, sortedby=:count, mincount=10)
-Profile.print(format=:tree, maxdepth=15)
+'
+# Then manually inspect src/Binary.jl.mem
 ```
 
-## Identified Hotspots
+**Compare before/after:**
+```bash
+# Before fix
+find src -name "*.mem" -delete
+julia --project --track-allocation=user benchmark/track_alloc.jl
+mv src/Binary.jl.mem /tmp/Binary.jl.mem.before
 
-### parse_vdb
+# After fix (edit code)
+find src -name "*.mem" -delete
+julia --project --track-allocation=user benchmark/track_alloc.jl
 
-| Location | Function | % Time | Issue |
-|----------|----------|--------|-------|
-| boot.jl:588 | GenericMemory | ~46% | Array allocation |
-| TreeRead.jl:198 | materialize_i2_values_v222 | ~55% | Main parsing loop |
-| Masks.jl:202 | read_mask(LeafMask) | ~10% | Mask array creation |
-| array.jl | push!/\_growend! | ~12% | Dynamic array growth |
-
-**Optimization opportunities:**
-1. Pre-allocate arrays where size is known
-2. Use `@inbounds` for hot loops with verified bounds
-3. Consider using `SVector` for fixed-size leaf values
-4. Pool/reuse mask allocations
-
-### get_value
-
-| Location | Function | % Time | Issue |
-|----------|----------|--------|-------|
-| Masks.jl:140-148 | on_indices iteration | ~50% | Linear scan for index |
-| int.jl | == comparisons | ~20% | Type promotion overhead |
-
-**Key findings:**
-- Zero allocations per query (excellent)
-- Main cost is mask iteration to find child indices
-- Could use `count_on` + direct indexing instead of iteration
-
-## Memory Analysis
-
-From profiling torus.vdb (5.3 MB file):
-
-```
-parse_vdb:
-  Time: ~250ms
-  Allocations: ~100 MB (18x file size)
-  GC time: ~150ms (60% of total!)
-
-get_value:
-  Time: 0.02ms per 10k queries
-  Allocations: 0 bytes per query
+# Compare
+diff /tmp/Binary.jl.mem.before src/Binary.jl.mem
 ```
 
-**Key insight:** GC dominates parse_vdb time. Reducing allocations is the primary optimization target.
+## Sample VDB Files
 
-## Top 10 Allocation Sites
+Place test files in `test/fixtures/samples/`:
+- `torus.vdb` - Level set torus (included)
+- `bunny_cloud.vdb` - Fog volume (download from ASWF)
+- `smoke.vdb` - Smoke simulation (download from ASWF)
 
-1. `GenericMemory` (Array creation) - TreeRead.jl value arrays
-2. `read_mask` - LeafMask array allocation (512 bits = 64 bytes per leaf)
-3. `_totuple` - Tuple construction for leaf values
-4. `push!` - Dynamic array growth in tree building
-5. `collect` - Iterator materialization
-6. `read_f32_le` - Float parsing (likely optimized)
-7. String operations in metadata parsing
-8. `Dict` operations for root table
-9. Node struct construction
-10. Compression buffer allocations
-
-## Running Type Stability Checks
-
-```julia
-using InteractiveUtils
-
-# Check parse_vdb
-@code_warntype parse_vdb(bytes)
-
-# Check get_value
-@code_warntype get_value(tree, coord(0,0,0))
-```
-
-Red/yellow highlights indicate type instability that can cause allocations.
+Download from: https://artifacts.aswf.io/io/aswf/openvdb/models/

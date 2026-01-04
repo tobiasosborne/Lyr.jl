@@ -4,6 +4,8 @@
 # Positions are 1-indexed (Julia convention)
 # All multi-byte types are little-endian
 
+using Base: ltoh
+
 """
     read_u8(bytes::Vector{UInt8}, pos::Int) -> Tuple{UInt8, Int}
 
