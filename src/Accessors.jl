@@ -210,7 +210,8 @@ end
 """
     ActiveVoxelsIterator{T}
 
-Iterator over active voxels in a tree. Uses lazy iteration without collecting all voxels upfront.
+Iterator over active voxels in a tree. True lazy iteration - traverses tree on demand
+without collecting voxels upfront. Memory usage is O(1) regardless of voxel count.
 """
 struct ActiveVoxelsIterator{T}
     tree::Tree{T}
@@ -226,67 +227,92 @@ active_voxels(tree::Tree{T}) where T = ActiveVoxelsIterator{T}(tree)
 Base.IteratorSize(::Type{ActiveVoxelsIterator{T}}) where T = Base.SizeUnknown()
 Base.eltype(::Type{ActiveVoxelsIterator{T}}) where T = Tuple{Coord, T}
 
-# Lazy iterator - maintains path through tree as state
+# State for lazy tree traversal - tracks position at each level
+# State tuple: (root_pairs, root_idx, i2_idx, i1_idx, leaf_mask_state)
+# where indices are into the respective tables, and leaf_mask_state is for on_indices
+
 function Base.iterate(it::ActiveVoxelsIterator{T}, state=nothing) where T
     if state === nothing
-        # First call - initialize iteration state
-        # State: (paths::Vector of voxel paths, current_index)
-        paths = _collect_voxel_paths(it.tree)
-        isempty(paths) && return nothing
-        coord, val = paths[1]
-        return ((coord, val), (paths, 2))
+        # Initialize: collect root entries (typically very few - O(1) to O(10))
+        root_pairs = collect(it.tree.table)
+        isempty(root_pairs) && return nothing
+        # Start with first root entry, first I2 child, first I1 child, first voxel
+        return _advance_voxels(root_pairs, 1, 1, 1, nothing)
     else
-        paths, idx = state
-        if idx > length(paths)
-            return nothing
-        end
-        coord, val = paths[idx]
-        return ((coord, val), (paths, idx + 1))
+        root_pairs, root_idx, i2_idx, i1_idx, leaf_state = state
+        return _advance_voxels(root_pairs, root_idx, i2_idx, i1_idx, leaf_state)
     end
 end
 
-# Helper to collect all (coordinate, value) pairs WITHOUT materializing them until needed
-# This avoids the O(n) allocation on first iterate, spreading it across all iterations
-function _collect_voxel_paths(tree::Tree{T}) where T
-    paths = Tuple{Coord, T}[]
-    for (_, entry) in tree.table
+# Advance to next voxel, handling all level transitions
+function _advance_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
+                         root_idx::Int, i2_idx::Int, i1_idx::Int,
+                         leaf_state) where T
+    while root_idx <= length(root_pairs)
+        entry = root_pairs[root_idx].second
+
+        # Skip tiles at root level (TODO: could iterate tile voxels if needed)
         if entry isa Tile{T}
-            # Skip tiles for now
-        else
-            _collect_voxel_paths_internal2!(paths, entry)
+            root_idx += 1
+            i2_idx = 1
+            i1_idx = 1
+            leaf_state = nothing
+            continue
         end
-    end
-    paths
-end
 
-function _collect_voxel_paths_internal2!(paths::Vector{Tuple{Coord, T}}, node::InternalNode2{T}) where T
-    for (i, _) in enumerate(on_indices(node.child_mask))
-        child = node.table[i]::InternalNode1{T}
-        _collect_voxel_paths_internal1!(paths, child)
-    end
-end
+        node2 = entry::InternalNode2{T}
+        n_i2_children = count_on(node2.child_mask)
 
-function _collect_voxel_paths_internal1!(paths::Vector{Tuple{Coord, T}}, node::InternalNode1{T}) where T
-    for (i, _) in enumerate(on_indices(node.child_mask))
-        leaf = node.table[i]::LeafNode{T}
-        _collect_voxel_paths_leaf!(paths, leaf)
-    end
-end
+        while i2_idx <= n_i2_children
+            node1 = node2.table[i2_idx]::InternalNode1{T}
+            n_i1_children = count_on(node1.child_mask)
 
-function _collect_voxel_paths_leaf!(paths::Vector{Tuple{Coord, T}}, leaf::LeafNode{T}) where T
-    for offset in on_indices(leaf.value_mask)
-        lx = offset & 7
-        ly = (offset >> 3) & 7
-        lz = (offset >> 6) & 7
-        c = Coord(leaf.origin.x + Int32(lx), leaf.origin.y + Int32(ly), leaf.origin.z + Int32(lz))
-        push!(paths, (c, leaf.values[offset + 1]))
+            while i1_idx <= n_i1_children
+                leaf = node1.table[i1_idx]::LeafNode{T}
+
+                # Iterate voxels in this leaf
+                leaf_iter = on_indices(leaf.value_mask)
+                iter_result = leaf_state === nothing ? iterate(leaf_iter) : iterate(leaf_iter, leaf_state)
+
+                if iter_result !== nothing
+                    offset, next_leaf_state = iter_result
+                    # Compute coordinate from leaf origin + offset
+                    lx = offset & 7
+                    ly = (offset >> 3) & 7
+                    lz = (offset >> 6) & 7
+                    c = Coord(leaf.origin.x + Int32(lx),
+                              leaf.origin.y + Int32(ly),
+                              leaf.origin.z + Int32(lz))
+                    val = leaf.values[offset + 1]
+                    return ((c, val), (root_pairs, root_idx, i2_idx, i1_idx, next_leaf_state))
+                end
+
+                # Move to next leaf
+                i1_idx += 1
+                leaf_state = nothing
+            end
+
+            # Move to next Internal1
+            i2_idx += 1
+            i1_idx = 1
+            leaf_state = nothing
+        end
+
+        # Move to next root entry
+        root_idx += 1
+        i2_idx = 1
+        i1_idx = 1
+        leaf_state = nothing
     end
+
+    nothing
 end
 
 """
     LeavesIterator{T}
 
-Iterator over leaf nodes in a tree. Uses lazy iteration without collecting all leaves upfront.
+Iterator over leaf nodes in a tree. True lazy iteration - traverses tree on demand
+without collecting leaves upfront. Memory usage is O(1) regardless of leaf count.
 """
 struct LeavesIterator{T}
     tree::Tree{T}
@@ -302,31 +328,50 @@ leaves(tree::Tree{T}) where T = LeavesIterator{T}(tree)
 Base.IteratorSize(::Type{LeavesIterator{T}}) where T = Base.SizeUnknown()
 Base.eltype(::Type{LeavesIterator{T}}) where T = LeafNode{T}
 
+# State tuple: (root_pairs, root_idx, i2_idx, i1_idx)
 function Base.iterate(it::LeavesIterator{T}, state=nothing) where T
     if state === nothing
-        leaf_nodes = _collect_leaf_nodes(it.tree)
-        isempty(leaf_nodes) && return nothing
-        return (leaf_nodes[1], (leaf_nodes, 2))
+        root_pairs = collect(it.tree.table)
+        isempty(root_pairs) && return nothing
+        return _advance_leaves(root_pairs, 1, 1, 1)
     else
-        leaf_nodes, idx = state
-        if idx > length(leaf_nodes)
-            return nothing
-        end
-        return (leaf_nodes[idx], (leaf_nodes, idx + 1))
+        root_pairs, root_idx, i2_idx, i1_idx = state
+        return _advance_leaves(root_pairs, root_idx, i2_idx, i1_idx)
     end
 end
 
-function _collect_leaf_nodes(tree::Tree{T}) where T
-    leaf_nodes = LeafNode{T}[]
-    for (_, entry) in tree.table
-        if entry isa InternalNode2{T}
-            for (i, _) in enumerate(on_indices(entry.child_mask))
-                child = entry.table[i]::InternalNode1{T}
-                for (j, _) in enumerate(on_indices(child.child_mask))
-                    push!(leaf_nodes, child.table[j]::LeafNode{T})
-                end
-            end
+function _advance_leaves(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
+                         root_idx::Int, i2_idx::Int, i1_idx::Int) where T
+    while root_idx <= length(root_pairs)
+        entry = root_pairs[root_idx].second
+
+        if entry isa Tile{T}
+            root_idx += 1
+            i2_idx = 1
+            i1_idx = 1
+            continue
         end
+
+        node2 = entry::InternalNode2{T}
+        n_i2_children = count_on(node2.child_mask)
+
+        while i2_idx <= n_i2_children
+            node1 = node2.table[i2_idx]::InternalNode1{T}
+            n_i1_children = count_on(node1.child_mask)
+
+            if i1_idx <= n_i1_children
+                leaf = node1.table[i1_idx]::LeafNode{T}
+                return (leaf, (root_pairs, root_idx, i2_idx, i1_idx + 1))
+            end
+
+            i2_idx += 1
+            i1_idx = 1
+        end
+
+        root_idx += 1
+        i2_idx = 1
+        i1_idx = 1
     end
-    leaf_nodes
+
+    nothing
 end

@@ -2,7 +2,7 @@
 
 ## Latest Session (2026-01-04 Session 14) - Performance Fixes
 
-**Status**: Fixed two critical performance issues. VDB lookups now O(1), mask iteration now O(set_bits).
+**Status**: Fixed three critical performance/memory issues.
 
 ### Work Completed
 1. **ly-a62 (closed)**: Fixed O(N) voxel lookup in get_value
@@ -12,31 +12,21 @@
 
 2. **ly-q7m (closed)**: Use CTZ for bit iteration in Masks.jl
    - **Problem**: `on_indices()` checked every bit using shift loop - O(64) per word
-   - **Solution**: Use `trailing_zeros()` (CTZ instruction) to jump directly to set bits - O(1) per set bit
+   - **Solution**: Use `trailing_zeros()` (CTZ instruction) to jump directly to set bits
    - **Files**: `src/Masks.jl`
-   - **Performance**: Now O(set_bits) instead of O(total_bits)
 
-### Algorithms
-**count_on_before** (ly-a62):
-```julia
-# O(1) table lookup using popcount
-child_idx = count_on_before(node.child_mask, target_idx) + 1
-```
-
-**on_indices with CTZ** (ly-q7m):
-```julia
-# O(1) jump to next set bit using trailing_zeros
-tz = trailing_zeros(remaining)
-remaining &= remaining - 1  # Clear lowest set bit
-```
+3. **ly-9ne (closed)**: Refactor active_voxels to lazy iterator
+   - **Problem**: `active_voxels()` and `leaves()` collected ALL elements into Vector on first call
+   - **Solution**: True lazy state machine - O(1) memory per iteration
+   - **Files**: `src/Accessors.jl`
 
 ### Test Results
 - **All tests**: 408 pass (1 broken = pre-existing v220 issue)
-- **Masks tests**: 62/62 pass
 
 ### Commits
 - `9d2ee6a`: perf: Fix O(N) to O(1) voxel lookup using count_on_before
-- (uncommitted) perf: Use CTZ for O(set_bits) mask iteration
+- `0732a7b`: perf: Use CTZ for O(set_bits) mask iteration
+- (uncommitted) perf: Refactor iterators to true lazy traversal
 
 ---
 
