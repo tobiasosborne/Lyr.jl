@@ -50,14 +50,11 @@ export AbstractNode, LeafNode, Tile
 export InternalNode1, InternalNode2, RootNode, Tree
 export GridClass, GRID_LEVEL_SET, GRID_FOG_VOLUME, GRID_STAGGERED, GRID_UNKNOWN
 
-# Exports - Topology
-export LeafTopology, Internal1Topology, Internal2Topology, RootTopology
-export read_leaf_topology, read_internal1_topology, read_internal2_topology, read_root_topology
+# Exports - Topology (child origin computation)
 export child_origin_internal2, child_origin_internal1
 
 # Exports - Values
 export read_leaf_values, read_tile_value
-export materialize_leaf, materialize_internal1, materialize_internal2, materialize_tree
 
 # Exports - Transforms
 export AbstractTransform, LinearTransform, UniformScaleTransform

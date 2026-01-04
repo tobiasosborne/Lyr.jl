@@ -70,7 +70,7 @@
         @testset "BBox contains its corners" begin
             for _ in 1:10
                 min_c = coord(rand(Int16), rand(Int16), rand(Int16))
-                max_c = (min_c[1] + abs(rand(Int16)), min_c[2] + abs(rand(Int16)), min_c[3] + abs(rand(Int16)))
+                max_c = Coord(min_c.x + abs(rand(Int16)), min_c.y + abs(rand(Int16)), min_c.z + abs(rand(Int16)))
                 bb = BBox(min_c, max_c)
 
                 @test Lyr.contains(bb, min_c)

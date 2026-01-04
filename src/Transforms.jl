@@ -39,7 +39,7 @@ end
 Transform index coordinates to world coordinates.
 """
 function index_to_world(t::LinearTransform, ijk::Coord)::NTuple{3, Float64}
-    i, j, k = Float64(ijk[1]), Float64(ijk[2]), Float64(ijk[3])
+    i, j, k = Float64(ijk.x), Float64(ijk.y), Float64(ijk.z)
 
     x = t.mat[1] * i + t.mat[2] * j + t.mat[3] * k + t.trans[1]
     y = t.mat[4] * i + t.mat[5] * j + t.mat[6] * k + t.trans[2]
@@ -54,7 +54,7 @@ end
 Transform index coordinates to world coordinates using uniform scale.
 """
 function index_to_world(t::UniformScaleTransform, ijk::Coord)::NTuple{3, Float64}
-    (Float64(ijk[1]) * t.scale, Float64(ijk[2]) * t.scale, Float64(ijk[3]) * t.scale)
+    (Float64(ijk.x) * t.scale, Float64(ijk.y) * t.scale, Float64(ijk.z) * t.scale)
 end
 
 """

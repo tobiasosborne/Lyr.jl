@@ -8,17 +8,6 @@
 # This module provides combined reading functions that handle this format.
 
 """
-    read_leaf_node(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord) -> Tuple{LeafNode{T}, Int}
-
-Read a complete leaf node (topology mask only - values read later in batch).
-Returns the topology info needed; values are read separately after all leaf masks.
-"""
-function read_leaf_node(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin::Coord)::Tuple{LeafTopology, Int} where T
-    mask, pos = read_mask(LeafMask, bytes, pos)
-    (LeafTopology(origin, mask), pos)
-end
-
-"""
     read_internal_tiles(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T, version::UInt32) -> Tuple{Vector{T}, Int}
 
 Read tile values for an internal node.
