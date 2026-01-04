@@ -1,5 +1,8 @@
 module Lyr
 
+# Exceptions (must be first for other modules to use)
+include("Exceptions.jl")
+
 # Binary primitives
 include("Binary.jl")
 
@@ -84,5 +87,11 @@ export gradient
 
 # Exports - Ray
 export Ray, LeafIntersection, intersect_bbox, intersect_leaves
+
+# Exports - Exceptions
+export LyrError, ParseError, CompressionError
+export InvalidMagicError, UnknownMetadataTypeError, MetadataParseError
+export ChunkSizeMismatchError, CompressionBoundsError, DecompressionSizeError
+export ValueCountError
 
 end # module

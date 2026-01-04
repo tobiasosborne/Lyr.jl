@@ -88,10 +88,10 @@ struct LeafIntersection{T}
 end
 
 """
-    intersect_leaves(ray::Ray, tree::Tree{T})
+    intersect_leaves(ray::Ray, tree::Tree{T}) -> Vector{LeafIntersection{T}}
 
-Return an iterator over all leaves the ray passes through.
-Yields (t_enter, t_exit, leaf) for each intersection, sorted by t_enter.
+Return all leaves the ray passes through, sorted by entry time.
+Each `LeafIntersection{T}` contains `t_enter`, `t_exit`, and `leaf` fields.
 """
 function intersect_leaves(ray::Ray, tree::Tree{T}) where T
     # Collect all leaf intersections

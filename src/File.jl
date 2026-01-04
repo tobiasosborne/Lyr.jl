@@ -79,7 +79,7 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     # Read and verify magic number (4 bytes)
     magic, pos = read_u32_le(bytes, pos)
     if magic != VDB_MAGIC
-        error("Invalid VDB magic number: expected 0x$(string(VDB_MAGIC, base=16)), got 0x$(string(magic, base=16))")
+        throw(InvalidMagicError(UInt64(VDB_MAGIC), UInt64(magic)))
     end
 
     # Skip 4 bytes of padding after magic
@@ -259,7 +259,7 @@ function skip_metadata_value_heuristic(bytes::Vector{UInt8}, pos::Int, type_name
         _, pos = read_f64_le(bytes, pos)
         _, pos = read_f64_le(bytes, pos)
     else
-        error("Unknown metadata type: $type_name")
+        throw(UnknownMetadataTypeError(type_name))
     end
     return pos
 end
@@ -421,7 +421,7 @@ function read_grid_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,A
             end
             
             if best_key_len == 0
-                error("Could not parse grid metadata key at position $key_start")
+                throw(MetadataParseError("Could not parse grid metadata key", key_start))
             end
             
             key = String(bytes[key_start:key_start+best_key_len-1])

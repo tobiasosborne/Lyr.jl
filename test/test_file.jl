@@ -6,7 +6,7 @@
 
     @testset "read_header invalid magic" begin
         bytes = UInt8[0x00, 0x00, 0x00, 0x00]  # Wrong magic
-        @test_throws ErrorException read_header(bytes, 1)
+        @test_throws InvalidMagicError read_header(bytes, 1)
     end
 
     @testset "read_header valid" begin

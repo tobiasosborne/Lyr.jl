@@ -94,11 +94,13 @@ Wrapper for read_dense_values for LeafNodes.
 """
 function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T, version::UInt32)::Tuple{NTuple{512,T}, Int} where T
     if version < 222
-        # v220: Raw active values, no metadata
+        # NOTE: v220 format is not yet fully supported
+        # v220 uses Blosc compression for leaf values, but the format differs from v222
+        # This code path will cause BoundsError on large v220 files like bunny_cloud.vdb
+        # See: https://github.com/tobiasosborne/Lyr.jl/issues (v220 support tracking)
         active_count = count_on(mask)
-        # println("DEBUG: read_leaf_values v220 pos=$pos active_count=$active_count")
         active_values, pos = read_active_values(T, bytes, pos, active_count)
-        
+
         # Scatter
         all_values = Vector{T}(undef, 512)
         active_idx = 1
@@ -117,6 +119,10 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
         (NTuple{512, T}(all_values), pos)
     else
         values, pos = read_dense_values(T, bytes, pos, codec, mask, background)
+        # Validate decompressed values length before NTuple construction
+        if length(values) != 512
+            throw(ValueCountError(512, length(values)))
+        end
         (NTuple{512, T}(values), pos)
     end
 end
