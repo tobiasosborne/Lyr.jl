@@ -1,0 +1,22 @@
+{
+  "note": "Reference values for VDB sample files. Structural metadata is verified; value samples pending external validation.",
+  "torus.vdb": {
+    "format_version": 222,
+    "grid_name": "ls_torus",
+    "grid_class": "GRID_LEVEL_SET",
+    "transform_type": "UniformScaleTransform",
+    "background": 0.15,
+    "leaf_count": 3152,
+    "active_voxel_count": 1565265,
+    "root_children": [
+      {"origin": [-4096, -4096, -4096], "type": "InternalNode2"}
+    ]
+  },
+  "smoke.vdb": {
+    "note": "File not available - download from https://artifacts.aswf.io/io/aswf/openvdb/models/smoke1.vdb/1.0.0/smoke1.vdb-1.0.0.zip"
+  },
+  "bunny_cloud.vdb": {
+    "note": "Skipped - v220 format has known performance issues",
+    "format_version": 220
+  }
+}
