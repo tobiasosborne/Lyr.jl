@@ -1,4 +1,9 @@
 # Accessors.jl - Tree queries and iteration
+#
+# Indexing Convention:
+# - Coordinate offset functions (leaf_offset, internal1_child_index, etc.) return 0-based indices
+# - Bitmask operations (is_on, on_indices, etc.) use 0-based bit positions
+# - Julia arrays are 1-based, so add 1 when accessing: values[offset + 1]
 
 """
     get_value(tree::Tree{T}, c::Coord) -> T
