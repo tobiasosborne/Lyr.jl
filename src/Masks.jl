@@ -117,6 +117,44 @@ Count the number of bits that are off.
 count_off(m::Mask{N,W}) where {N,W} = N - count_on(m)
 
 """
+    count_on_before(m::Mask{N,W}, i::Int) -> Int
+
+Count the number of bits that are on in positions 0 to i-1 (exclusive of i).
+This is O(1) using popcount, enabling O(1) sparse table lookups.
+
+For VDB tree traversal, when bit `i` is set in the child_mask, the table index
+is `count_on_before(child_mask, i)`.
+"""
+function count_on_before(m::Mask{N,W}, i::Int)::Int where {N,W}
+    @boundscheck 0 <= i < N || throw(BoundsError(m, i))
+
+    i == 0 && return 0
+
+    # Which word contains bit i
+    word_idx = i >> 6  # 0-indexed word
+    bit_in_word = i & 63
+
+    count = 0
+
+    # Sum popcount of all complete words before word_idx
+    @inbounds for w in 1:word_idx
+        count += count_ones(m.words[w])
+    end
+
+    # Add popcount of bits 0 to bit_in_word-1 in the target word
+    if bit_in_word > 0
+        @inbounds begin
+            word = m.words[word_idx + 1]  # 1-indexed
+            # Mask to keep only bits 0 through bit_in_word-1
+            mask = (UInt64(1) << bit_in_word) - 1
+            count += count_ones(word & mask)
+        end
+    end
+
+    count
+end
+
+"""
     OnIndicesIterator{N,W}
 
 Iterator over indices of on bits in a mask.

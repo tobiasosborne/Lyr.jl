@@ -1,6 +1,48 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 13) - PropCheck and Test Improvements
+## Latest Session (2026-01-04 Session 14) - Critical O(N) Lookup Fix
+
+**Status**: Fixed critical performance issue ly-a62. VDB lookups now O(1) instead of O(N).
+
+### Work Completed
+1. **ly-a62 (closed)**: Fixed O(N) voxel lookup in get_value
+   - **Problem**: `get_value` and `is_active` in Accessors.jl were iterating through all set bits in child_mask to find the table index - O(N) where N is number of set bits
+   - **Solution**: Added `count_on_before(mask, i)` function using popcount - O(1)
+   - **Files changed**:
+     - `src/Masks.jl`: Added `count_on_before()` - counts set bits before index i using popcount
+     - `src/Lyr.jl`: Exported `count_on_before`
+     - `src/Accessors.jl`: Replaced 4 O(N) loops with O(1) `count_on_before` calls
+     - `test/test_masks.jl`: Added 16 tests for `count_on_before`
+
+### Algorithm
+The fix replaces:
+```julia
+# O(N) - iterates through all set bits
+child_idx = 0
+for idx in on_indices(node.child_mask)
+    child_idx += 1
+    if idx == target_idx
+        break
+    end
+end
+```
+With:
+```julia
+# O(1) - single popcount operation
+child_idx = count_on_before(node.child_mask, target_idx) + 1
+```
+
+### Test Results
+- **Masks tests**: 62/62 pass (16 new for count_on_before)
+- **Accessors tests**: 14/14 pass
+- **Performance**: ~13-60 ns/query regardless of mask density (O(1) confirmed)
+
+### Commits
+- (uncommitted) feat: Fix O(N) to O(1) voxel lookup using count_on_before
+
+---
+
+## Previous Session (2026-01-04 Session 13) - PropCheck and Test Improvements
 
 **Status**: Completed multiple P2 issues. Added Vec3 read_tile_value, comprehensive compression tests, and proper PropCheck property tests. All tests pass.
 

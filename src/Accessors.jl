@@ -26,28 +26,16 @@ function get_value(tree::Tree{T}, c::Coord)::T where T
     if is_off(node2.child_mask, i1_idx)
         # Check if it's a tile
         if is_on(node2.value_mask, i1_idx)
-            # Find the tile in the table
+            # O(1) table lookup using popcount
             tile_offset = count_on(node2.child_mask)
-            tile_idx = 0
-            for idx in on_indices(node2.value_mask)
-                tile_idx += 1
-                if idx == i1_idx
-                    return node2.table[tile_offset + tile_idx].value
-                end
-            end
+            tile_idx = count_on_before(node2.value_mask, i1_idx) + 1
+            return node2.table[tile_offset + tile_idx].value
         end
         return tree.background
     end
 
-    # Find child index in table
-    child_idx = 0
-    for idx in on_indices(node2.child_mask)
-        child_idx += 1
-        if idx == i1_idx
-            break
-        end
-    end
-
+    # O(1) child lookup using popcount
+    child_idx = count_on_before(node2.child_mask, i1_idx) + 1
     node1 = node2.table[child_idx]::InternalNode1{T}
 
     # Navigate to Leaf
@@ -55,27 +43,16 @@ function get_value(tree::Tree{T}, c::Coord)::T where T
 
     if is_off(node1.child_mask, leaf_idx)
         if is_on(node1.value_mask, leaf_idx)
+            # O(1) table lookup using popcount
             tile_offset = count_on(node1.child_mask)
-            tile_idx = 0
-            for idx in on_indices(node1.value_mask)
-                tile_idx += 1
-                if idx == leaf_idx
-                    return node1.table[tile_offset + tile_idx].value
-                end
-            end
+            tile_idx = count_on_before(node1.value_mask, leaf_idx) + 1
+            return node1.table[tile_offset + tile_idx].value
         end
         return tree.background
     end
 
-    # Find child index in table
-    child_idx = 0
-    for idx in on_indices(node1.child_mask)
-        child_idx += 1
-        if idx == leaf_idx
-            break
-        end
-    end
-
+    # O(1) child lookup using popcount
+    child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
     leaf = node1.table[child_idx]::LeafNode{T}
 
     # Get value from leaf
@@ -107,15 +84,8 @@ function is_active(tree::Tree{T}, c::Coord)::Bool where T
         return is_on(node2.value_mask, i1_idx)
     end
 
-    # Find the Internal1 node
-    child_idx = 0
-    for idx in on_indices(node2.child_mask)
-        child_idx += 1
-        if idx == i1_idx
-            break
-        end
-    end
-
+    # O(1) child lookup using popcount
+    child_idx = count_on_before(node2.child_mask, i1_idx) + 1
     node1 = node2.table[child_idx]::InternalNode1{T}
     leaf_idx = internal1_child_index(c)
 
@@ -123,15 +93,8 @@ function is_active(tree::Tree{T}, c::Coord)::Bool where T
         return is_on(node1.value_mask, leaf_idx)
     end
 
-    # Find the leaf
-    child_idx = 0
-    for idx in on_indices(node1.child_mask)
-        child_idx += 1
-        if idx == leaf_idx
-            break
-        end
-    end
-
+    # O(1) child lookup using popcount
+    child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
     leaf = node1.table[child_idx]::LeafNode{T}
     offset = leaf_offset(c)
 

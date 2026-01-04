@@ -34,7 +34,7 @@ export read_bytes, read_cstring, read_string_with_size
 # Exports - Masks
 export Mask, LeafMask, Internal1Mask, Internal2Mask
 export is_on, is_off, is_empty, is_full
-export count_on, count_off
+export count_on, count_off, count_on_before
 export on_indices, off_indices
 export read_mask
 

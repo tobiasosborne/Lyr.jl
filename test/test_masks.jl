@@ -148,6 +148,47 @@
         @test pos == 65
     end
 
+    @testset "count_on_before" begin
+        # Single word mask
+        words = (UInt64(0b1010),)  # bits 1 and 3
+        m = Mask{64,1}(words)
+
+        # Before bit 0: no bits set
+        @test count_on_before(m, 0) == 0
+        # Before bit 1: no bits set (bit 1 is at position 1)
+        @test count_on_before(m, 1) == 0
+        # Before bit 2: bit 1 is set
+        @test count_on_before(m, 2) == 1
+        # Before bit 3: bit 1 is set
+        @test count_on_before(m, 3) == 1
+        # Before bit 4: bits 1 and 3 are set
+        @test count_on_before(m, 4) == 2
+
+        # Multi-word mask: bits at positions 0, 63, 64, 127
+        words = (UInt64(1) | (UInt64(1) << 63), UInt64(1) | (UInt64(1) << 63))
+        m = Mask{128,2}(words)
+
+        @test count_on_before(m, 0) == 0    # Nothing before bit 0
+        @test count_on_before(m, 1) == 1    # Bit 0 is set
+        @test count_on_before(m, 63) == 1   # Only bit 0 before 63
+        @test count_on_before(m, 64) == 2   # Bits 0, 63 before 64
+        @test count_on_before(m, 65) == 3   # Bits 0, 63, 64 before 65
+        @test count_on_before(m, 127) == 3  # Bits 0, 63, 64 before 127
+
+        # Verify consistency: count_on_before(m, i) + 1 == position in on_indices for bit i
+        words = (0b10110001,)  # bits 0, 4, 5, 7
+        m = Mask{64,1}(words)
+        indices = collect(on_indices(m))
+        for (pos, idx) in enumerate(indices)
+            @test count_on_before(m, idx) + 1 == pos
+        end
+
+        # Edge case: first bit in second word
+        words = (UInt64(0), UInt64(1))  # only bit 64 is set
+        m = Mask{128,2}(words)
+        @test count_on_before(m, 64) == 0  # No bits before bit 64
+    end
+
     @testset "Round-trip: read what you write" begin
         # Create a mask with known pattern
         original_words = (0xdeadbeefcafebabe, 0x123456789abcdef0)
