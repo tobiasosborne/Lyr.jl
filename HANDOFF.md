@@ -1,6 +1,55 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 13) - PropCheck and Test Improvements
+## Latest Session (2026-01-04 Session 14) - Julia Profiling Setup
+
+**Status**: Completed profiling infrastructure. Identified hotspots in parse_vdb and get_value. All tests pass.
+
+### Work Completed
+1. **ly-2vi (closed)**: Setup Julia profiling with ProfileView.jl and Profile stdlib
+   - Added Profile and ProfileView to Project.toml dependencies
+   - Created `benchmark/profile.jl` - comprehensive profiling script
+   - Created `benchmark/README.md` - profiling workflow documentation
+   - Identified top 10 allocation sites and CPU hotspots
+
+### Profiling Results
+
+**parse_vdb hotspots** (torus.vdb, 5.3MB):
+| Location | Function | % Time | Issue |
+|----------|----------|--------|-------|
+| boot.jl:588 | GenericMemory | ~46% | Array allocation |
+| TreeRead.jl:198 | materialize_i2_values_v222 | ~55% | Main parsing loop |
+| Masks.jl:202 | read_mask(LeafMask) | ~10% | Mask array creation |
+| array.jl | push!/\_growend! | ~12% | Dynamic array growth |
+
+**get_value hotspots**:
+| Location | Function | % Time | Issue |
+|----------|----------|--------|-------|
+| Masks.jl:140-148 | on_indices iteration | ~50% | Linear scan for index |
+| int.jl | == comparisons | ~20% | Type promotion overhead |
+
+**Memory Analysis**:
+- parse_vdb: ~250ms, 100MB allocations (18x file size), 60% GC time
+- get_value: 0 allocations per query (excellent)
+
+### Optimization Targets
+1. Pre-allocate arrays where size is known
+2. Use `@inbounds` for hot loops with verified bounds
+3. Consider `SVector` for fixed-size leaf values
+4. Replace `on_indices` iteration with `count_on` + direct indexing
+
+### Files Changed
+- `Project.toml` - Added Profile and ProfileView dependencies
+- `benchmark/profile.jl` - New profiling script
+- `benchmark/README.md` - New documentation
+
+### Next Steps
+1. Implement optimizations based on hotspot analysis
+2. Pre-allocate leaf value arrays
+3. Optimize mask iteration in get_value
+
+---
+
+## Previous Session (2026-01-04 Session 13) - PropCheck and Test Improvements
 
 **Status**: Completed multiple P2 issues. Added Vec3 read_tile_value, comprehensive compression tests, and proper PropCheck property tests. All tests pass.
 
