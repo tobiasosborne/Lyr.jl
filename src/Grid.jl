@@ -38,22 +38,29 @@ struct Grid{T}
 end
 
 """
-    read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass, version::UInt32) -> Tuple{Grid{T}, Int}
+    read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass, version::UInt32, grid_start_pos::Int, block_offset::Int64) -> Tuple{Grid{T}, Int}
 
 Parse a complete grid from bytes.
 
-VDB files interleave topology and values at the subtree level. For each Internal2
-subtree, all topology comes first (masks), then all values (tiles + compressed leaves).
+For VDB v222+, topology and values are stored in separate sections:
+- Topology section: from grid start to grid_start + block_offset
+- Values section: from grid_start + block_offset onwards
+
+For older versions, topology and values are interleaved per-subtree.
 """
-function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass, version::UInt32)::Tuple{Grid{T}, Int} where T
+function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, name::String, grid_class::GridClass, version::UInt32, grid_start_pos::Int, block_offset::Int64)::Tuple{Grid{T}, Int} where T
     # Read transform
     transform, pos = read_transform(bytes, pos)
 
     # Read background value
     background, pos = read_tile_value(T, bytes, pos)
 
-    # Read tree with interleaved topology + values
-    tree, pos = read_tree(T, bytes, pos, codec, background, grid_class, version)
+    # Calculate values section start position for v222+
+    # In Julia 1-indexed: values_start = grid_start_pos + block_offset
+    values_start = grid_start_pos + Int(block_offset)
+
+    # Read tree
+    tree, pos = read_tree(T, bytes, pos, codec, background, grid_class, version, values_start)
 
     grid = Grid{T}(name, grid_class, transform, tree)
     (grid, pos)
