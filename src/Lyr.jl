@@ -18,6 +18,11 @@ include("Values.jl")
 include("Transforms.jl")
 include("TreeRead.jl")
 include("Grid.jl")
+
+# File parsing (modular)
+include("Header.jl")
+include("Metadata.jl")
+include("GridDescriptor.jl")
 include("File.jl")
 
 # Queries and utilities
