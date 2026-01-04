@@ -13,6 +13,30 @@
         @test pos == 9
     end
 
+    @testset "read_tile_value Vec3f (NTuple{3,Float32})" begin
+        # Vec3f: (1.0, 2.0, 3.0) as little-endian Float32s
+        bytes = UInt8[
+            0x00, 0x00, 0x80, 0x3f,  # 1.0f0
+            0x00, 0x00, 0x00, 0x40,  # 2.0f0
+            0x00, 0x00, 0x40, 0x40   # 3.0f0
+        ]
+        val, pos = read_tile_value(NTuple{3, Float32}, bytes, 1)
+        @test val == (1.0f0, 2.0f0, 3.0f0)
+        @test pos == 13
+    end
+
+    @testset "read_tile_value Vec3d (NTuple{3,Float64})" begin
+        # Vec3d: (1.0, 2.0, 3.0) as little-endian Float64s
+        bytes = UInt8[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f,  # 1.0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,  # 2.0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x40   # 3.0
+        ]
+        val, pos = read_tile_value(NTuple{3, Float64}, bytes, 1)
+        @test val == (1.0, 2.0, 3.0)
+        @test pos == 25
+    end
+
     @testset "materialize_leaf" begin
         topo = LeafTopology(
             coord(0, 0, 0),

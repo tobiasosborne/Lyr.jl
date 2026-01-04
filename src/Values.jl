@@ -147,6 +147,21 @@ function read_tile_value(::Type{Float64}, bytes::Vector{UInt8}, pos::Int)::Tuple
     read_f64_le(bytes, pos)
 end
 
+# Vec3 specializations (VDB stores vectors as 3 consecutive floats)
+function read_tile_value(::Type{NTuple{3, Float32}}, bytes::Vector{UInt8}, pos::Int)::Tuple{NTuple{3, Float32}, Int}
+    x, pos = read_f32_le(bytes, pos)
+    y, pos = read_f32_le(bytes, pos)
+    z, pos = read_f32_le(bytes, pos)
+    ((x, y, z), pos)
+end
+
+function read_tile_value(::Type{NTuple{3, Float64}}, bytes::Vector{UInt8}, pos::Int)::Tuple{NTuple{3, Float64}, Int}
+    x, pos = read_f64_le(bytes, pos)
+    y, pos = read_f64_le(bytes, pos)
+    z, pos = read_f64_le(bytes, pos)
+    ((x, y, z), pos)
+end
+
 """
     read_active_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, count::Int) -> Tuple{Vector{T}, Int}
 
