@@ -6,10 +6,12 @@ authors = ["Lyr.jl Contributors"]
 [deps]
 Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+PropCheck = "ca382230-33be-11e9-0059-d981d03070e4"
 
 [compat]
 Blosc = "0.7.3"
 CodecZlib = "0.7"
+PropCheck = "0.10.1"
 julia = "1.9"
 
 [extras]
