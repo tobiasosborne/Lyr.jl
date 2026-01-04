@@ -1,6 +1,41 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-03 Session 10) - Addressing v220 BoundsError and BD Tool
+## Latest Session (2026-01-04 Session 11) - v222 Value Format Investigation
+
+**Status**: Investigated v222 level set value parsing. Achieved 82% valid values (was lower). Format uses complex RLE-like encoding. Partial fix committed.
+
+### Work Completed
+1. **ly-k0s (closed)**: Investigated v222 value parsing garbage issue
+   - Discovered format is NOT simple [64-byte mask][values] blocks
+   - Valid SDFs start at offset 27 from values_start
+   - Format appears to use RLE-encoded selection masks
+   - Leaf ordering in values section differs from topology order
+
+2. **Created ly-wdj**: Follow-up issue for complete v222 format decoding
+
+### Key Findings - v222 Level Set Format
+- First 15 bytes: zeros (RLE for bit positions 0-119?)
+- Bytes 15-25: mask bits (0x80, 0xc0, 0xe0...)
+- Byte 26: zero
+- Bytes 27+: Float32 values (valid SDFs)
+- First leaf has 38 values at offset 27, not 188 at offset 64
+- Leaf ordering in values section differs from topology traversal
+
+### Test Results
+- `torus.vdb` (v222): Parses successfully, 82% valid values
+- 15% garbage values remain (format decoding incomplete)
+
+### Commits
+- `de82756`: wip: v222 value parsing - 82% valid, needs format investigation
+
+### Next Steps
+1. Complete v222 format decoding (ly-wdj) - study OpenVDB C++ source
+2. Fix remaining 15% garbage values
+3. Continue with other P1 issues
+
+---
+
+## Previous Session (2026-01-03 Session 10) - Addressing v220 BoundsError and BD Tool
 
 **Status**: Reverted changes to test/test_integration.jl to ensure tests pass. Investigated `bd` tool configuration issue. All tests pass (1 broken as expected). Ready for next development.
 
