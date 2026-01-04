@@ -1,5 +1,6 @@
 using Test
 using Lyr
+using InteractiveUtils
 
 @testset "Lyr.jl" begin
     include("test_binary.jl")
@@ -17,4 +18,5 @@ using Lyr
     include("test_ray.jl")
     include("test_integration.jl")
     include("test_properties.jl")
+    include("test_type_stability.jl")
 end
