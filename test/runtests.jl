@@ -19,4 +19,5 @@ using InteractiveUtils
     include("test_integration.jl")
     include("test_properties.jl")
     include("test_type_stability.jl")
+    include("test_jet.jl")
 end
