@@ -1,6 +1,47 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 12) - P1 Issues and Exception Handling
+## Latest Session (2026-01-04 Session 13) - PropCheck and Test Improvements
+
+**Status**: Completed multiple P2 issues. Added Vec3 read_tile_value, comprehensive compression tests, and proper PropCheck property tests. All tests pass.
+
+### Work Completed
+1. **ly-2tt (closed)**: Added Vec3 read_tile_value specializations
+   - Added `read_tile_value(NTuple{3, Float32}, ...)` and `NTuple{3, Float64}` in Values.jl
+   - VDB stores vectors as 3 consecutive floats
+   - Added 4 tests in test_values.jl
+
+2. **ly-jzt (closed)**: Added comprehensive tests for read_compressed_bytes
+   - Tests for Blosc-compressed data with positive chunk_size
+   - Tests for Zlib-compressed data
+   - Error handling tests: ChunkSizeMismatchError, DecompressionSizeError, CompressionBoundsError
+   - Position handling tests for reading from middle of byte array
+
+3. **ly-f15 (closed)**: Converted property tests to use PropCheck
+   - Replaced Random.seed() + manual loops with PropCheck generators
+   - Uses `itype()` for primitive type generation
+   - Uses `interleave()` for multi-value generation
+   - Custom `coord_gen()` and `small_coord_gen()` generators
+   - Fixed edge cases: subnormal floats, proper Coord type usage
+   - Proper shrinking enabled for all properties
+
+### Test Results
+- **Total tests**: 381
+- **Passing**: 381
+- **Broken**: 1 (v220 integration test - known limitation)
+
+### Commits
+- `3a7f897`: feat: Add read_tile_value specializations for Vec3 types
+- `c56dd32`: test: Add comprehensive tests for read_compressed_bytes
+- `6942552`: test: Convert property tests to use PropCheck with generators and shrinking
+
+### Next Steps
+1. Continue with remaining P2 issues from `bd ready`
+2. Study OpenVDB C++ source for v220 leaf value format
+3. Consider creating dedicated v220 format issue
+
+---
+
+## Previous Session (2026-01-04 Session 12) - P1 Issues and Exception Handling
 
 **Status**: Fixed 5 P1 issues. Added typed exception hierarchy. Investigated v220 format (complex, not yet fully supported). All tests pass.
 
