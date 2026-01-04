@@ -83,8 +83,27 @@ end
 """
     leaf_offset(c::Coord) -> Int
 
-Compute the linear offset (0-511) of a coordinate within its leaf node.
-Uses Morton/Z-order: offset = x + 8*y + 64*z (for coordinates within leaf).
+Compute the linear offset of a coordinate within its leaf node.
+
+# Returns
+- `Int` in range 0-511 (**0-indexed**).
+
+# Indexing Convention
+This function returns a **0-based index** for compatibility with bitmask operations
+(`is_on`, `on_indices`, etc.) which use 0-indexed bit positions. For Julia array
+access, add 1: `values[leaf_offset(c) + 1]`.
+
+# Algorithm
+Uses linear indexing: `offset = x + 8*y + 64*z` where x, y, z are the local
+coordinates within the leaf (each 0-7).
+
+# Example
+```julia
+c = Coord(5, 10, 3)
+offset = leaf_offset(c)  # 0-based index
+value = leaf.values[offset + 1]  # Julia 1-based array access
+is_active = is_on(leaf.value_mask, offset)  # Mask uses 0-based indexing
+```
 """
 function leaf_offset(c::Coord)::Int
     # Get local coordinates within the leaf (0-7 each)
@@ -97,7 +116,14 @@ end
 """
     internal1_child_index(c::Coord) -> Int
 
-Compute the child index (0-4095) for a coordinate within an Internal1 node.
+Compute the child index for a coordinate within an Internal1 node.
+
+# Returns
+- `Int` in range 0-4095 (**0-indexed**).
+
+# Indexing Convention
+Returns a **0-based index** for compatibility with bitmask operations.
+For table access, use with `on_indices` iteration pattern (see Accessors.jl).
 """
 function internal1_child_index(c::Coord)::Int
     # Get coordinates relative to Internal1 origin, then extract Internal1 part
@@ -114,7 +140,14 @@ end
 """
     internal2_child_index(c::Coord) -> Int
 
-Compute the child index (0-32767) for a coordinate within an Internal2 node.
+Compute the child index for a coordinate within an Internal2 node.
+
+# Returns
+- `Int` in range 0-32767 (**0-indexed**).
+
+# Indexing Convention
+Returns a **0-based index** for compatibility with bitmask operations.
+For table access, use with `on_indices` iteration pattern (see Accessors.jl).
 """
 function internal2_child_index(c::Coord)::Int
     # Get coordinates relative to Internal2 origin, then extract Internal2 part
