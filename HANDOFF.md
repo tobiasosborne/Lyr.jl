@@ -1,6 +1,58 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 11) - v222 Value Format Investigation
+## Latest Session (2026-01-04 Session 12) - P1 Issues and Exception Handling
+
+**Status**: Fixed 5 P1 issues. Added typed exception hierarchy. Investigated v220 format (complex, not yet fully supported). All tests pass.
+
+### Work Completed
+1. **ly-7bh (closed)**: Fixed code duplication in materialize functions
+   - Created `_read_internal_tiles!` helper in Values.jl
+   - Created `_count_active_tiles` helper in Accessors.jl
+   - Added constants `INTERNAL2_TILE_VOXELS`, `INTERNAL1_TILE_VOXELS`
+
+2. **ly-mig (closed)**: Added validation after decompression
+   - Added length check in `read_leaf_values` before NTuple construction
+   - Throws `ValueCountError` if length != 512
+
+3. **ly-d0j (closed)**: Fixed Ray.jl docstring
+   - `intersect_leaves` now correctly documented as returning `Vector{LeafIntersection{T}}`
+
+4. **ly-2dh (closed)**: Added typed exceptions
+   - Created `src/Exceptions.jl` with exception hierarchy
+   - `LyrError` (base) → `ParseError`, `CompressionError` subtypes
+   - Specific errors: `InvalidMagicError`, `UnknownMetadataTypeError`, etc.
+   - Replaced all `error()` calls with typed exceptions
+
+5. **ly-t0q (closed)**: Investigated v220 BoundsError
+   - v220 leaf values use Blosc compression with i64 size prefix
+   - Blosc.decompress returns 0 bytes for the data
+   - Format differs significantly from v222
+   - Added code comments documenting the limitation
+   - bunny_cloud.vdb remains skipped
+
+### Test Results
+- **Total tests**: 1498
+- **Passing**: 1498
+- **Broken**: 1 (v220 integration test - known limitation)
+
+### Commits
+- `5d5fff0`: Add typed exceptions and fix various P1 issues
+
+### Key Findings - v220 Format
+- Leaf values at position 83849 start with 8-byte chunk_size (128)
+- Data is 128 bytes of mostly zeros (46 non-zero bytes)
+- Blosc decompression returns 0 bytes (invalid/empty)
+- Zlib fails with "unknown compression method"
+- Format needs OpenVDB C++ source investigation
+
+### Next Steps
+1. Study OpenVDB C++ source for v220 leaf value format
+2. Continue with remaining P1 issues (ly-knz, ly-1ni)
+3. Consider creating dedicated v220 format issue
+
+---
+
+## Previous Session (2026-01-04 Session 11) - v222 Value Format Investigation
 
 **Status**: Investigated v222 level set value parsing. Achieved 82% valid values (was lower). Format uses complex RLE-like encoding. Partial fix committed.
 
