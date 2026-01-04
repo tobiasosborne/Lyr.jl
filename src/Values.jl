@@ -180,6 +180,29 @@ function materialize_leaf(::Type{T}, topo::LeafTopology, values::NTuple{512,T}):
     LeafNode{T}(topo.origin, topo.value_mask, values)
 end
 
+# =============================================================================
+# Generic internal node materialization pattern
+# =============================================================================
+
+"""
+    _read_internal_tiles!(::Type{T}, table::Vector, bytes::Vector{UInt8}, pos::Int,
+                          value_mask, child_count::Int) -> Int
+
+Read tile values for an internal node, storing them after children in the table.
+Returns the new file position.
+"""
+function _read_internal_tiles!(::Type{T}, table::Vector, bytes::Vector{UInt8}, pos::Int,
+                               value_mask, child_count::Int)::Int where T
+    tile_idx = 1
+    for _ in on_indices(value_mask)
+        value, pos = read_tile_value(T, bytes, pos)
+        active_byte, pos = read_u8(bytes, pos)
+        table[child_count + tile_idx] = Tile{T}(value, active_byte != 0)
+        tile_idx += 1
+    end
+    pos
+end
+
 """
     materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32) -> Tuple{InternalNode1{T}, Int}
 
@@ -188,19 +211,12 @@ Create an InternalNode1 from topology, reading values from bytes.
 function materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode1{T}, Int} where T
     child_count = count_on(topo.child_mask)
     tile_count = count_on(topo.value_mask)
-
     table = Vector{Union{LeafNode{T}, Tile{T}}}(undef, child_count + tile_count)
 
-    # Read tile values first
-    tile_idx = 1
-    for _ in on_indices(topo.value_mask)
-        value, pos = read_tile_value(T, bytes, pos)
-        active_byte, pos = read_u8(bytes, pos)
-        table[child_count + tile_idx] = Tile{T}(value, active_byte != 0)
-        tile_idx += 1
-    end
+    # Read tiles
+    pos = _read_internal_tiles!(T, table, bytes, pos, topo.value_mask, child_count)
 
-    # Materialize children
+    # Materialize leaf children
     for (i, child_topo) in enumerate(topo.children)
         if child_topo !== nothing
             values, pos = read_leaf_values(T, bytes, pos, codec, child_topo.value_mask, background, version)
@@ -208,8 +224,7 @@ function materialize_internal1(::Type{T}, topo::Internal1Topology, bytes::Vector
         end
     end
 
-    node = InternalNode1{T}(topo.origin, topo.child_mask, topo.value_mask, table)
-    (node, pos)
+    (InternalNode1{T}(topo.origin, topo.child_mask, topo.value_mask, table), pos)
 end
 
 """
@@ -220,28 +235,19 @@ Create an InternalNode2 from topology, reading values from bytes.
 function materialize_internal2(::Type{T}, topo::Internal2Topology, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
     child_count = count_on(topo.child_mask)
     tile_count = count_on(topo.value_mask)
-
     table = Vector{Union{InternalNode1{T}, Tile{T}}}(undef, child_count + tile_count)
 
-    # Read tile values first
-    tile_idx = 1
-    for _ in on_indices(topo.value_mask)
-        value, pos = read_tile_value(T, bytes, pos)
-        active_byte, pos = read_u8(bytes, pos)
-        table[child_count + tile_idx] = Tile{T}(value, active_byte != 0)
-        tile_idx += 1
-    end
+    # Read tiles
+    pos = _read_internal_tiles!(T, table, bytes, pos, topo.value_mask, child_count)
 
-    # Materialize children
+    # Materialize Internal1 children
     for (i, child_topo) in enumerate(topo.children)
         if child_topo !== nothing
-            child, pos = materialize_internal1(T, child_topo, bytes, pos, codec, background, version)
-            table[i] = child
+            table[i], pos = materialize_internal1(T, child_topo, bytes, pos, codec, background, version)
         end
     end
 
-    node = InternalNode2{T}(topo.origin, topo.child_mask, topo.value_mask, table)
-    (node, pos)
+    (InternalNode2{T}(topo.origin, topo.child_mask, topo.value_mask, table), pos)
 end
 
 """

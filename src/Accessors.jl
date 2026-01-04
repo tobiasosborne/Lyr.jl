@@ -161,45 +161,40 @@ function active_voxel_count(tree::Tree{T})::Int where T
     count
 end
 
-function _count_active_internal2(node::InternalNode2{T})::Int where T
-    count = 0
+# Tile region sizes for counting active voxels
+const INTERNAL2_TILE_VOXELS = 128^3   # Full Internal1 region
+const INTERNAL1_TILE_VOXELS = 8^3     # Full leaf region
 
-    # Count active tiles
+"""
+    _count_active_tiles(node, tile_voxels::Int) -> Int
+
+Count active voxels in an internal node's tiles.
+"""
+function _count_active_tiles(node, tile_voxels::Int)::Int
+    count = 0
     tile_offset = count_on(node.child_mask)
     for (i, _) in enumerate(on_indices(node.value_mask))
         tile = node.table[tile_offset + i]
         if tile.active
-            count += 128^3  # Full Internal1 region
+            count += tile_voxels
         end
     end
+    count
+end
 
-    # Count children
+function _count_active_internal2(node::InternalNode2{T})::Int where T
+    count = _count_active_tiles(node, INTERNAL2_TILE_VOXELS)
     for (i, _) in enumerate(on_indices(node.child_mask))
-        child = node.table[i]::InternalNode1{T}
-        count += _count_active_internal1(child)
+        count += _count_active_internal1(node.table[i]::InternalNode1{T})
     end
-
     count
 end
 
 function _count_active_internal1(node::InternalNode1{T})::Int where T
-    count = 0
-
-    # Count active tiles
-    tile_offset = count_on(node.child_mask)
-    for (i, _) in enumerate(on_indices(node.value_mask))
-        tile = node.table[tile_offset + i]
-        if tile.active
-            count += 8^3  # Full leaf region
-        end
-    end
-
-    # Count leaves
+    count = _count_active_tiles(node, INTERNAL1_TILE_VOXELS)
     for (i, _) in enumerate(on_indices(node.child_mask))
-        leaf = node.table[i]::LeafNode{T}
-        count += count_on(leaf.value_mask)
+        count += count_on((node.table[i]::LeafNode{T}).value_mask)
     end
-
     count
 end
 
