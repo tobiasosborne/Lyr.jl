@@ -98,10 +98,15 @@ end
     read_bytes(bytes::Vector{UInt8}, pos::Int, n::Int) -> Tuple{Vector{UInt8}, Int}
 
 Read `n` bytes starting at position `pos`.
+Uses unsafe_wrap to avoid copying data - the returned vector shares memory with `bytes`.
+SAFETY: The returned vector is only valid while `bytes` is not garbage collected.
+Callers that need an independent copy should use `copy(result)`.
 """
 function read_bytes(bytes::Vector{UInt8}, pos::Int, n::Int)::Tuple{Vector{UInt8}, Int}
     @boundscheck checkbounds(bytes, pos:pos+n-1)
-    @inbounds val = bytes[pos:pos+n-1]
+    GC.@preserve bytes begin
+        val = unsafe_wrap(Vector{UInt8}, pointer(bytes, pos), n)
+    end
     (val, pos + n)
 end
 
@@ -110,16 +115,18 @@ end
 
 Read a null-terminated C string starting at position `pos`.
 Returns the string (without null terminator) and position after the null byte.
+Uses unsafe_string to avoid intermediate array allocation.
 """
 function read_cstring(bytes::Vector{UInt8}, pos::Int)::Tuple{String, Int}
     start = pos
-    while pos <= length(bytes) && bytes[pos] != 0x00
+    @inbounds while pos <= length(bytes) && bytes[pos] != 0x00
         pos += 1
     end
     if pos > length(bytes)
         throw(BoundsError(bytes, pos))
     end
-    str = String(bytes[start:pos-1])
+    len = pos - start
+    str = GC.@preserve bytes unsafe_string(pointer(bytes, start), len)
     (str, pos + 1)  # Skip the null terminator
 end
 
@@ -127,13 +134,15 @@ end
     read_string_with_size(bytes::Vector{UInt8}, pos::Int) -> Tuple{String, Int}
 
 Read a size-prefixed string. The size is a 32-bit little-endian integer.
+Uses unsafe_string to avoid intermediate array allocation.
 """
 function read_string_with_size(bytes::Vector{UInt8}, pos::Int)::Tuple{String, Int}
     size, pos = read_u32_le(bytes, pos)
     if size == 0
         return ("", pos)
     end
-    @boundscheck checkbounds(bytes, pos:pos+Int(size)-1)
-    @inbounds str = String(bytes[pos:pos+Int(size)-1])
-    (str, pos + Int(size))
+    len = Int(size)
+    @boundscheck checkbounds(bytes, pos:pos+len-1)
+    str = GC.@preserve bytes unsafe_string(pointer(bytes, pos), len)
+    (str, pos + len)
 end

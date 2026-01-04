@@ -122,12 +122,15 @@ end
 """
     read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int) -> Tuple{T, Int}
 
-Read a single tile value.
+Read a single tile value using direct pointer load (zero-copy).
 """
 function read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{T, Int} where T
-    data, pos = read_bytes(bytes, pos, sizeof(T))
-    value = reinterpret(T, data)[1]
-    (value, pos)
+    n = sizeof(T)
+    @boundscheck checkbounds(bytes, pos:pos+n-1)
+    GC.@preserve bytes begin
+        @inbounds val = unsafe_load(Ptr{T}(pointer(bytes, pos)))
+    end
+    (ltoh(val), pos + n)
 end
 
 # Specializations for common types

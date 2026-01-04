@@ -1,8 +1,8 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 14) - Julia Profiling Setup
+## Latest Session (2026-01-04 Session 14) - Profiling & Binary.jl Optimization
 
-**Status**: Completed profiling infrastructure. Identified hotspots in parse_vdb and get_value. All tests pass.
+**Status**: Completed profiling infrastructure and Binary.jl allocation optimizations. All tests pass.
 
 ### Work Completed
 1. **ly-2vi (closed)**: Setup Julia profiling with ProfileView.jl and Profile stdlib
@@ -10,6 +10,13 @@
    - Created `benchmark/profile.jl` - comprehensive profiling script
    - Created `benchmark/README.md` - profiling workflow documentation
    - Identified top 10 allocation sites and CPU hotspots
+
+2. **ly-oxt (closed)**: Remove allocation spam in Binary.jl
+   - `read_bytes`: Now uses `unsafe_wrap` for zero-copy byte slicing
+   - `read_cstring`: Uses `unsafe_string` (1 allocation vs 2)
+   - `read_string_with_size`: Uses `unsafe_string` (1 allocation vs 2)
+   - `read_tile_value`: Uses direct pointer load instead of read_bytes+reinterpret
+   - All functions use `GC.@preserve` for memory safety
 
 ### Profiling Results
 
@@ -42,10 +49,14 @@
 - `benchmark/profile.jl` - New profiling script
 - `benchmark/README.md` - New documentation
 
+### Commits
+- `54bf7a9`: feat: Add Julia profiling infrastructure with ProfileView.jl
+- `e46ca1b`: perf: Remove allocation spam in Binary.jl
+
 ### Next Steps
-1. Implement optimizations based on hotspot analysis
-2. Pre-allocate leaf value arrays
-3. Optimize mask iteration in get_value
+1. Pre-allocate leaf value arrays in TreeRead.jl
+2. Optimize mask iteration in get_value (note: nux already fixed via ly-a62, ly-q7m)
+3. Reduce dynamic array growth in tree building
 
 ---
 
