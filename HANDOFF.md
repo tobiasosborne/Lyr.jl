@@ -1,10 +1,10 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 14) - Performance Fixes
+## Latest Session (2026-01-04 Session 14) - Performance Optimization Sprint
 
-**Status**: Fixed three critical performance/memory issues.
+**Status**: Completed 5 performance issues in parallel. Major improvements to lookup speed and memory usage.
 
-### Work Completed
+### Work Completed (nux)
 1. **ly-a62 (closed)**: Fixed O(N) voxel lookup in get_value
    - **Problem**: `get_value` and `is_active` iterated through set bits to find table index
    - **Solution**: Added `count_on_before(mask, i)` using popcount - O(1)
@@ -20,13 +20,46 @@
    - **Solution**: True lazy state machine - O(1) memory per iteration
    - **Files**: `src/Accessors.jl`
 
+### Work Completed (furiosa)
+4. **ly-2vi (closed)**: Setup Julia profiling with ProfileView.jl and Profile stdlib
+   - Added Profile and ProfileView to Project.toml dependencies
+   - Created `benchmark/profile.jl` - comprehensive profiling script
+   - Created `benchmark/README.md` - profiling workflow documentation
+   - Identified top 10 allocation sites and CPU hotspots
+
+5. **ly-oxt (closed)**: Remove allocation spam in Binary.jl
+   - `read_bytes`: Now uses `unsafe_wrap` for zero-copy byte slicing
+   - `read_cstring`: Uses `unsafe_string` (1 allocation vs 2)
+   - `read_string_with_size`: Uses `unsafe_string` (1 allocation vs 2)
+   - `read_tile_value`: Uses direct pointer load instead of read_bytes+reinterpret
+   - All functions use `GC.@preserve` for memory safety
+
+### Profiling Results
+
+**parse_vdb hotspots** (torus.vdb, 5.3MB):
+| Location | Function | % Time | Issue |
+|----------|----------|--------|-------|
+| boot.jl:588 | GenericMemory | ~46% | Array allocation |
+| TreeRead.jl:198 | materialize_i2_values_v222 | ~55% | Main parsing loop |
+| Masks.jl:202 | read_mask(LeafMask) | ~10% | Mask array creation |
+| array.jl | push!/\_growend! | ~12% | Dynamic array growth |
+
+**get_value**: 0 allocations per query, ~12.6ns regardless of mask density (O(1))
+
 ### Test Results
 - **All tests**: 408 pass (1 broken = pre-existing v220 issue)
 
 ### Commits
 - `9d2ee6a`: perf: Fix O(N) to O(1) voxel lookup using count_on_before
 - `0732a7b`: perf: Use CTZ for O(set_bits) mask iteration
-- (uncommitted) perf: Refactor iterators to true lazy traversal
+- `ef09044`: perf: Refactor iterators to true lazy traversal
+- `54bf7a9`: feat: Add Julia profiling infrastructure with ProfileView.jl
+- `3143ea4`: perf: Remove allocation spam in Binary.jl
+
+### Next Steps
+1. Pre-allocate leaf value arrays in TreeRead.jl
+2. Reduce dynamic array growth in tree building
+3. Consider `SVector` for fixed-size leaf values
 
 ---
 
