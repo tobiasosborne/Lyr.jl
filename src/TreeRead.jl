@@ -179,41 +179,24 @@ end
 
 Materialize values for an I2 subtree from the values section (v222+ format).
 
-V222+ level set format:
-- Position is already at values_start
-- First, align to 16-byte boundary
-- Then: selection masks for ALL leaves (64 bytes each)
-- Then: raw Float32 values for selected voxels (no compression)
-- I1/I2 tiles use background value (not stored)
+V222+ level set format per-leaf:
+1. Selection mask (64 bytes) - indicates which voxels have stored values
+2. Raw Float32 values for selected voxels (no compression, no metadata)
+3. Non-selected voxels use background value
 """
 function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
-    # Align to 16-byte boundary
-    pos = align_to_16(pos)
-
-    # Count total leaves to read selection masks
-    total_leaves = sum(length(i1.leaves) for i1 in i2_topo.children; init=0)
-
-    # Read ALL selection masks upfront
-    selection_masks = Vector{LeafMask}()
-    for i1_topo in i2_topo.children
-        for _ in i1_topo.leaves
-            mask, pos = read_mask(LeafMask, bytes, pos)
-            push!(selection_masks, mask)
-        end
-    end
-
-    # Now read raw Float32 values for each leaf
+    # V222+ level set format: interleaved [64-byte selection mask][raw values] per leaf
     i1_nodes = Vector{InternalNode1{T}}()
-    leaf_idx = 1
 
     for i1_topo in i2_topo.children
         leaf_nodes = Vector{LeafNode{T}}()
 
         for leaf_topo in i1_topo.leaves
-            selection_mask = selection_masks[leaf_idx]
+            # Read 64-byte selection mask inline
+            selection_mask, pos = read_mask(LeafMask, bytes, pos)
+            # Read raw values for selected voxels
             values, pos = read_leaf_values_v222_raw(T, bytes, pos, selection_mask, background)
             push!(leaf_nodes, LeafNode{T}(leaf_topo.origin, leaf_topo.value_mask, values))
-            leaf_idx += 1
         end
 
         # Construct I1 node - tiles use background value for level sets
@@ -339,19 +322,18 @@ function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec,
         origin = coord(x, y, z)
         push!(i2_origins, origin)
 
-        # Read I2 topology (masks only)
+        # Read I2 topology (masks only, no selection masks)
         i2_topo, pos = read_i2_topology_v222(bytes, pos, origin)
-
-        # Read selection masks for all leaves in this I2
-        i2_topo, pos = read_selection_masks_v222!(i2_topo, bytes, pos)
 
         push!(i2_topos, i2_topo)
     end
 
-    # Phase 2: Seek to values section and read all values
+    # Phase 2: Seek to values section and read selection masks + values
+    # Format is interleaved: [mask][values][mask][values] per leaf
     pos = values_start
 
     for (origin, i2_topo) in zip(i2_origins, i2_topos)
+        # materialize_i2_values_v222 reads selection masks inline with values
         node, pos = materialize_i2_values_v222(T, i2_topo, bytes, pos, codec, background, version)
         table[origin] = node
     end
