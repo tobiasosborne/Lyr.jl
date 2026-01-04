@@ -1,44 +1,42 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 14) - Critical O(N) Lookup Fix
+## Latest Session (2026-01-04 Session 14) - Performance Fixes
 
-**Status**: Fixed critical performance issue ly-a62. VDB lookups now O(1) instead of O(N).
+**Status**: Fixed two critical performance issues. VDB lookups now O(1), mask iteration now O(set_bits).
 
 ### Work Completed
 1. **ly-a62 (closed)**: Fixed O(N) voxel lookup in get_value
-   - **Problem**: `get_value` and `is_active` in Accessors.jl were iterating through all set bits in child_mask to find the table index - O(N) where N is number of set bits
-   - **Solution**: Added `count_on_before(mask, i)` function using popcount - O(1)
-   - **Files changed**:
-     - `src/Masks.jl`: Added `count_on_before()` - counts set bits before index i using popcount
-     - `src/Lyr.jl`: Exported `count_on_before`
-     - `src/Accessors.jl`: Replaced 4 O(N) loops with O(1) `count_on_before` calls
-     - `test/test_masks.jl`: Added 16 tests for `count_on_before`
+   - **Problem**: `get_value` and `is_active` iterated through set bits to find table index
+   - **Solution**: Added `count_on_before(mask, i)` using popcount - O(1)
+   - **Files**: `src/Masks.jl`, `src/Accessors.jl`, `test/test_masks.jl`
 
-### Algorithm
-The fix replaces:
+2. **ly-q7m (closed)**: Use CTZ for bit iteration in Masks.jl
+   - **Problem**: `on_indices()` checked every bit using shift loop - O(64) per word
+   - **Solution**: Use `trailing_zeros()` (CTZ instruction) to jump directly to set bits - O(1) per set bit
+   - **Files**: `src/Masks.jl`
+   - **Performance**: Now O(set_bits) instead of O(total_bits)
+
+### Algorithms
+**count_on_before** (ly-a62):
 ```julia
-# O(N) - iterates through all set bits
-child_idx = 0
-for idx in on_indices(node.child_mask)
-    child_idx += 1
-    if idx == target_idx
-        break
-    end
-end
-```
-With:
-```julia
-# O(1) - single popcount operation
+# O(1) table lookup using popcount
 child_idx = count_on_before(node.child_mask, target_idx) + 1
 ```
 
+**on_indices with CTZ** (ly-q7m):
+```julia
+# O(1) jump to next set bit using trailing_zeros
+tz = trailing_zeros(remaining)
+remaining &= remaining - 1  # Clear lowest set bit
+```
+
 ### Test Results
-- **Masks tests**: 62/62 pass (16 new for count_on_before)
-- **Accessors tests**: 14/14 pass
-- **Performance**: ~13-60 ns/query regardless of mask density (O(1) confirmed)
+- **All tests**: 408 pass (1 broken = pre-existing v220 issue)
+- **Masks tests**: 62/62 pass
 
 ### Commits
-- (uncommitted) feat: Fix O(N) to O(1) voxel lookup using count_on_before
+- `9d2ee6a`: perf: Fix O(N) to O(1) voxel lookup using count_on_before
+- (uncommitted) perf: Use CTZ for O(set_bits) mask iteration
 
 ---
 

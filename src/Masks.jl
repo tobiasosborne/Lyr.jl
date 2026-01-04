@@ -174,30 +174,42 @@ on_indices(m::Mask{N,W}) where {N,W} = OnIndicesIterator{N,W}(m)
 Base.IteratorSize(::Type{OnIndicesIterator{N,W}}) where {N,W} = Base.SizeUnknown()
 Base.eltype(::Type{OnIndicesIterator{N,W}}) where {N,W} = Int
 
-function Base.iterate(it::OnIndicesIterator{N,W}, state=(1, 0)) where {N,W}
-    word_idx, bit_offset = state
-
-    while word_idx <= W
-        word = it.mask.words[word_idx]
-        # Skip already-checked bits
-        word >>= bit_offset
-
-        while word != 0 && bit_offset < 64
-            if word & 1 == 1
-                idx = (word_idx - 1) * 64 + bit_offset
-                if idx < N
-                    return (idx, (word_idx, bit_offset + 1))
-                end
-            end
-            word >>= 1
-            bit_offset += 1
+function Base.iterate(it::OnIndicesIterator{N,W}, state=nothing) where {N,W}
+    # State: (word_idx, remaining_bits) where remaining_bits has processed bits cleared
+    if state === nothing
+        # Initialize: find first word with set bits
+        word_idx = 1
+        @inbounds while word_idx <= W && it.mask.words[word_idx] == 0
+            word_idx += 1
         end
-
-        word_idx += 1
-        bit_offset = 0
+        word_idx > W && return nothing
+        @inbounds remaining = it.mask.words[word_idx]
+    else
+        word_idx, remaining = state
     end
 
-    nothing
+    # Use CTZ to find next set bit - O(1) jump to next set bit
+    @inbounds while true
+        if remaining != 0
+            tz = trailing_zeros(remaining)
+            idx = (word_idx - 1) * 64 + tz
+            if idx < N
+                # Clear this bit and return
+                remaining &= remaining - 1  # Clear lowest set bit
+                return (idx, (word_idx, remaining))
+            else
+                return nothing  # Past valid range
+            end
+        end
+
+        # Move to next word with set bits
+        word_idx += 1
+        while word_idx <= W && it.mask.words[word_idx] == 0
+            word_idx += 1
+        end
+        word_idx > W && return nothing
+        remaining = it.mask.words[word_idx]
+    end
 end
 
 """
