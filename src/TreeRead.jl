@@ -92,8 +92,10 @@ function read_i2_topology_v222(bytes::Vector{UInt8}, pos::Int, origin::Coord)::T
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
-    # Read Internal1 children
-    i1_children = Vector{I1TopoData}()
+    # Pre-allocate Internal1 children vector
+    n_i2_children = count_on(i2_child_mask)
+    i1_children = Vector{I1TopoData}(undef, n_i2_children)
+    i1_idx = 0
 
     for child_idx in on_indices(i2_child_mask)
         i1_origin = child_origin_internal2(origin, child_idx)
@@ -102,16 +104,21 @@ function read_i2_topology_v222(bytes::Vector{UInt8}, pos::Int, origin::Coord)::T
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
-        # Read leaf value masks
-        leaves = Vector{LeafTopoWithSelection}()
+        # Pre-allocate leaves vector
+        n_leaves = count_on(i1_child_mask)
+        leaves = Vector{LeafTopoWithSelection}(undef, n_leaves)
+        leaf_idx_out = 0
+
         for leaf_idx in on_indices(i1_child_mask)
             leaf_origin = child_origin_internal1(i1_origin, leaf_idx)
             leaf_mask, pos = read_mask(LeafMask, bytes, pos)
             # Selection mask will be read later
-            push!(leaves, LeafTopoWithSelection(leaf_origin, leaf_mask, nothing))
+            leaf_idx_out += 1
+            leaves[leaf_idx_out] = LeafTopoWithSelection(leaf_origin, leaf_mask, nothing)
         end
 
-        push!(i1_children, I1TopoData(i1_origin, i1_child_mask, i1_value_mask, leaves))
+        i1_idx += 1
+        i1_children[i1_idx] = I1TopoData(i1_origin, i1_child_mask, i1_value_mask, leaves)
     end
 
     (I2TopoData(origin, i2_child_mask, i2_value_mask, i1_children), pos)
@@ -124,16 +131,20 @@ Read selection masks for all leaves in an I2 subtree (v222+ format).
 Mutates the I2TopoData in place to add selection masks.
 """
 function read_selection_masks_v222!(i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int)::Tuple{I2TopoData, Int}
-    # Create new I1 children with selection masks filled in
-    new_i1_children = Vector{I1TopoData}()
+    # Pre-allocate new I1 children vector
+    n_i1_children = length(i2_topo.children)
+    new_i1_children = Vector{I1TopoData}(undef, n_i1_children)
 
-    for i1_topo in i2_topo.children
-        new_leaves = Vector{LeafTopoWithSelection}()
-        for leaf in i1_topo.leaves
+    for (i1_idx, i1_topo) in enumerate(i2_topo.children)
+        # Pre-allocate new leaves vector
+        n_leaves = length(i1_topo.leaves)
+        new_leaves = Vector{LeafTopoWithSelection}(undef, n_leaves)
+
+        for (leaf_idx, leaf) in enumerate(i1_topo.leaves)
             selection_mask, pos = read_mask(LeafMask, bytes, pos)
-            push!(new_leaves, LeafTopoWithSelection(leaf.origin, leaf.value_mask, selection_mask))
+            new_leaves[leaf_idx] = LeafTopoWithSelection(leaf.origin, leaf.value_mask, selection_mask)
         end
-        push!(new_i1_children, I1TopoData(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, new_leaves))
+        new_i1_children[i1_idx] = I1TopoData(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, new_leaves)
     end
 
     new_i2_topo = I2TopoData(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, new_i1_children)
@@ -186,17 +197,21 @@ V222+ level set format per-leaf:
 """
 function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
     # V222+ level set format: interleaved [64-byte selection mask][raw values] per leaf
-    i1_nodes = Vector{InternalNode1{T}}()
+    # Pre-allocate i1_nodes vector
+    n_i1_nodes = length(i2_topo.children)
+    i1_nodes = Vector{InternalNode1{T}}(undef, n_i1_nodes)
 
-    for i1_topo in i2_topo.children
-        leaf_nodes = Vector{LeafNode{T}}()
+    for (i1_node_idx, i1_topo) in enumerate(i2_topo.children)
+        # Pre-allocate leaf_nodes vector
+        n_leaves = length(i1_topo.leaves)
+        leaf_nodes = Vector{LeafNode{T}}(undef, n_leaves)
 
-        for leaf_topo in i1_topo.leaves
+        for (leaf_idx, leaf_topo) in enumerate(i1_topo.leaves)
             # Read 64-byte selection mask inline
             selection_mask, pos = read_mask(LeafMask, bytes, pos)
             # Read raw values for selected voxels
             values, pos = read_leaf_values_v222_raw(T, bytes, pos, selection_mask, background)
-            push!(leaf_nodes, LeafNode{T}(leaf_topo.origin, leaf_topo.value_mask, values))
+            leaf_nodes[leaf_idx] = LeafNode{T}(leaf_topo.origin, leaf_topo.value_mask, values)
         end
 
         # Construct I1 node - tiles use background value for level sets
@@ -212,7 +227,7 @@ function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vecto
             i1_table[i1_child_count + i] = Tile{T}(background, true)
         end
 
-        push!(i1_nodes, InternalNode1{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, i1_table))
+        i1_nodes[i1_node_idx] = InternalNode1{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, i1_table)
     end
 
     # Construct I2 node
@@ -358,8 +373,10 @@ function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
-    # Collect Internal1 topology
-    internal1_topo = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{Tuple{Coord, LeafMask}}}}()
+    # Pre-allocate Internal1 topology vector
+    n_i2_children = count_on(i2_child_mask)
+    internal1_topo = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{Tuple{Coord, LeafMask}}}}(undef, n_i2_children)
+    i1_topo_idx = 0
 
     for child_idx in on_indices(i2_child_mask)
         i1_origin = child_origin_internal2(origin, child_idx)
@@ -367,14 +384,20 @@ function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
-        leaves = Vector{Tuple{Coord, LeafMask}}()
+        # Pre-allocate leaves vector
+        n_leaves = count_on(i1_child_mask)
+        leaves = Vector{Tuple{Coord, LeafMask}}(undef, n_leaves)
+        leaf_idx_out = 0
+
         for leaf_idx in on_indices(i1_child_mask)
             leaf_origin = child_origin_internal1(i1_origin, leaf_idx)
             leaf_mask, pos = read_mask(LeafMask, bytes, pos)
-            push!(leaves, (leaf_origin, leaf_mask))
+            leaf_idx_out += 1
+            leaves[leaf_idx_out] = (leaf_origin, leaf_mask)
         end
 
-        push!(internal1_topo, (i1_origin, i1_child_mask, i1_value_mask, leaves))
+        i1_topo_idx += 1
+        internal1_topo[i1_topo_idx] = (i1_origin, i1_child_mask, i1_value_mask, leaves)
     end
 
     # ========== Phase 2: All Values ==========
@@ -382,16 +405,20 @@ function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos
     # Read Internal2 Tile Values
     i2_active_vals, pos = read_internal_tiles(T, bytes, pos, i2_value_mask)
 
-    # Read Internal1 Tile Values and Leaf Values
-    i1_children = Vector{InternalNode1{T}}()
+    # Pre-allocate Internal1 children vector
+    n_i1_children = length(internal1_topo)
+    i1_children = Vector{InternalNode1{T}}(undef, n_i1_children)
 
-    for (i1_origin, i1_child_mask, i1_value_mask, leaf_topos) in internal1_topo
+    for (i1_child_idx, (i1_origin, i1_child_mask, i1_value_mask, leaf_topos)) in enumerate(internal1_topo)
         i1_active_vals, pos = read_internal_tiles(T, bytes, pos, i1_value_mask)
 
-        leaves = Vector{LeafNode{T}}()
-        for (leaf_origin, leaf_mask) in leaf_topos
+        # Pre-allocate leaves vector
+        n_leaves = length(leaf_topos)
+        leaves = Vector{LeafNode{T}}(undef, n_leaves)
+
+        for (leaf_idx, (leaf_origin, leaf_mask)) in enumerate(leaf_topos)
             values, pos = read_leaf_values(T, bytes, pos, codec, leaf_mask, background, version)
-            push!(leaves, LeafNode{T}(leaf_origin, leaf_mask, values))
+            leaves[leaf_idx] = LeafNode{T}(leaf_origin, leaf_mask, values)
         end
 
         i1_child_count = count_on(i1_child_mask)
@@ -405,7 +432,7 @@ function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos
             i1_table[i1_child_count + i] = Tile{T}(val, true)
         end
 
-        push!(i1_children, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table))
+        i1_children[i1_child_idx] = InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table)
     end
 
     # Construct Internal2 Node
