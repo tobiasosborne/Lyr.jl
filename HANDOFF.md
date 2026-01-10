@@ -1,6 +1,55 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-04 Session 14) - Performance Optimization Sprint
+## Latest Session (2026-01-10) - VDB Format Deep Research
+
+**Status**: Completed comprehensive research and documentation of OpenVDB file format versions 220-224. Created authoritative specification with C++ reference sources.
+
+### Work Completed
+
+1. **Deep format research** validated against official OpenVDB C++ sources
+2. **Created `docs/VDB_FORMAT_COMPLETE.md`** — 500+ line comprehensive specification covering:
+   - All file format versions (213-224) with constants
+   - Complete binary layouts for header, metadata, grids
+   - Tree structure (5-4-3 hierarchy) with bit index calculations
+   - Node topology and value reading algorithms
+   - Compression metadata codes (0-6) with selection masks
+   - Version-specific differences with pseudocode
+
+3. **Downloaded C++ reference implementations to `reference/`**:
+   - `tinyvdbio.h` — Header-only parser (91KB)
+   - `Compression.h/cc` — ZLIB/Blosc codecs
+   - `LeafNode.h`, `InternalNode.h`, `RootNode.h` — Node I/O
+   - `io.h` — Stream utilities
+   - `README.md` — Quick reference guide
+
+4. **Updated `CLAUDE.md`** with format documentation section
+
+### Key Validated Findings
+
+| Finding | Evidence |
+|---------|----------|
+| v220 stores 13 extra bytes per leaf (origin + numBuffers) | OpenVDB v11.0 LeafNode.h |
+| v222+ uses metadata byte (0-6) + selection mask | Compression.h enums |
+| Chunk sizes are Int64 (8 bytes) for ALL versions | Compression.cc |
+| Global compression in header for v220-221 only | TinyVDBIO |
+| Per-grid compression for v222+ | TinyVDBIO ReadGridCompression() |
+
+### Correction to Previous Analysis
+
+The V220_FORMAT_ANALYSIS.md stated Int32 chunk sizes for v220. Research confirms **Int64 is used for all versions** in modern OpenVDB. This may be historical behavior that changed.
+
+### Commits
+- `0c3ac95`: docs: Add comprehensive VDB format specification and C++ references
+
+### Next Steps
+1. **Implement v220 fix** using validated spec:
+   - Skip 13 bytes (origin + numBuffers) in leaf value reading
+   - Test with bunny_cloud.vdb
+2. Verify internal tile active byte behavior for v220
+
+---
+
+## Previous Session (2026-01-04 Session 14) - Performance Optimization Sprint
 
 **Status**: Completed 5 performance issues in parallel. Major improvements to lookup speed and memory usage.
 

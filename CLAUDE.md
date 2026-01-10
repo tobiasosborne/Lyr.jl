@@ -8,7 +8,7 @@ This is not hyperbole. This is the standard.
 
 ## The Project
 
-**VDB.jl** — A pure Julia implementation of the OpenVDB file format parser.
+**Lyr.jl** — A pure Julia implementation of the OpenVDB file format parser.
 
 OpenVDB is the Academy Award-winning sparse volumetric data structure used in film VFX. We are building a parser of such elegance that it serves as both implementation and specification.
 
@@ -19,6 +19,33 @@ OpenVDB is the Academy Award-winning sparse volumetric data structure used in fi
 3. **Zero-copy where possible** — Minimal allocations
 4. **Type-safe** — Illegal states unrepresentable
 5. **Documented** — Code as literature
+
+## Format Documentation
+
+**Essential reading before implementing format changes:**
+
+| Document | Purpose |
+|----------|---------|
+| `docs/VDB_FORMAT_COMPLETE.md` | **Comprehensive specification** — versions 220-224, all binary layouts |
+| `docs/V220_FORMAT_ANALYSIS.md` | v220 vs v222+ differences for bunny_cloud.vdb |
+| `docs/VDB_FORMAT.md` | Original format notes |
+| `reference/` | Official OpenVDB C++ sources for verification |
+
+### Key Version Boundaries
+
+| Version | Constant | Breaking Change |
+|---------|----------|-----------------|
+| 220 | `SELECTIVE_COMPRESSION` | Global compression in header |
+| **222** | **`NODE_MASK_COMPRESSION`** | **Leaf values: +13 bytes (origin+buffers) removed** |
+| 223 | `BLOSC_COMPRESSION` | Blosc codec support |
+| 224 | `MULTIPASS_IO` | Current version |
+
+### Critical v220 vs v222+ Difference
+
+```
+v220 leaf values:  [origin 12B][numBuffers 1B][raw active values...]
+v222+ leaf values: [metadata 1B][inactive vals?][selection mask?][compressed values...]
+```
 
 ## TDD: The Law
 
@@ -68,23 +95,23 @@ Issues have dependencies. Respect the DAG.
 
 ```bash
 # Run all tests
-cd VDB.jl && julia --project -e 'using Pkg; Pkg.test()'
+julia --project -e 'using Pkg; Pkg.test()'
 
 # Run specific test file
-julia --project=VDB.jl test/test_binary.jl
+julia --project test/test_binary.jl
 
 # Check type stability
-julia --project=VDB.jl -e 'using VDB; @code_warntype read_u32_le([0x01,0x02,0x03,0x04], 1)'
+julia --project -e 'using Lyr; @code_warntype read_u32_le([0x01,0x02,0x03,0x04], 1)'
 
 # REPL with package loaded
-julia --project=VDB.jl -e 'using VDB; # ...'
+julia --project -e 'using Lyr; # ...'
 ```
 
 ## Architecture
 
 ```
-VDB.jl/src/
-├── VDB.jl           # Module root, exports
+src/
+├── Lyr.jl           # Module root, exports
 ├── Binary.jl        # Primitive readers: u8, u32, f32, strings
 ├── Masks.jl         # Bitmasks: Mask{N}, LeafMask, iteration
 ├── Coordinates.jl   # Coord, BBox, tree navigation
@@ -143,7 +170,7 @@ bd update <id> --status in_progress
 ### Ending
 ```bash
 # 1. Ensure tests pass
-julia --project=VDB.jl -e 'using Pkg; Pkg.test()'
+julia --project -e 'using Pkg; Pkg.test()'
 
 # 2. Update beads
 bd close <id>           # If complete
@@ -157,7 +184,7 @@ git commit -m "feat: ..."
 git push
 
 # 5. Update handoff
-# Edit VDB.jl/HANDOFF.md with session summary
+# Edit HANDOFF.md with session summary
 ```
 
 ## Remember
