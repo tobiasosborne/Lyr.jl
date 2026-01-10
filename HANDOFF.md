@@ -1,6 +1,63 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-10) - VDB Format Deep Research
+## Latest Session (2026-01-10) - v220 Format Fix Implementation
+
+**Status**: Implemented v220 format support for leaf values. bunny_cloud.vdb should now parse correctly.
+
+### Work Completed
+
+1. **Fixed `read_leaf_values` in `src/Values.jl`** for v220 format:
+   - v220 leaf values have 13 extra bytes before values: origin (12B) + numBuffers (1B)
+   - Code now skips these 13 bytes for version < 222
+   - Uses `read_compressed_bytes` to properly handle compressed values
+   - Scatters active values to full 512-element array
+
+2. **Updated `test/test_integration.jl`**:
+   - Removed bunny_cloud.vdb from SKIP_FILES
+   - Added dedicated test case for v220 format (bunny_cloud.vdb)
+   - Tests: version check, grid properties, leaf/voxel counts, value sampling
+
+3. **Created `scripts/verify_v220.jl`**:
+   - Manual verification script for v220 parsing
+   - Run with: `julia --project scripts/verify_v220.jl`
+   - Tests parsing without running full test suite
+
+### Key Fix
+
+The v220 leaf value format differs from v222+:
+
+```
+v220:  [origin 12B][numBuffers 1B][chunk_size 8B][compressed values]
+v222+: [metadata 1B][inactive vals?][selection mask?][chunk_size 8B][compressed values]
+```
+
+The previous code didn't skip the 13-byte header for v220, causing position drift and BoundsError.
+
+### Commits
+- `e6f613b`: fix: Add v220 format support for leaf values
+
+### Closed Issues
+- `path-tracer-t0q`: Fix v220 read_active_values BoundsError
+- `path-tracer-rhk`: bunny_cloud.vdb parsing fails in Leaf Values
+
+### Known Issues
+- Beads sync has prefix mismatch warning (pre-existing issue)
+- Tests were NOT run this session (user requested to avoid freezing)
+
+### Next Steps
+1. **IMPORTANT**: Manually verify fix works by running:
+   ```bash
+   julia --project scripts/verify_v220.jl
+   ```
+2. If verification passes, run full test suite:
+   ```bash
+   julia --project -e 'using Pkg; Pkg.test()'
+   ```
+3. If internal tile issues appear, check `read_internal_tiles` for version-specific handling
+
+---
+
+## Previous Session (2026-01-10) - VDB Format Deep Research
 
 **Status**: Completed comprehensive research and documentation of OpenVDB file format versions 220-224. Created authoritative specification with C++ reference sources.
 
