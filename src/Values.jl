@@ -93,11 +93,22 @@ Wrapper for read_dense_values for LeafNodes.
 """
 function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T, version::UInt32)::Tuple{NTuple{512,T}, Int} where T
     if version < 222
-        # v220: Raw active values, no metadata
-        active_count = count_on(mask)
-        active_values, pos = read_active_values(T, bytes, pos, active_count)
+        # v220/v221: Origin + numBuffers precede values (13 bytes)
+        # Skip origin (3 × Int32 = 12 bytes) - already have it from topology
+        pos += 12
+        # Skip numBuffers (Int8 = 1 byte) - always 1 in practice
+        pos += 1
 
-        # Scatter
+        # Read active values (may be compressed depending on codec)
+        active_count = count_on(mask)
+        expected_size = active_count * sizeof(T)
+
+        # Use read_compressed_bytes which handles both compressed and uncompressed
+        # For NoCompression it reads raw bytes, for others it reads chunk_size + data
+        data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
+        active_values = reinterpret(T, data)
+
+        # Scatter active values to full 512-element array
         all_values = Vector{T}(undef, 512)
         active_idx = 1
         for i in 0:511

@@ -5,7 +5,7 @@
     SAMPLE_DIR = joinpath(@__DIR__, "fixtures", "samples")
 
     # Files to skip (too slow or known issues)
-    SKIP_FILES = Set(["bunny_cloud.vdb"])  # v220 format, performance issues
+    SKIP_FILES = Set{String}()  # No files skipped - v220 support now implemented
 
     @testset "torus.vdb (v222 level set)" begin
         filepath = joinpath(SAMPLE_DIR, "torus.vdb")
@@ -40,6 +40,44 @@
         @test length(grid.tree.table) == 1
         @test haskey(grid.tree.table, (-4096, -4096, -4096))
         @test grid.tree.table[(-4096, -4096, -4096)] isa InternalNode2{Float32}
+    end
+
+    @testset "bunny_cloud.vdb (v220 fog volume)" begin
+        filepath = joinpath(SAMPLE_DIR, "bunny_cloud.vdb")
+        if !isfile(filepath)
+            @info "Skipping bunny_cloud.vdb test: file not found"
+            @test_skip "bunny_cloud.vdb not available"
+            return
+        end
+
+        # Parse should succeed - tests v220 format support
+        vdb = parse_vdb(filepath)
+
+        # Header verification - must be v220
+        @test vdb.header.format_version == 220
+        @test vdb.header.compression isa Codec
+
+        # Should have at least one grid
+        @test length(vdb.grids) >= 1
+
+        # Grid properties
+        grid = vdb.grids[1]
+        @test grid.grid_class == GRID_FOG_VOLUME
+        @test grid.transform isa AbstractTransform
+
+        # Tree structure - should have leaves and active voxels
+        @test leaf_count(grid.tree) > 0
+        @test active_voxel_count(grid.tree) > 0
+
+        # Sample some active voxels to verify values are reasonable
+        sample_count = 0
+        for (coord, val) in active_voxels(grid.tree)
+            @test isfinite(val)  # Values should be finite numbers
+            @test val >= 0.0f0   # Fog volume density should be non-negative
+            sample_count += 1
+            sample_count >= 100 && break
+        end
+        @test sample_count > 0  # Should have found some active voxels
     end
 
     @testset "smoke.vdb (fog volume)" begin
