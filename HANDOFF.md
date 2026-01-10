@@ -1,28 +1,36 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-10) - Cleanup Verification
+## Latest Session (2026-01-10) - v220 FIX IS BROKEN
 
-**Status**: Verified repository is clean. No debug statements in tests. Previous session work already committed and pushed.
+**Status**: ❌ **v220 parsing still fails.** Previous agent's fix did NOT work.
 
-### Work Completed
+### The Error
 
-1. **Verified no debug statements in tests** - searched all test files for `println`, `@show`, `@debug`, `print(` - none found
-2. **Confirmed working tree clean** - `git status` shows nothing to commit
-3. **Previous v220 fix already landed** - commit `e6f613b` already pushed
-
-### Test Suite Warning
-
-**DO NOT run full test suite** - the bunny_cloud.vdb integration test iterates through millions of voxels and will appear to freeze. This is not a bug, it's just slow iteration.
-
-To test v220 parsing quickly, use:
-```bash
-julia --project scripts/verify_v220.jl
 ```
+julia --project scripts/verify_v220.jl
+
+FAILURE: Error parsing bunny_cloud.vdb
+Error: CompressionBoundsError(83933, 1152921521786716160, 84066196)
+BoundsError: attempt to access 84066196-element Vector{UInt8} at index [83933:1152921521786800092]
+```
+
+The chunk_size `1152921521786716160` is garbage (should be ~2048 bytes). This means the file position is wrong when reading leaf values.
+
+### Root Cause (Not Fixed)
+
+The v220 leaf format fix in `e6f613b` is incomplete or incorrect. The 13-byte skip (origin + numBuffers) is not being applied correctly, causing position drift that results in reading garbage as chunk_size.
+
+### What Needs To Be Done
+
+1. **Debug `read_leaf_values` in `src/Values.jl`** - trace the exact byte positions
+2. **Verify the 13-byte skip** is happening at the right place
+3. **Check if there are OTHER version differences** beyond leaf values (internal nodes?)
+4. **Test with actual hex dump** of bunny_cloud.vdb to verify format assumptions
 
 ### Repository State
 - Working tree: **clean**
 - All commits: **pushed**
-- Beads: synced
+- v220 parsing: **BROKEN**
 
 ---
 
