@@ -22,6 +22,15 @@ const LOG2DIM_I1 = Int32(4)
 """Log2dim for LeafNode (8x8x8)."""
 const LOG2DIM_LEAF = Int32(3)
 
+# Per-node compression flags (from tinyvdbio.h MaskCompressionFlags enum)
+const NO_MASK_OR_INACTIVE_VALS = UInt8(0)   # no inactive vals, or all inactive vals are +background
+const NO_MASK_AND_MINUS_BG = UInt8(1)       # all inactive vals are -background
+const NO_MASK_AND_ONE_INACTIVE_VAL = UInt8(2)  # all inactive vals have same non-background value
+const MASK_AND_NO_INACTIVE_VALS = UInt8(3)     # mask selects between -background and +background
+const MASK_AND_ONE_INACTIVE_VAL = UInt8(4)  # mask selects between background and one other value
+const MASK_AND_TWO_INACTIVE_VALS = UInt8(5) # mask selects between two non-background values
+const NO_MASK_AND_ALL_VALS = UInt8(6)       # > 2 inactive vals, so no mask compression
+
 # =============================================================================
 # Data Structures
 # =============================================================================
@@ -105,6 +114,69 @@ end
 # =============================================================================
 
 """
+    skip_mask_values(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
+                    file_version::UInt32, compression_flags::UInt32,
+                    value_mask::NodeMask) -> Int
+
+Skip over internal node values during topology reading (ReadMaskValues equivalent).
+
+Per tinyvdbio.h ReadMaskValues, for v222+ internal nodes read:
+1. per_node_flag (1 byte)
+2. inactiveVal0 (4 bytes) - if flag indicates
+3. inactiveVal1 (4 bytes) - if flag indicates
+4. selection_mask (mask bytes) - if flag indicates
+5. compressed values via ReadAndDecompressData
+
+Returns new position after skipping all value data.
+"""
+function skip_mask_values(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
+                         file_version::UInt32, compression_flags::UInt32,
+                         value_mask::NodeMask)::Int
+    mask_compressed = (compression_flags & COMPRESS_ACTIVE_MASK) != 0
+    num_values = 1 << (3 * log2dim)
+
+    # Read per_node_flag for v222+
+    per_node_flag = NO_MASK_AND_ALL_VALS
+    if file_version >= FILE_VERSION_NODE_MASK_COMPRESSION
+        per_node_flag, pos = read_u8(bytes, pos)
+    end
+
+    # Skip inactiveVal0 if present
+    if per_node_flag == NO_MASK_AND_ONE_INACTIVE_VAL ||
+       per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
+       per_node_flag == MASK_AND_TWO_INACTIVE_VALS
+        pos += 4  # Float32 size
+
+        # Skip inactiveVal1 if two inactive values
+        if per_node_flag == MASK_AND_TWO_INACTIVE_VALS
+            pos += 4  # Float32 size
+        end
+    end
+
+    # Skip selection_mask if present
+    if per_node_flag == MASK_AND_NO_INACTIVE_VALS ||
+       per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
+       per_node_flag == MASK_AND_TWO_INACTIVE_VALS
+        # Mask size in bytes = word_count * 8
+        mask_bytes = ((1 << (3 * log2dim)) >> 6) * 8
+        pos += mask_bytes
+    end
+
+    # Determine how many values to read
+    read_count = num_values
+    if mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
+       file_version >= FILE_VERSION_NODE_MASK_COMPRESSION
+        read_count = count_on(value_mask)
+    end
+
+    # Skip compressed/uncompressed values via read_compressed_data
+    # We read and discard the data to advance stream position correctly
+    _, pos = read_compressed_data(bytes, pos, read_count, 4, compression_flags)
+
+    return pos
+end
+
+"""
     read_internal_topology(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
                           file_version::UInt32, compression_flags::UInt32,
                           background::Float32) -> Tuple{InternalNodeData, Int}
@@ -136,13 +208,15 @@ function read_internal_topology(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
 
     num_values = 1 << (3 * log2dim)  # Total slots in this node
 
-    # For v222+, values for non-child positions are read in ReadMaskValues
-    # during topology reading. For simplicity in TinyVDB, we defer all value
-    # reading to the buffer reading pass.
+    # For v222+, internal node values are embedded in topology (ReadMaskValues).
+    # We skip over them here; values are read during buffer pass.
+    if file_version >= FILE_VERSION_NODE_MASK_COMPRESSION
+        pos = skip_mask_values(bytes, pos, log2dim, file_version, compression_flags, value_mask)
+    end
     values = Float32[]
 
     # Determine child type: I2 -> I1, I1 -> Leaf
-    child_log2dim = log2dim - 1
+    child_log2dim = Int32(log2dim - 1)
     is_leaf_child = (child_log2dim == LOG2DIM_LEAF)
 
     # Read child nodes recursively

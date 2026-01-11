@@ -939,7 +939,8 @@ end
         append!(bytes, value_mask_bytes)
 
         bytes = Vector{UInt8}(bytes)
-        internal, pos = read_internal_topology(bytes, 1, Int32(4), UInt32(222), COMPRESS_NONE, 0.0f0)
+        # Use v220 to skip ReadMaskValues (v222+ embeds values in topology)
+        internal, pos = read_internal_topology(bytes, 1, Int32(4), UInt32(220), COMPRESS_NONE, 0.0f0)
 
         @test internal.log2dim == Int32(4)
         @test count_on(internal.child_mask) == 0
@@ -1127,26 +1128,26 @@ end
     end
 
     @testset "read_transform - skip over" begin
-        # Transform: 3x4 matrix (doubles) = 12 doubles = 96 bytes for linear
+        # Per tinyvdbio.h, UniformScaleMap reads 5 Vec3d = 15 doubles = 120 bytes
         # For now we just skip transforms
 
-        # Build a simple linear transform
+        # Build a UniformScaleMap transform
         bytes = UInt8[]
 
-        # Transform type string
-        append!(bytes, reinterpret(UInt8, [UInt32(6)]))
-        append!(bytes, Vector{UInt8}("linear"))
+        # Transform type string: "UniformScaleMap" (15 chars)
+        append!(bytes, reinterpret(UInt8, [UInt32(15)]))
+        append!(bytes, Vector{UInt8}("UniformScaleMap"))
 
-        # 3x4 matrix (12 doubles = 96 bytes)
-        for _ in 1:12
+        # 5 Vec3d = 15 doubles = 120 bytes
+        for _ in 1:15
             append!(bytes, reinterpret(UInt8, [Float64(1.0)]))
         end
 
         bytes = Vector{UInt8}(bytes)
         pos = read_transform(bytes, 1)
 
-        # Should be past the transform data: 4 (len) + 6 (str) + 96 (matrix) + 1 = 107
-        @test pos == 107
+        # Should be past the transform data: 4 (len) + 15 (str) + 120 (5 vec3d) + 1 = 140
+        @test pos == 140
     end
 
 end
