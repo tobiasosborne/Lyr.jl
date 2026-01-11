@@ -38,8 +38,8 @@
 
         # Tree has exactly one Internal2 child at expected origin
         @test length(grid.tree.table) == 1
-        @test haskey(grid.tree.table, (-4096, -4096, -4096))
-        @test grid.tree.table[(-4096, -4096, -4096)] isa InternalNode2{Float32}
+        @test haskey(grid.tree.table, Coord(-4096, -4096, -4096))
+        @test grid.tree.table[Coord(-4096, -4096, -4096)] isa InternalNode2{Float32}
     end
 
     @testset "bunny_cloud.vdb (v220 fog volume)" begin

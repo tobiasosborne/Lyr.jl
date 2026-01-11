@@ -26,16 +26,18 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
     # Read header
     header, pos = read_header(bytes, pos)
 
-    # Read file-level metadata
+    # Read file-level metadata (has count prefix for all versions)
+    # Note: v220-221 have size-prefixed values, v222+ have inline values
     if header.format_version >= 222
-        # Version 222+: No count prefix, use heuristic detection
-        while is_metadata_entry(bytes, pos)
+        # Version 222+: Count prefix, inline values (no size prefix per value)
+        meta_count, pos = read_u32_le(bytes, pos)
+        for _ in 1:meta_count
             _, pos = read_string_with_size(bytes, pos)  # key
             type_name, pos = read_string_with_size(bytes, pos)  # type
             pos = skip_metadata_value_heuristic(bytes, pos, type_name)  # value
         end
     else
-        # Version 220-221: Has count prefix and size-prefixed values
+        # Version 220-221: Count prefix, size-prefixed values
         pos = read_file_metadata_v220(bytes, pos)
     end
 
@@ -64,6 +66,23 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
             pos = Int(desc.byte_offset) + 1  # byte_offset is 0-indexed, pos is 1-indexed
         end
 
+        # For v222+, read per-grid compression flags (4 bytes)
+        # Flags: 0x1=ZIP, 0x2=ACTIVE_MASK, 0x4=BLOSC
+        grid_codec, grid_mask_compressed = if header.format_version >= 222
+            compression_flags, pos = read_u32_le(bytes, pos)
+            codec = if (compression_flags & 0x4) != 0
+                BloscCodec()
+            elseif (compression_flags & 0x1) != 0
+                ZipCodec()
+            else
+                NoCompression()
+            end
+            mask_compressed = (compression_flags & 0x2) != 0
+            (codec, mask_compressed)
+        else
+            (header.compression, header.active_mask_compression)
+        end
+
         # Determine value type
         T = parse_value_type(desc.grid_type)
 
@@ -83,13 +102,13 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
 
         # Parse the grid
         if T == Float32
-            grid, pos = read_grid(Float32, bytes, pos, header.compression, header.active_mask_compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(Float32, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
             push!(grids_temp, grid)
         elseif T == Float64
-            grid, pos = read_grid(Float64, bytes, pos, header.compression, header.active_mask_compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(Float64, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
             push!(grids_temp, grid)
         elseif T == NTuple{3, Float32}
-            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, header.active_mask_compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
             push!(grids_temp, grid)
         end
     end

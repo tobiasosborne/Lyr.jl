@@ -75,31 +75,38 @@ end
     read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, expected_size::Int) -> Tuple{Vector{UInt8}, Int}
 
 Read a size-prefixed compressed block and decompress it.
-The block format is: compressed_size (i64) | data
+The block format is: chunk_size (Int64) | data
 
-- If compressed_size <= 0: Data is uncompressed. Read expected_size bytes directly.
-  (The sign is just a flag; the actual size is always expected_size for uncompressed data)
-- If compressed_size > 0: Data is compressed. Read compressed_size bytes then decompress.
+Per VDB format spec (Section 10):
+- If chunk_size == 0: Empty chunk, return empty array
+- If chunk_size < 0: Uncompressed, read abs(chunk_size) raw bytes
+- If chunk_size > 0: Compressed, read chunk_size bytes then decompress
 
-For NoCompression, the format is just raw bytes (this function shouldn't be called typically, or handled by size=expected).
+For NoCompression codec, no size prefix is used (handled by separate method).
 """
 function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, expected_size::Int)::Tuple{Vector{UInt8}, Int}
     # Read chunk size (signed Int64)
     chunk_size, pos = read_i64_le(bytes, pos)
 
-    if chunk_size <= 0
-        # Uncompressed data (chunk_size <= 0 is just a flag, not the size)
-        # Read expected_size raw bytes directly
-        data, pos = read_bytes(bytes, pos, expected_size)
+    if chunk_size == 0
+        # Empty chunk
+        return (UInt8[], pos)
+    elseif chunk_size < 0
+        # Uncompressed data: read abs(chunk_size) raw bytes
+        raw_size = Int(-chunk_size)
+
+        # Verify size matches expected
+        if raw_size != expected_size
+            throw(ChunkSizeMismatchError(pos, expected_size, raw_size, chunk_size))
+        end
+
+        data, pos = read_bytes(bytes, pos, raw_size)
         return (data, pos)
     else
-        # Compressed data
-        compressed_size = chunk_size
-        
-        # Read compressed data
+        # Compressed data: read chunk_size bytes then decompress
         compressed_data = UInt8[]
         try
-            compressed_data, pos = read_bytes(bytes, pos, Int(compressed_size))
+            compressed_data, pos = read_bytes(bytes, pos, Int(chunk_size))
         catch e
             if isa(e, BoundsError)
                 throw(CompressionBoundsError(pos, chunk_size, length(bytes)))

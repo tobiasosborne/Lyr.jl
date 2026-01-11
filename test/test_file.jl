@@ -10,14 +10,14 @@
     end
 
     @testset "read_header valid" begin
-        # VDB header format (from torus.vdb analysis):
+        # VDB v222+ header format (per-grid compression, not in header):
         # - Magic (4 bytes) + padding (4 bytes) = 8 bytes
         # - Format version (4 bytes u32 LE)
         # - Library major (4 bytes u32 LE)
         # - Library minor (4 bytes u32 LE)
         # - Has grid offsets (1 byte) if version >= 212
         # - UUID (36 bytes ASCII string)
-        # - Compression (4 bytes u32 LE) if version >= 222
+        # NOTE: v222+ does NOT have compression in header; it's per-grid
         uuid_str = "a2313abf-7b19-4669-a9ea-f4a83e6bf20d"
         bytes = vcat(
             reinterpret(UInt8, [UInt32(VDB_MAGIC)]),       # Magic (4 bytes)
@@ -27,7 +27,6 @@
             reinterpret(UInt8, [UInt32(0)]),               # Library minor
             UInt8[0x01],                                    # Has grid offsets
             Vector{UInt8}(uuid_str),                        # UUID (36 bytes)
-            reinterpret(UInt8, [UInt32(0)]),               # No compression (u32)
         )
 
         header, pos = read_header(bytes, 1)
@@ -36,6 +35,7 @@
         @test header.library_major == 9
         @test header.library_minor == 0
         @test header.has_grid_offsets == true
+        # For v222+, header.compression is placeholder (actual is per-grid)
         @test header.compression isa NoCompression
         @test header.uuid == uuid_str
         @test pos == length(bytes) + 1  # Position should be right after header
@@ -48,11 +48,13 @@
             UInt32(0),
             true,
             BloscCodec(),
+            true,  # active_mask_compression
             "a2313abf-7b19-4669-a9ea-f4a83e6bf20d"
         )
 
         @test header isa VDBHeader
         @test header.compression isa BloscCodec
+        @test header.active_mask_compression == true
         @test length(header.uuid) == 36
     end
 
@@ -86,7 +88,7 @@
     @testset "VDBFile structure" begin
         header = VDBHeader(
             UInt32(222), UInt32(9), UInt32(0),
-            true, NoCompression(),
+            true, NoCompression(), false,  # active_mask_compression
             "00000000-0000-0000-0000-000000000000"
         )
 

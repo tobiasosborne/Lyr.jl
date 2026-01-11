@@ -75,17 +75,19 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     uuid_bytes, pos = read_bytes(bytes, pos, 36)
     uuid = String(uuid_bytes)
 
-    # Read compression flags (4 bytes u32 LE) if version >= 222
-    # Flags are a bitfield: 0x1=ZIP, 0x2=ACTIVE_MASK, 0x4=BLOSC
-    # For older versions, default to ZipCodec with ACTIVE_MASK (standard OpenVDB behavior)
-    compression_flags = if format_version >= 222
-        flags, pos = read_u32_le(bytes, pos)
-        flags
-    else
+    # Compression handling differs by version:
+    # - v220-221: Global compression flag in header (already skipped above as "half_float")
+    # - v222+: Compression is per-grid, NOT in header. Read at start of each grid.
+    #
+    # For v220-221, we default to ZIP + ACTIVE_MASK (standard OpenVDB behavior)
+    # For v222+, we use placeholder values; actual compression read per-grid in File.jl
+    compression_flags = if format_version < 222
         UInt32(0x3)  # ZIP + ACTIVE_MASK default for pre-222
+    else
+        UInt32(0x0)  # Placeholder for v222+; overridden per-grid
     end
 
-    # Determine codec from flags
+    # Determine codec from flags (for v220-221; v222+ overrides per-grid)
     compression = if (compression_flags & 0x4) != 0
         BloscCodec()
     elseif (compression_flags & 0x1) != 0
