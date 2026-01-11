@@ -55,11 +55,9 @@ v222+ leaf values: [metadata 1B][inactive vals?][selection mask?][compressed val
 # byte_offset  = absolute position of grid data start
 # block_offset = absolute position of values section start
 # end_offset   = absolute position of grid end
-
-# To convert to Julia 1-indexed:
-values_start = Int(block_offset) + 1  # CORRECT
-values_start = grid_start + block_offset  # WRONG - double counts!
 ```
+
+**Note:** The current implementation has a bug in offset handling. See TinyVDB below for the correct approach.
 
 ## TDD: The Law
 
@@ -138,8 +136,72 @@ src/
 ├── File.jl          # VDBFile, parse_vdb entry point
 ├── Accessors.jl     # get_value, is_active, iterators
 ├── Interpolation.jl # Nearest, trilinear sampling
-└── Ray.jl           # Ray-tree intersection
+├── Ray.jl           # Ray-tree intersection
+└── TinyVDB.jl       # Minimal VDB parser (v222, Float32, sequential read)
 ```
+
+## TinyVDB — Minimal Reimplementation
+
+**Status:** In progress — 4/12 components complete (152 tests passing)
+
+A fresh, minimal VDB parser based directly on `reference/tinyvdbio.h`. Created to fix value parsing bugs in the main implementation.
+
+### Key Design Decision: Sequential Reading
+
+The C++ reference (tinyvdbio) reads **sequentially** — it never seeks to `block_pos`:
+1. Seek to `grid_pos`
+2. Read topology (masks, origins)
+3. Continue reading values from current stream position
+
+This avoids the offset calculation bugs in the current implementation.
+
+### Scope
+- v222 format only
+- Float32 values only
+- Zlib + NoCompression
+- No transforms, accessors, interpolation, or ray tracing
+
+### Module Structure
+
+```
+src/TinyVDB/
+├── TinyVDB.jl   # Main module (includes + exports)
+├── Binary.jl    # read_u8, read_u32, read_i64, read_f32, read_string, etc.
+├── Types.jl     # Coord, VDBHeader, NodeType enum
+├── Mask.jl      # NodeMask with is_on, set_on!, count_on, read_mask
+├── Header.jl    # read_header, VDB_MAGIC constant
+├── GridDescriptor.jl  # (TODO)
+├── Compression.jl     # (TODO)
+├── Topology.jl        # (TODO) Root, Internal, Leaf reading
+├── Values.jl          # (TODO)
+└── Parser.jl          # (TODO) Entry point
+```
+
+### Running TinyVDB Tests
+
+```bash
+# ONLY run TinyVDB tests (fast, isolated)
+julia --project test/test_tinyvdb.jl
+
+# Do NOT run full suite during TinyVDB development
+```
+
+### Beads Issues (path-tracer-*)
+
+| ID | Component | Status |
+|----|-----------|--------|
+| 43t | Binary primitives | ✅ DONE |
+| 0rj | Data structures | ✅ DONE |
+| paa | Mask implementation | ✅ DONE |
+| 437 | Header parsing | ✅ DONE |
+| nwi | Grid descriptor | 🔲 Ready |
+| hss | Compression | 🔲 Ready |
+| 760 | Root topology | 🔲 Ready |
+| 9nu | Internal node topology | 🔲 Ready |
+| 2ep | Leaf topology | 🔲 Ready |
+| 0qj | Value reading | ⏳ Blocked |
+| 2re | Tree assembly | ⏳ Blocked |
+| nss | Entry point | ⏳ Blocked |
 
 ## Style
 

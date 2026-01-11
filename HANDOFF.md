@@ -2,7 +2,124 @@
 
 ---
 
-## Latest Session (2026-01-11 Night) - C++ Reference Investigation
+## Latest Session (2026-01-11) - TinyVDB Implementation Started
+
+**Status**: 🟢 IN PROGRESS - 4/12 components complete, 152 tests passing
+
+### Summary
+
+Implemented first 4 TinyVDB components following strict TDD. Refactored from single file to multi-file module structure for maintainability.
+
+### What Was Implemented
+
+| Component | File | Tests | LOC |
+|-----------|------|-------|-----|
+| Binary primitives | `Binary.jl` | 61 | ~115 |
+| Data structures | `Types.jl` | 22 | ~35 |
+| Mask implementation | `Mask.jl` | 55 | ~100 |
+| Header parsing | `Header.jl` | 14 | ~55 |
+
+**Total: 152 tests, ~305 LOC**
+
+### Module Structure
+
+```
+src/TinyVDB/
+├── TinyVDB.jl   (1.4KB) - Main module with includes/exports
+├── Binary.jl    (3.7KB) - read_u8, read_u32, read_i64, read_f32, read_string
+├── Types.jl     (0.6KB) - Coord, VDBHeader, NodeType enum
+├── Mask.jl      (2.9KB) - NodeMask, is_on, set_on!, count_on, read_mask
+└── Header.jl    (2.1KB) - read_header, VDB_MAGIC
+```
+
+### Key Implementation Details
+
+**Binary primitives** - Pure functional `(bytes, pos) -> (result, new_pos)` pattern using `ltoh` for little-endian, `GC.@preserve` for safety.
+
+**NodeMask** - 0-indexed bit positions (matching C++ reference). Supports LOG2DIM 3/4/5 for leaf/internal1/internal2 nodes. Uses `count_ones` for efficient popcount.
+
+**Header parsing** - Validates VDB magic, version >= 220, requires grid offsets. Handles v220-221 compression flag difference.
+
+### Beads Closed This Session
+
+- `path-tracer-43t` - Binary primitives ✅
+- `path-tracer-0rj` - Data structures ✅
+- `path-tracer-paa` - Mask implementation ✅
+- `path-tracer-437` - Header parsing ✅
+
+### Ready for Next Session
+
+5 components now unblocked (run `bd ready`):
+- `path-tracer-nwi` - Grid descriptor
+- `path-tracer-hss` - Compression (zlib)
+- `path-tracer-760` - Root topology
+- `path-tracer-9nu` - Internal node topology
+- `path-tracer-2ep` - Leaf topology
+
+### Running Tests
+
+```bash
+# ONLY run TinyVDB tests (fast, isolated)
+julia --project test/test_tinyvdb.jl
+
+# Do NOT run full test suite during TinyVDB development
+```
+
+---
+
+## Previous Session (2026-01-11 Late Night) - TinyVDB Planning
+
+**Status**: 🟢 PLANNING COMPLETE - Fresh reimplementation planned
+
+### Summary
+
+C++ reference investigation revealed that tinyvdbio reads **sequentially** (never seeks to block_pos). Created 12 beads issues for a minimal ~475 LOC reimplementation.
+
+### Key Finding
+
+The current Lyr.jl implementation has a fundamental bug: it tries to seek to `block_offset` separately, but the C++ reference reads topology and values as one continuous stream.
+
+**tinyvdbio approach:**
+1. `seek_set(grid_pos)` — seek to grid start
+2. `ReadTopology()` — read tree structure
+3. `ReadBuffer()` — read values from current position (no separate seek!)
+
+### TinyVDB Implementation Plan
+
+| Bead ID | Component | LOC Est | Deps |
+|---------|-----------|---------|------|
+| path-tracer-43t | Binary primitives | ~30 | - |
+| path-tracer-0rj | Data structures | ~40 | - |
+| path-tracer-paa | Mask implementation | ~50 | 43t |
+| path-tracer-437 | Header parsing | ~40 | 43t |
+| path-tracer-nwi | Grid descriptor | ~25 | 43t |
+| path-tracer-hss | Compression | ~50 | 43t |
+| path-tracer-760 | Root topology | ~40 | 43t, paa, 0rj |
+| path-tracer-9nu | Internal node topology | ~50 | 43t, paa, 0rj |
+| path-tracer-2ep | Leaf topology | ~30 | 43t, paa, 0rj |
+| path-tracer-0qj | Value reading | ~80 | hss, paa |
+| path-tracer-2re | Tree assembly | ~30 | 760, 9nu, 2ep, 0qj |
+| path-tracer-nss | Entry point | ~25 | 2re, 437, nwi |
+
+**Total: ~475 LOC** in `src/TinyVDB.jl`
+
+### Scope
+
+- v222 format only
+- Float32 values only
+- Zlib + NoCompression
+- Sequential reading (no block_offset seeking)
+- No transforms, accessors, interpolation, ray tracing
+
+### Next Steps
+
+1. Run `bd ready` to see unblocked issues (43t, 0rj)
+2. Implement binary primitives and data structures first
+3. Work through dependency chain to entry point
+
+---
+
+## Previous Session (2026-01-11 Night) - C++ Reference Investigation
 
 **Status**: 🟡 INVESTIGATION IN PROGRESS - Fix attempted but values still garbage
 
