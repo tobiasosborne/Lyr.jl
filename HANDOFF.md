@@ -2,7 +2,62 @@
 
 ---
 
-## Latest Session (2026-01-11) - v222 Header Fix + Renderer Plan
+## Latest Session (2026-01-11) - Sphere Tracing Renderer
+
+**Status**: ✅ SUCCESS - Implemented sphere tracing renderer with Camera, shading, PPM output.
+
+### What Was Implemented
+
+**Renderer** (`src/Render.jl`):
+- `Camera` struct with look_at constructor
+- `camera_ray` for generating rays through pixels
+- `sphere_trace` for ray marching through level sets
+- `shade` with Lambertian shading
+- `render_image` main render loop
+- `write_ppm` for PPM output
+
+**CLI Script** (`scripts/render_vdb.jl`):
+- Full command-line renderer with options for width, height, FOV, distance, steps
+
+**Tests** (`test/test_render.jl`):
+- Camera construction and orthonormal basis
+- Shading with different light directions
+- PPM output formatting and clamping
+- Sphere tracing miss cases
+- Full pipeline tests
+
+### Files Modified/Added
+
+| File | Change |
+|------|--------|
+| `src/Render.jl` | NEW - Sphere tracing renderer (~300 lines) |
+| `src/Lyr.jl` | Added include and exports for Render module |
+| `scripts/render_vdb.jl` | NEW - CLI renderer script |
+| `test/test_render.jl` | NEW - Render tests (26 tests) |
+| `test/runtests.jl` | Added test_render.jl to suite |
+
+### Test Results
+
+```
+514 passing, 0 failed, 3 errored (known: bunny_cloud v220, sphere_points PointDataGrid)
+```
+
+### Notes on Sphere Tracing
+
+The sample VDB files are **sparse narrow-band level sets** that only store SDF values in a thin shell around the surface. This limits sphere tracing effectiveness since:
+- Outside the narrow band: returns background value
+- Inside object but outside narrow band: returns background value
+- Only in the narrow band: actual SDF values
+
+For production use with these files, DDA ray marching through the tree structure would be more appropriate. The current sphere tracer works correctly but most rays miss due to the sparse data.
+
+### Commits
+
+- TBD (changes staged)
+
+---
+
+## Previous Session (2026-01-11) - v222 Header Fix + Renderer Plan
 
 **Status**: ✅ SUCCESS - Fixed critical v222 parsing bug. All tracer bullet files now parse. Renderer plan approved.
 

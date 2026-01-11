@@ -29,6 +29,7 @@ include("File.jl")
 include("Accessors.jl")
 include("Interpolation.jl")
 include("Ray.jl")
+include("Render.jl")
 
 # Exports - Binary
 export read_u8, read_u32_le, read_u64_le
@@ -95,5 +96,10 @@ export LyrError, ParseError, CompressionError
 export InvalidMagicError, UnknownMetadataTypeError, MetadataParseError
 export ChunkSizeMismatchError, CompressionBoundsError, DecompressionSizeError
 export ValueCountError
+
+# Exports - Render
+export Camera, camera_ray
+export sphere_trace, shade
+export render_image, write_ppm
 
 end # module
