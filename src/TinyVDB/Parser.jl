@@ -115,31 +115,21 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Int
     transform_type, pos = read_string(bytes, pos)
 
     # Based on type, skip the appropriate amount of data
-    if transform_type == "linear" || transform_type == "uniformScaleMap" ||
-       transform_type == "scaleMap" || transform_type == "translationMap"
-        # 4x4 matrix = 16 doubles = 128 bytes
-        # But actually VDB stores transforms as a simpler format...
-        # Let's read the actual format: just the matrix elements
-
-        # For a linear transform: read 12 doubles (3x4 matrix)
-        for _ in 1:12
-            _, pos = read_f64(bytes, pos)
-        end
-    elseif transform_type == "uniformScaleTranslateMap"
-        # scale (double) + translation (3 doubles) = 4 doubles
-        for _ in 1:4
-            _, pos = read_f64(bytes, pos)
-        end
-    elseif transform_type == "scaleTranslateMap"
-        # scale (3 doubles) + translation (3 doubles) = 6 doubles
-        for _ in 1:6
+    # Per tinyvdbio.h ReadTransform (lines 2620-2669):
+    # UniformScaleMap and UniformScaleTranslateMap read 5 Vec3d = 15 doubles = 120 bytes:
+    #   - scale_values (3 doubles)
+    #   - voxel_size (3 doubles)
+    #   - scale_values_inverse (3 doubles)
+    #   - inv_scale_squared (3 doubles)
+    #   - inv_twice_scale (3 doubles)
+    if transform_type == "UniformScaleMap" || transform_type == "UniformScaleTranslateMap"
+        # 5 Vec3d = 15 doubles = 120 bytes
+        for _ in 1:15
             _, pos = read_f64(bytes, pos)
         end
     else
-        # Unknown transform type - try to continue with linear format
-        for _ in 1:12
-            _, pos = read_f64(bytes, pos)
-        end
+        # Unsupported transform type - error like C++ does
+        error("Unsupported transform type: $transform_type (only UniformScaleMap and UniformScaleTranslateMap supported)")
     end
 
     return pos
