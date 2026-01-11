@@ -462,16 +462,11 @@ end
 
 @testset "TinyVDB Header Parsing" begin
 
+    # VDB magic bytes: " BDV" + 4 null bytes
+    magic_bytes = UInt8[0x20, 0x42, 0x44, 0x56, 0x00, 0x00, 0x00, 0x00]
+
     @testset "read_header - valid v222 header" begin
         # Build a valid VDB v222 header
-        # Magic: 0x20424456 as Int64 (little-endian)
-        # File version: 222
-        # Major version: 9
-        # Minor version: 0
-        # has_grid_offsets: 1
-        # UUID: 36 bytes
-
-        magic = UInt64(0x20424456)  # " VDB" as little-endian Int64
         file_version = UInt32(222)
         major_version = UInt32(9)
         minor_version = UInt32(0)
@@ -480,7 +475,7 @@ end
 
         bytes = UInt8[]
         # Magic (8 bytes)
-        append!(bytes, reinterpret(UInt8, [magic]))
+        append!(bytes, magic_bytes)
         # File version (4 bytes)
         append!(bytes, reinterpret(UInt8, [file_version]))
         # Major version (4 bytes)
@@ -500,14 +495,13 @@ end
         @test header.is_compressed == false  # v222+ doesn't have compression byte
         @test header.uuid == uuid
         @test header.offset_to_data == UInt64(pos)
-        @test pos == 58  # 8 + 4 + 4 + 4 + 1 + 36 + 1 = 58 (wait, let me recalculate)
-        # Actually: 8 (magic) + 4 (file_ver) + 4 (major) + 4 (minor) + 1 (has_offsets) + 36 (uuid) = 57
+        # 8 (magic) + 4 (file_ver) + 4 (major) + 4 (minor) + 1 (has_offsets) + 36 (uuid) = 57
         # So pos should be 58 (1-indexed, next position after byte 57)
+        @test pos == 58
     end
 
     @testset "read_header - valid v220 header with compression" begin
         # v220 has compression byte after has_grid_offsets
-        magic = UInt64(0x20424456)
         file_version = UInt32(220)
         major_version = UInt32(8)
         minor_version = UInt32(0)
@@ -516,7 +510,7 @@ end
         uuid = "12345678-1234-1234-1234-123456789012"
 
         bytes = UInt8[]
-        append!(bytes, reinterpret(UInt8, [magic]))
+        append!(bytes, magic_bytes)
         append!(bytes, reinterpret(UInt8, [file_version]))
         append!(bytes, reinterpret(UInt8, [major_version]))
         append!(bytes, reinterpret(UInt8, [minor_version]))
@@ -534,7 +528,7 @@ end
     end
 
     @testset "read_header - invalid magic" begin
-        # Wrong magic number
+        # Wrong magic bytes
         bytes = UInt8[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         append!(bytes, zeros(UInt8, 50))  # padding
 
@@ -543,11 +537,10 @@ end
 
     @testset "read_header - version too old" begin
         # Valid magic but version < 220
-        magic = UInt64(0x20424456)
         file_version = UInt32(219)  # too old
 
         bytes = UInt8[]
-        append!(bytes, reinterpret(UInt8, [magic]))
+        append!(bytes, magic_bytes)
         append!(bytes, reinterpret(UInt8, [file_version]))
         append!(bytes, zeros(UInt8, 50))  # padding
 
@@ -556,14 +549,13 @@ end
 
     @testset "read_header - no grid offsets" begin
         # has_grid_offsets = 0 not supported
-        magic = UInt64(0x20424456)
         file_version = UInt32(222)
         major_version = UInt32(9)
         minor_version = UInt32(0)
         has_offsets = UInt8(0)  # not supported
 
         bytes = UInt8[]
-        append!(bytes, reinterpret(UInt8, [magic]))
+        append!(bytes, magic_bytes)
         append!(bytes, reinterpret(UInt8, [file_version]))
         append!(bytes, reinterpret(UInt8, [major_version]))
         append!(bytes, reinterpret(UInt8, [minor_version]))
@@ -571,6 +563,590 @@ end
         append!(bytes, zeros(UInt8, 40))  # padding
 
         @test_throws ErrorException read_header(bytes, 1)
+    end
+
+end
+
+@testset "TinyVDB Grid Descriptor" begin
+
+    @testset "GridDescriptor structure" begin
+        # Test basic construction
+        gd = GridDescriptor(
+            "density",           # grid_name
+            "density[0]",        # unique_name
+            "Tree_float_5_4_3",  # grid_type
+            false,               # half_precision
+            "",                  # instance_parent
+            Int64(1000),         # grid_pos
+            Int64(2000),         # block_pos
+            Int64(3000)          # end_pos
+        )
+        @test gd.grid_name == "density"
+        @test gd.unique_name == "density[0]"
+        @test gd.grid_type == "Tree_float_5_4_3"
+        @test gd.half_precision == false
+        @test gd.instance_parent == ""
+        @test gd.grid_pos == Int64(1000)
+        @test gd.block_pos == Int64(2000)
+        @test gd.end_pos == Int64(3000)
+    end
+
+    @testset "strip_suffix" begin
+        # Basic name with no suffix
+        @test strip_suffix("density") == "density"
+
+        # Name with [0] suffix (using SEP character 0x1e)
+        @test strip_suffix("density" * Char(0x1e) * "0") == "density"
+
+        # Name with longer suffix
+        @test strip_suffix("grid_name" * Char(0x1e) * "123") == "grid_name"
+
+        # Empty string
+        @test strip_suffix("") == ""
+    end
+
+    @testset "read_grid_descriptor" begin
+        # Build a valid grid descriptor
+        # Format: unique_name (string), grid_type (string), instance_parent (string),
+        #         grid_pos (i64), block_pos (i64), end_pos (i64)
+
+        unique_name = "density"
+        grid_type = "Tree_float_5_4_3"
+        instance_parent = ""
+
+        bytes = UInt8[]
+
+        # unique_name string: length (4 bytes) + chars
+        append!(bytes, reinterpret(UInt8, [UInt32(length(unique_name))]))
+        append!(bytes, Vector{UInt8}(unique_name))
+
+        # grid_type string
+        append!(bytes, reinterpret(UInt8, [UInt32(length(grid_type))]))
+        append!(bytes, Vector{UInt8}(grid_type))
+
+        # instance_parent string (empty)
+        append!(bytes, reinterpret(UInt8, [UInt32(0)]))
+
+        # grid_pos (i64)
+        append!(bytes, reinterpret(UInt8, [Int64(1000)]))
+
+        # block_pos (i64)
+        append!(bytes, reinterpret(UInt8, [Int64(2000)]))
+
+        # end_pos (i64)
+        append!(bytes, reinterpret(UInt8, [Int64(3000)]))
+
+        gd, pos = read_grid_descriptor(bytes, 1)
+
+        @test gd.grid_name == "density"
+        @test gd.unique_name == "density"
+        @test gd.grid_type == "Tree_float_5_4_3"
+        @test gd.half_precision == false
+        @test gd.instance_parent == ""
+        @test gd.grid_pos == Int64(1000)
+        @test gd.block_pos == Int64(2000)
+        @test gd.end_pos == Int64(3000)
+    end
+
+    @testset "read_grid_descriptor with suffix" begin
+        # Grid name with [0] suffix
+        unique_name = "density" * Char(0x1e) * "0"
+        grid_type = "Tree_float_5_4_3"
+
+        bytes = UInt8[]
+        append!(bytes, reinterpret(UInt8, [UInt32(length(unique_name))]))
+        append!(bytes, Vector{UInt8}(unique_name))
+        append!(bytes, reinterpret(UInt8, [UInt32(length(grid_type))]))
+        append!(bytes, Vector{UInt8}(grid_type))
+        append!(bytes, reinterpret(UInt8, [UInt32(0)]))  # instance_parent
+        append!(bytes, reinterpret(UInt8, [Int64(100)]))  # grid_pos
+        append!(bytes, reinterpret(UInt8, [Int64(200)]))  # block_pos
+        append!(bytes, reinterpret(UInt8, [Int64(300)]))  # end_pos
+
+        gd, _ = read_grid_descriptor(bytes, 1)
+
+        @test gd.grid_name == "density"
+        @test gd.unique_name == unique_name
+    end
+
+    @testset "read_grid_descriptor with half precision suffix" begin
+        # Grid type with _HalfFloat suffix
+        unique_name = "density"
+        grid_type = "Tree_float_5_4_3_HalfFloat"
+
+        bytes = UInt8[]
+        append!(bytes, reinterpret(UInt8, [UInt32(length(unique_name))]))
+        append!(bytes, Vector{UInt8}(unique_name))
+        append!(bytes, reinterpret(UInt8, [UInt32(length(grid_type))]))
+        append!(bytes, Vector{UInt8}(grid_type))
+        append!(bytes, reinterpret(UInt8, [UInt32(0)]))  # instance_parent
+        append!(bytes, reinterpret(UInt8, [Int64(100)]))
+        append!(bytes, reinterpret(UInt8, [Int64(200)]))
+        append!(bytes, reinterpret(UInt8, [Int64(300)]))
+
+        gd, _ = read_grid_descriptor(bytes, 1)
+
+        @test gd.grid_type == "Tree_float_5_4_3"  # suffix stripped
+        @test gd.half_precision == true
+    end
+
+    @testset "read_grid_descriptors (multiple)" begin
+        # Build bytes for count + 2 descriptors
+        bytes = UInt8[]
+
+        # Grid count (i32)
+        append!(bytes, reinterpret(UInt8, [Int32(2)]))
+
+        # First descriptor
+        unique_name1 = "density"
+        grid_type1 = "Tree_float_5_4_3"
+        append!(bytes, reinterpret(UInt8, [UInt32(length(unique_name1))]))
+        append!(bytes, Vector{UInt8}(unique_name1))
+        append!(bytes, reinterpret(UInt8, [UInt32(length(grid_type1))]))
+        append!(bytes, Vector{UInt8}(grid_type1))
+        append!(bytes, reinterpret(UInt8, [UInt32(0)]))
+        append!(bytes, reinterpret(UInt8, [Int64(100)]))
+        append!(bytes, reinterpret(UInt8, [Int64(200)]))
+        append!(bytes, reinterpret(UInt8, [Int64(300)]))
+
+        # Second descriptor
+        unique_name2 = "temperature"
+        grid_type2 = "Tree_float_5_4_3"
+        append!(bytes, reinterpret(UInt8, [UInt32(length(unique_name2))]))
+        append!(bytes, Vector{UInt8}(unique_name2))
+        append!(bytes, reinterpret(UInt8, [UInt32(length(grid_type2))]))
+        append!(bytes, Vector{UInt8}(grid_type2))
+        append!(bytes, reinterpret(UInt8, [UInt32(0)]))
+        append!(bytes, reinterpret(UInt8, [Int64(400)]))
+        append!(bytes, reinterpret(UInt8, [Int64(500)]))
+        append!(bytes, reinterpret(UInt8, [Int64(600)]))
+
+        descriptors, pos = read_grid_descriptors(bytes, 1)
+
+        @test length(descriptors) == 2
+        @test descriptors["density"].grid_name == "density"
+        @test descriptors["density"].grid_pos == Int64(100)
+        @test descriptors["temperature"].grid_name == "temperature"
+        @test descriptors["temperature"].grid_pos == Int64(400)
+    end
+
+end
+
+@testset "TinyVDB Compression" begin
+
+    @testset "Compression constants" begin
+        @test COMPRESS_NONE == 0x00
+        @test COMPRESS_ZIP == 0x01
+        @test COMPRESS_ACTIVE_MASK == 0x02
+        @test COMPRESS_BLOSC == 0x04
+    end
+
+    @testset "read_compressed_data - uncompressed (COMPRESS_NONE)" begin
+        # 4 Float32 values uncompressed
+        values = Float32[1.0, 2.0, 3.0, 4.0]
+        bytes = Vector{UInt8}(reinterpret(UInt8, values))
+
+        result, pos = read_compressed_data(bytes, 1, 4, 4, COMPRESS_NONE)
+
+        @test length(result) == 16  # 4 floats * 4 bytes
+        @test reinterpret(Float32, result) == values
+        @test pos == 17
+    end
+
+    @testset "read_compressed_data - negative zipped bytes (uncompressed zip)" begin
+        # When compression_flags has COMPRESS_ZIP but numZippedBytes <= 0,
+        # data is stored uncompressed
+        values = Float32[1.0, 2.0, 3.0, 4.0]
+        raw_bytes = reinterpret(UInt8, values)
+
+        bytes = UInt8[]
+        # numZippedBytes = -1 (indicates uncompressed)
+        append!(bytes, reinterpret(UInt8, [Int64(-1)]))
+        append!(bytes, raw_bytes)
+
+        result, pos = read_compressed_data(bytes, 1, 4, 4, COMPRESS_ZIP)
+
+        @test length(result) == 16
+        @test reinterpret(Float32, result) == values
+        @test pos == 25  # 8 (i64) + 16 (data)
+    end
+
+    @testset "read_compressed_data - zlib compressed" begin
+        # Create some test data and compress it with zlib
+        using CodecZlib
+
+        values = Float32[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+        raw_bytes = reinterpret(UInt8, values)
+
+        # Compress with zlib
+        compressed = transcode(ZlibCompressor, Vector{UInt8}(raw_bytes))
+
+        bytes = UInt8[]
+        # numZippedBytes = length of compressed data
+        append!(bytes, reinterpret(UInt8, [Int64(length(compressed))]))
+        append!(bytes, compressed)
+
+        result, pos = read_compressed_data(bytes, 1, 8, 4, COMPRESS_ZIP)
+
+        @test length(result) == 32  # 8 floats * 4 bytes
+        @test reinterpret(Float32, result) == values
+    end
+
+    @testset "read_grid_compression" begin
+        # v222+ has per-grid compression flags
+        bytes = Vector{UInt8}(reinterpret(UInt8, [UInt32(COMPRESS_ZIP | COMPRESS_ACTIVE_MASK)]))
+
+        flags, pos = read_grid_compression(bytes, 1, UInt32(222))
+
+        @test flags == (COMPRESS_ZIP | COMPRESS_ACTIVE_MASK)
+        @test pos == 5
+    end
+
+    @testset "read_grid_compression - old version" begin
+        # v221 and earlier don't have per-grid compression
+        bytes = UInt8[0x00, 0x00, 0x00, 0x00]
+
+        flags, pos = read_grid_compression(bytes, 1, UInt32(221))
+
+        @test flags == COMPRESS_NONE
+        @test pos == 1  # position unchanged
+    end
+
+end
+
+@testset "TinyVDB Topology" begin
+
+    @testset "RootNodeData structure" begin
+        root = RootNodeData(
+            3.0f0,       # background
+            Int32(0),    # num_tiles
+            Int32(1),    # num_children
+            Tuple{Coord, Float32, Bool}[],  # tiles
+            Tuple{Coord, InternalNodeData}[]  # children (empty for now)
+        )
+        @test root.background == 3.0f0
+        @test root.num_tiles == 0
+        @test root.num_children == 1
+    end
+
+    @testset "InternalNodeData structure" begin
+        # Create masks for I2 node (log2dim=5)
+        child_mask = NodeMask(Int32(5))
+        value_mask = NodeMask(Int32(5))
+
+        internal = InternalNodeData(
+            Int32(5),     # log2dim
+            child_mask,
+            value_mask,
+            Float32[],    # values
+            Tuple{Int32, Any}[]  # children
+        )
+        @test internal.log2dim == Int32(5)
+        @test internal.child_mask.log2dim == Int32(5)
+    end
+
+    @testset "LeafNodeData structure" begin
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+
+        leaf = LeafNodeData(
+            value_mask,
+            Float32[]  # values (read separately)
+        )
+        @test is_on(leaf.value_mask, 0) == true
+        @test is_on(leaf.value_mask, 1) == false
+    end
+
+    @testset "read_root_topology - empty root" begin
+        # Root with 0 tiles, 0 children
+        bytes = UInt8[]
+
+        # background value (f32)
+        append!(bytes, reinterpret(UInt8, [3.0f0]))
+        # num_tiles (i32)
+        append!(bytes, reinterpret(UInt8, [Int32(0)]))
+        # num_children (i32)
+        append!(bytes, reinterpret(UInt8, [Int32(0)]))
+
+        bytes = Vector{UInt8}(bytes)
+        root, pos = read_root_topology(bytes, 1)
+
+        @test root.background == 3.0f0
+        @test root.num_tiles == 0
+        @test root.num_children == 0
+        @test length(root.tiles) == 0
+        @test length(root.children) == 0
+        @test pos == 13  # 4 + 4 + 4
+    end
+
+    @testset "read_root_topology - with tiles" begin
+        bytes = UInt8[]
+
+        # background value
+        append!(bytes, reinterpret(UInt8, [0.0f0]))
+        # num_tiles = 2
+        append!(bytes, reinterpret(UInt8, [Int32(2)]))
+        # num_children = 0
+        append!(bytes, reinterpret(UInt8, [Int32(0)]))
+
+        # Tile 1: coord (0,0,0), value 1.0, active=true
+        append!(bytes, reinterpret(UInt8, [Int32(0), Int32(0), Int32(0)]))
+        append!(bytes, reinterpret(UInt8, [1.0f0]))
+        push!(bytes, 0x01)  # active = true
+
+        # Tile 2: coord (4096,0,0), value 2.0, active=false
+        append!(bytes, reinterpret(UInt8, [Int32(4096), Int32(0), Int32(0)]))
+        append!(bytes, reinterpret(UInt8, [2.0f0]))
+        push!(bytes, 0x00)  # active = false
+
+        bytes = Vector{UInt8}(bytes)
+        root, pos = read_root_topology(bytes, 1)
+
+        @test root.num_tiles == 2
+        @test root.tiles[1][1] == Coord(0, 0, 0)
+        @test root.tiles[1][2] == 1.0f0
+        @test root.tiles[1][3] == true
+        @test root.tiles[2][1] == Coord(4096, 0, 0)
+        @test root.tiles[2][2] == 2.0f0
+        @test root.tiles[2][3] == false
+    end
+
+    @testset "read_leaf_topology" begin
+        # Leaf mask: 512 bits = 64 bytes
+        bytes = zeros(UInt8, 64)
+        bytes[1] = 0xFF  # First 8 bits on
+
+        bytes = Vector{UInt8}(bytes)
+        leaf, pos = read_leaf_topology(bytes, 1)
+
+        @test count_on(leaf.value_mask) == 8
+        @test is_on(leaf.value_mask, 0) == true
+        @test is_on(leaf.value_mask, 7) == true
+        @test is_on(leaf.value_mask, 8) == false
+        @test pos == 65
+    end
+
+    @testset "read_internal_topology - no children" begin
+        # I1 node (log2dim=4): 4096 bits = 512 bytes per mask
+        mask_size = 512
+
+        bytes = UInt8[]
+        # child_mask: all zeros (no children)
+        append!(bytes, zeros(UInt8, mask_size))
+        # value_mask: first 8 bits on
+        value_mask_bytes = zeros(UInt8, mask_size)
+        value_mask_bytes[1] = 0xFF
+        append!(bytes, value_mask_bytes)
+
+        bytes = Vector{UInt8}(bytes)
+        internal, pos = read_internal_topology(bytes, 1, Int32(4), UInt32(222), COMPRESS_NONE, 0.0f0)
+
+        @test internal.log2dim == Int32(4)
+        @test count_on(internal.child_mask) == 0
+        @test count_on(internal.value_mask) == 8
+        @test pos == 1025  # 512 + 512 = 1024 bytes, so pos = 1025
+    end
+
+end
+
+@testset "TinyVDB Values" begin
+
+    @testset "NodeMaskFlag constants" begin
+        @test NO_MASK_OR_INACTIVE_VALS == 0
+        @test NO_MASK_AND_ONE_INACTIVE_VAL == 1
+        @test NO_MASK_AND_ALL_VALS == 6
+    end
+
+    @testset "read_leaf_values - uncompressed, all values" begin
+        # Create a leaf with some active voxels
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+        set_on!(value_mask, 1)
+        set_on!(value_mask, 511)
+
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        # Build bytes: value_mask (64 bytes) + per_node_flag (1 byte) + 512 float32 values
+        bytes = UInt8[]
+
+        # Value mask (64 bytes) - skip over this in buffer reading
+        mask_bytes = zeros(UInt8, 64)
+        mask_bytes[1] = 0x03  # bits 0 and 1
+        mask_bytes[64] = 0x80  # bit 511
+        append!(bytes, mask_bytes)
+
+        # per_node_flag = NO_MASK_AND_ALL_VALS
+        push!(bytes, UInt8(NO_MASK_AND_ALL_VALS))
+
+        # 512 float values (2048 bytes) - set specific values
+        values = zeros(Float32, 512)
+        values[1] = 1.0f0
+        values[2] = 2.0f0
+        values[512] = 512.0f0
+        append!(bytes, reinterpret(UInt8, values))
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222), COMPRESS_NONE)
+
+        @test length(result_leaf.values) == 512
+        @test result_leaf.values[1] == 1.0f0
+        @test result_leaf.values[2] == 2.0f0
+        @test result_leaf.values[512] == 512.0f0
+        @test pos == 2114  # 64 + 1 + 2048 + 1
+    end
+
+    @testset "read_leaf_values - compressed" begin
+        using CodecZlib
+
+        value_mask = NodeMask(Int32(3))
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        # Create test values
+        values = ones(Float32, 512)  # All 1.0 for good compression
+        raw_bytes = Vector{UInt8}(reinterpret(UInt8, values))
+        compressed = transcode(ZlibCompressor, raw_bytes)
+
+        bytes = UInt8[]
+        # Value mask (64 bytes)
+        append!(bytes, zeros(UInt8, 64))
+        # per_node_flag
+        push!(bytes, UInt8(NO_MASK_AND_ALL_VALS))
+        # Compressed size (i64)
+        append!(bytes, reinterpret(UInt8, [Int64(length(compressed))]))
+        # Compressed data
+        append!(bytes, compressed)
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222), COMPRESS_ZIP)
+
+        @test length(result_leaf.values) == 512
+        @test all(v -> v == 1.0f0, result_leaf.values)
+    end
+
+    @testset "read_tree_values" begin
+        # Build a minimal tree structure with one leaf
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        # I1 node with one child
+        i1_child_mask = NodeMask(Int32(4))
+        set_on!(i1_child_mask, 0)  # Child at position 0
+        i1_value_mask = NodeMask(Int32(4))
+        i1 = InternalNodeData(Int32(4), i1_child_mask, i1_value_mask, Float32[], [(Int32(0), leaf)])
+
+        # I2 node with one child
+        i2_child_mask = NodeMask(Int32(5))
+        set_on!(i2_child_mask, 0)
+        i2_value_mask = NodeMask(Int32(5))
+        i2 = InternalNodeData(Int32(5), i2_child_mask, i2_value_mask, Float32[], [(Int32(0), i1)])
+
+        # Root with one child
+        root = RootNodeData(0.0f0, Int32(0), Int32(1), [], [(Coord(0, 0, 0), i2)])
+
+        # Build bytes: leaf values only (internal nodes don't store values in our simplified model)
+        bytes = UInt8[]
+        append!(bytes, zeros(UInt8, 64))  # mask
+        push!(bytes, UInt8(NO_MASK_AND_ALL_VALS))
+        values = zeros(Float32, 512)
+        values[1] = 42.0f0
+        append!(bytes, reinterpret(UInt8, values))
+
+        bytes = Vector{UInt8}(bytes)
+        result_root, pos = read_tree_values(bytes, 1, root, UInt32(222), COMPRESS_NONE)
+
+        # Navigate to the leaf
+        i2_result = result_root.children[1][2]
+        i1_result = i2_result.children[1][2]
+        leaf_result = i1_result.children[1][2]
+
+        @test leaf_result.values[1] == 42.0f0
+    end
+
+end
+
+@testset "TinyVDB Parser" begin
+
+    @testset "TinyGrid structure" begin
+        # Create a minimal grid
+        value_mask = NodeMask(Int32(3))
+        leaf = LeafNodeData(value_mask, Float32[1.0])
+        i1_child_mask = NodeMask(Int32(4))
+        i1 = InternalNodeData(Int32(4), i1_child_mask, NodeMask(Int32(4)), Float32[], [])
+        i2_child_mask = NodeMask(Int32(5))
+        i2 = InternalNodeData(Int32(5), i2_child_mask, NodeMask(Int32(5)), Float32[], [])
+        root = RootNodeData(0.0f0, Int32(0), Int32(0), [], [])
+
+        grid = TinyGrid("density", root)
+
+        @test grid.name == "density"
+        @test grid.root.background == 0.0f0
+    end
+
+    @testset "TinyVDBFile structure" begin
+        header = VDBHeader(
+            UInt32(222),
+            UInt32(9),
+            UInt32(0),
+            false,
+            false,
+            "test-uuid",
+            UInt64(100)
+        )
+
+        file = TinyVDBFile(header, Dict{String, TinyGrid}())
+
+        @test file.header.file_version == UInt32(222)
+        @test isempty(file.grids)
+    end
+
+    @testset "read_metadata - skip over" begin
+        # Build minimal metadata: count = 1, name = "test", type = "string", value = "hello"
+        bytes = UInt8[]
+
+        # count = 1
+        append!(bytes, reinterpret(UInt8, [Int32(1)]))
+
+        # name = "test"
+        append!(bytes, reinterpret(UInt8, [UInt32(4)]))
+        append!(bytes, Vector{UInt8}("test"))
+
+        # type = "string"
+        append!(bytes, reinterpret(UInt8, [UInt32(6)]))
+        append!(bytes, Vector{UInt8}("string"))
+
+        # value = "hello"
+        append!(bytes, reinterpret(UInt8, [UInt32(5)]))
+        append!(bytes, Vector{UInt8}("hello"))
+
+        bytes = Vector{UInt8}(bytes)
+        pos = read_metadata(bytes, 1)
+
+        # Should skip over all metadata
+        @test pos == length(bytes) + 1
+    end
+
+    @testset "read_transform - skip over" begin
+        # Transform: 3x4 matrix (doubles) = 12 doubles = 96 bytes for linear
+        # For now we just skip transforms
+
+        # Build a simple linear transform
+        bytes = UInt8[]
+
+        # Transform type string
+        append!(bytes, reinterpret(UInt8, [UInt32(6)]))
+        append!(bytes, Vector{UInt8}("linear"))
+
+        # 3x4 matrix (12 doubles = 96 bytes)
+        for _ in 1:12
+            append!(bytes, reinterpret(UInt8, [Float64(1.0)]))
+        end
+
+        bytes = Vector{UInt8}(bytes)
+        pos = read_transform(bytes, 1)
+
+        # Should be past the transform data: 4 (len) + 6 (str) + 96 (matrix) + 1 = 107
+        @test pos == 107
     end
 
 end

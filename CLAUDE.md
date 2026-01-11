@@ -155,6 +155,21 @@ The C++ reference (tinyvdbio) reads **sequentially** — it never seeks to `bloc
 
 This avoids the offset calculation bugs in the current implementation.
 
+### ⚠️ MANDATORY PROTOCOL FOR TINYVDB WORK
+
+**Previous agents introduced bugs by not verifying against C++ reference. This protocol is NON-NEGOTIABLE.**
+
+1. **BEFORE implementing ANY function**: Read the corresponding C++ function in `reference/tinyvdbio.h`
+2. **Document the EXACT byte format** in comments before writing code
+3. **Implement to match C++ EXACTLY** - no assumptions, no shortcuts
+4. **Test on cube.vdb ONLY** - it's small (3.8MB), never test on large files
+5. **REPORT BACK after EVERY issue** - do NOT chain multiple fixes without reporting
+
+**Known bugs from not following protocol:**
+- `read_metadata`: Missing 4-byte size prefix for typed values
+- `read_transform`: Wrong format (should be 5 Vec3d = 120 bytes for UniformScaleMap)
+- `read_grid`: Was missing buffer_count read before topology
+
 ### Scope
 - v222 format only
 - Float32 values only

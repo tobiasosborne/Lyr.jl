@@ -2,7 +2,59 @@
 
 ---
 
-## Latest Session (2026-01-11) - TinyVDB Implementation Started
+## Latest Session (2026-01-11) - TinyVDB AUDIT REQUIRED
+
+**Status**: 🔴 CRITICAL - Previous implementations did NOT match C++ reference
+
+### Summary
+
+Discovered that TinyVDB implementation has MULTIPLE bugs because previous agents did not carefully verify against `reference/tinyvdbio.h`. Parser fails on cube.vdb.
+
+### Critical Bugs Found
+
+1. **Parser.jl `read_metadata`**: Missing 4-byte size prefix for typed values (bool, float, double, int32, int64, vec3i, vec3d)
+2. **Parser.jl `read_transform`**: Completely wrong format - should read 5 Vec3d (15 doubles = 120 bytes) for UniformScaleMap/UniformScaleTranslateMap
+3. **Parser.jl `read_grid`**: Was missing buffer_count (int32) read before topology (now added)
+
+### Mandatory Protocol for Future Agents
+
+**BEFORE implementing ANY TinyVDB function:**
+1. Read the corresponding C++ function in `reference/tinyvdbio.h`
+2. Document the EXACT byte format
+3. Implement to match EXACTLY
+4. Test on cube.vdb ONLY (small file)
+
+**REPORT BACK after EVERY issue. Do NOT chain multiple fixes without reporting.**
+
+### Audit Issues Created (ALL P0)
+
+| Issue ID | File | Status |
+|----------|------|--------|
+| path-tracer-g73 | Binary.jl | open |
+| path-tracer-btf | Compression.jl | open |
+| path-tracer-z0t | GridDescriptor.jl | open |
+| path-tracer-dwx | Header.jl | open |
+| path-tracer-5vr | Mask.jl | open |
+| path-tracer-o0y | Parser.jl | open |
+| path-tracer-2yl | Topology.jl | open |
+| path-tracer-kck | Types.jl | open |
+| path-tracer-31s | Values.jl | open |
+| path-tracer-3jb | TinyVDB.jl | open |
+
+### Other Open Issues
+
+- path-tracer-8hz - Missing buffer_count bug (fix applied but other bugs block testing)
+- path-tracer-nss - Entry point (in_progress)
+
+### Next Steps
+
+1. Work through audit issues ONE AT A TIME
+2. Start with path-tracer-g73 (Binary.jl)
+3. For each: read C++ ref, compare Julia, fix discrepancies, report back
+
+---
+
+## Previous Session (2026-01-11) - TinyVDB Implementation Started
 
 **Status**: 🟢 IN PROGRESS - 4/12 components complete, 152 tests passing
 

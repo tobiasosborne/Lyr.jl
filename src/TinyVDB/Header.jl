@@ -1,8 +1,14 @@
 # Header.jl - VDB file header parsing for TinyVDB
 
 """
-VDB file magic number: " VDB" (0x20424456) as little-endian Int64.
-This is stored in the first 8 bytes of every VDB file.
+VDB file magic bytes: " BDV" followed by 4 null bytes.
+Stored as raw ASCII bytes at the start of every VDB file.
+Note: This spells " BDV" not " VDB" - the format stores it this way.
+"""
+const VDB_MAGIC_BYTES = UInt8[0x20, 0x42, 0x44, 0x56, 0x00, 0x00, 0x00, 0x00]
+
+"""
+VDB file magic number as Int64 for legacy comparisons.
 """
 const VDB_MAGIC = Int64(0x20424456)
 
@@ -12,7 +18,7 @@ const VDB_MAGIC = Int64(0x20424456)
 Parse VDB file header starting at position `pos`.
 
 The VDB header layout is:
-- [0:7]   magic number (0x20424456 = " VDB" as int64, little-endian)
+- [0:7]   magic number (8 bytes: " BDV" + 4 null bytes)
 - [8:11]  file version (uint32)
 - [12:15] major version (uint32)
 - [16:19] minor version (uint32)
@@ -23,9 +29,14 @@ The VDB header layout is:
 Returns the header and the position immediately after the header (offset_to_data).
 """
 function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
-    # Read magic (8 bytes as Int64)
-    magic, pos = read_i64(bytes, pos)
-    magic != VDB_MAGIC && error("Invalid VDB magic number: expected 0x$(string(VDB_MAGIC, base=16)), got 0x$(string(magic, base=16))")
+    # Read and verify magic bytes
+    @boundscheck checkbounds(bytes, pos:pos+7)
+    magic_bytes = bytes[pos:pos+7]
+    pos += 8
+
+    if magic_bytes != VDB_MAGIC_BYTES
+        error("Invalid VDB magic bytes: expected $(VDB_MAGIC_BYTES), got $(magic_bytes)")
+    end
 
     # Read file version
     file_version, pos = read_u32(bytes, pos)
