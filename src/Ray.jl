@@ -112,9 +112,9 @@ end
 function _intersect_internal2!(intersections::Vector{LeafIntersection{T}}, ray::Ray, node::InternalNode2{T}) where T
     # Check if ray intersects this node's bounding box
     node_size = Int32(4096)  # 8 * 16 * 32
-    bbox = BBox(node.origin, (node.origin[1] + node_size - Int32(1),
-                               node.origin[2] + node_size - Int32(1),
-                               node.origin[3] + node_size - Int32(1)))
+    bbox = BBox(node.origin, Coord(node.origin[1] + node_size - Int32(1),
+                                    node.origin[2] + node_size - Int32(1),
+                                    node.origin[3] + node_size - Int32(1)))
 
     if intersect_bbox(ray, bbox) === nothing
         return
@@ -130,9 +130,9 @@ end
 function _intersect_internal1!(intersections::Vector{LeafIntersection{T}}, ray::Ray, node::InternalNode1{T}) where T
     # Check if ray intersects this node's bounding box
     node_size = Int32(128)  # 8 * 16
-    bbox = BBox(node.origin, (node.origin[1] + node_size - Int32(1),
-                               node.origin[2] + node_size - Int32(1),
-                               node.origin[3] + node_size - Int32(1)))
+    bbox = BBox(node.origin, Coord(node.origin[1] + node_size - Int32(1),
+                                    node.origin[2] + node_size - Int32(1),
+                                    node.origin[3] + node_size - Int32(1)))
 
     if intersect_bbox(ray, bbox) === nothing
         return
@@ -147,9 +147,9 @@ end
 
 function _intersect_leaf!(intersections::Vector{LeafIntersection{T}}, ray::Ray, leaf::LeafNode{T}) where T
     leaf_size = Int32(8)
-    bbox = BBox(leaf.origin, (leaf.origin[1] + leaf_size - Int32(1),
-                               leaf.origin[2] + leaf_size - Int32(1),
-                               leaf.origin[3] + leaf_size - Int32(1)))
+    bbox = BBox(leaf.origin, Coord(leaf.origin[1] + leaf_size - Int32(1),
+                                    leaf.origin[2] + leaf_size - Int32(1),
+                                    leaf.origin[3] + leaf_size - Int32(1)))
 
     result = intersect_bbox(ray, bbox)
     if result !== nothing

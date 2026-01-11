@@ -2,9 +2,85 @@
 
 ---
 
-## Latest Session (2026-01-11) - Sphere Tracing Renderer
+## Latest Session (2026-01-11 PM) - Investigation & Bug Fixes
 
-**Status**: ✅ SUCCESS - Implemented sphere tracing renderer with Camera, shading, PPM output.
+**Status**: 🔴 CRITICAL BUG FOUND - Leaf values are garbage, parsing is broken.
+
+### Summary
+
+Previous session claimed "sphere tracing works but misses due to sparse data." **This is wrong.** The real problem is that **leaf values are corrupt garbage** (values like `2.0e23`, `NaN`).
+
+### What Was Fixed
+
+**Ray.jl BBox bug** (3 places):
+- `_intersect_internal2!`, `_intersect_internal1!`, `_intersect_leaf!` all created `BBox` with tuples instead of `Coord`
+- Changed `BBox(origin, (x, y, z))` → `BBox(origin, Coord(x, y, z))`
+- `intersect_leaves` now works correctly
+
+### Critical Finding: Leaf Values Are Garbage
+
+```julia
+# Leaf at Coord(-48, -56, -40) from cube.vdb:
+Active count: 320
+Values at first few active indices: [0.15, 2.0589416e23, 2.0589416e23, 2.011718e23, ...]
+Min/max values: NaN / NaN
+```
+
+**The VDB parser is NOT correctly reading/decompressing v222 leaf values.**
+
+This explains:
+1. Why sphere tracing returns `nothing` - SDF values are garbage
+2. Why the renderer produces blank images
+3. Why issue `path-tracer-52o` (tracer bullet verification) exists
+
+### File Details
+
+- **cube.vdb**: Format v222, NoCompression in header
+- Grid parses: 547 leaves, 178665 active voxels (counts look correct)
+- But actual values are corrupt
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Ray.jl` | Fixed BBox construction (tuple → Coord) in 3 places |
+
+### What Needs Investigation
+
+1. **Values.jl** - `read_leaf_values` may be reading wrong bytes or wrong format
+2. **TreeRead.jl** - Tree construction may be corrupting values
+3. **Compression.jl** - Decompression may be returning garbage
+
+### Debug Scripts
+
+There are **27 debug scripts** in `scripts/` from previous sessions. Issue `path-tracer-6q6` tracks cleanup.
+
+### Next Steps
+
+1. Read `docs/VDB_FORMAT_COMPLETE.md` for v222 leaf value format
+2. Trace exact bytes being read for leaf values in cube.vdb
+3. Compare against OpenVDB C++ reference output
+4. Fix value parsing before any renderer work
+
+### Beads Issue Chain (in order)
+
+**SCOPE: cube.vdb ONLY until chain complete**
+
+| Issue | Status | Description |
+|-------|--------|-------------|
+| `path-tracer-fdb` | READY | Read VDB_FORMAT_COMPLETE.md for v222 leaf format |
+| `path-tracer-5vn` | blocked by fdb | Trace exact bytes read for cube.vdb leaves |
+| `path-tracer-wfo` | blocked by 5vn | Fix v222 leaf value parsing |
+| `path-tracer-2zj` | blocked by wfo | BLOCKER: leaf values are garbage |
+| `path-tracer-52o` | blocked by 2zj | Tracer bullet: cube.vdb verification |
+
+**Next agent MUST start with `path-tracer-fdb`** - read the format spec before any code changes.
+
+---
+
+## Previous Session (2026-01-11) - Sphere Tracing Renderer
+
+**Status**: ⚠️ PARTIAL - Renderer implemented but produces blank output due to corrupt values.
 
 ### What Was Implemented
 
