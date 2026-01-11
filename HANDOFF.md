@@ -1,6 +1,62 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-10) - v220 FIX IS BROKEN
+## Latest Session (2026-01-11) - Pivot to Tracer Bullet with Small VDBs
+
+**Status**: ✅ Pivoted away from v220/bunny. Downloaded small reference VDBs. Created P0 tracer bullet issues.
+
+### Strategic Decision
+
+v220 format (bunny_cloud.vdb) is complex and blocked. Instead of continuing to debug it, we're focusing on a **tracer bullet implementation** using small, well-behaved v222 files.
+
+### Work Completed
+
+1. **Deprecated v220/bunny issues**:
+   - Closed `ly-1sc` and `path-tracer-1sc` (bunny stress tests)
+   - v220 remains on ice until core v222 support is solid
+
+2. **Downloaded small VDB reference files** (all v222/v224):
+   | File | Size | Version | Status |
+   |------|------|---------|--------|
+   | cube.vdb | 3.7MB | v222 | ✅ Parsing |
+   | icosahedron.vdb | 1.1MB | v222 | ✅ Parsing |
+   | sphere.vdb | 811KB | v222 | ✅ Parsing |
+   | utahteapot.vdb | 19MB | v222 | ✅ Parsing |
+   | sphere_points.vdb | 139KB | v224 | ❌ PointDataGrid not supported |
+
+3. **Created P0 tracer bullet issues**:
+   - `path-tracer-q8t`: cube.vdb end-to-end parsing and value verification
+   - `path-tracer-4op`: sphere.vdb level set parsing and SDF verification
+   - `path-tracer-afl`: icosahedron.vdb parsing and topology verification
+
+4. **Closed obsolete issues**:
+   - `path-tracer-1ni`: Sample VDB files downloaded
+   - `path-tracer-knz`: Integration tests no longer placeholders
+
+### Test Results
+
+```
+cube.vdb        5/5 tests passing
+icosahedron.vdb 5/5 tests passing
+sphere.vdb      5/5 tests passing
+utahteapot.vdb  5/5 tests passing
+```
+
+### Next Steps (Tracer Bullet)
+
+1. Pick one P0 issue (recommend `path-tracer-q8t` cube.vdb)
+2. Generate reference values from OpenVDB C++ tools
+3. Verify our parsed values match exactly
+4. Fix any discrepancies
+5. Repeat for sphere and icosahedron
+
+### Repository State
+- Working tree: **clean**
+- All commits: **pushed**
+- v222 parsing: **working** for small files
+
+---
+
+## Previous Session (2026-01-10) - v220 FIX IS BROKEN
 
 **Status**: ❌ **v220 parsing still fails.** Previous agent's fix did NOT work.
 
