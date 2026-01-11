@@ -2,7 +2,114 @@
 
 ---
 
-## Latest Session (2026-01-11 PM) - Investigation & Bug Fixes
+## Latest Session (2026-01-11 Night) - C++ Reference Investigation
+
+**Status**: 🟡 INVESTIGATION IN PROGRESS - Fix attempted but values still garbage
+
+### Summary
+
+Applied fix to Grid.jl:65, but values still garbage. Began C++ reference investigation.
+
+### What Was Changed
+
+**File**: `src/Grid.jl:65`
+
+```julia
+# BEFORE:
+values_start = grid_start_pos + Int(block_offset)
+
+# AFTER (current):
+values_start = Int(block_offset) + 1
+```
+
+### The Problem
+
+After fix, values are STILL garbage (NaN, -1.7e38). This means either:
+1. The fix is wrong (off-by-one still)
+2. There's another bug elsewhere
+
+### Byte Position Analysis
+
+```
+block_offset from file = 514617
+
+bytes[514617] = 0    ← Valid metadata byte (NO_MASK_OR_INACTIVE_VALS)
+bytes[514618] = 252  ← Not metadata
+bytes[514619] = 254
+```
+
+**Confusion**: If block_offset=514617 is 0-indexed, Julia position should be 514618. But the metadata byte (0) is at Julia position 514617.
+
+This suggests EITHER:
+- block_offset is already 1-indexed in VDB files (unusual for C++)
+- OR there's something else wrong
+
+### C++ Reference Investigation (INCOMPLETE)
+
+Examined `reference/` files to understand how OpenVDB uses block_offset:
+
+**tinyvdbio.h findings**:
+- `seek_set(gd.GridPos())` at lines 2746, 3061 - seeks directly to grid position
+- `BlockPos()` accessor exists but is NOT USED in tinyvdbio implementation
+- tinyvdbio reads sequentially after seeking to GridPos
+
+**LeafNode.h findings** (lines 1327-1446):
+- `readTopology()`: Only reads value mask (64 bytes for leaf)
+- `readBuffers()`: Reads value mask AGAIN (or seeks over it), then reads compressed values
+- The value mask appears in BOTH topology and values sections
+
+**Key insight**: In official OpenVDB:
+```cpp
+// readBuffers() line 1382-1388
+if (seekable) {
+    mValueMask.seek(is);  // Seek OVER the mask (skip it)
+} else {
+    mValueMask.load(is);  // Read the mask
+}
+// Then read compressed values...
+```
+
+### UNRESOLVED QUESTION
+
+How does OpenVDB seek to `block_pos` before calling `readBuffers()`?
+
+Need to find where the actual seek happens. The investigation was interrupted before finding this.
+
+### Next Steps for Next Agent
+
+1. **Find the seek**: Search OpenVDB C++ for where `block_pos` / `BlockPos()` is used with seekg/seek_set
+2. **Understand the offset**: Determine if block_offset is 0-indexed or 1-indexed
+3. **Check v222 format**: The value mask may be stored differently in v222+ format
+
+### Files to Examine
+
+| File | What to look for |
+|------|------------------|
+| `reference/RootNode.h` | Tree reading entry point, may have seek logic |
+| `reference/InternalNode.h` | May show how tree traversal works |
+| OpenVDB Archive.cc (not in reference/) | File-level seek operations |
+
+### Current Grid.jl State
+
+```julia
+# Line 65 - CURRENTLY:
+values_start = Int(block_offset) + 1
+
+# THREE OPTIONS TO TRY:
+# 1. values_start = Int(block_offset) + 1  ← Current (doesn't work)
+# 2. values_start = Int(block_offset)      ← No +1
+# 3. values_start = grid_start_pos + Int(block_offset)  ← Original (doesn't work)
+```
+
+### Beads Issues
+
+- `path-tracer-h60` - CLOSED (fix applied)
+- `path-tracer-1x0` - IN PROGRESS (verification - values still bad)
+- `path-tracer-9d7` - BLOCKED (TreeRead.jl fix)
+
+---
+
+## Previous Session (2026-01-11 PM) - Investigation & Bug Fixes
 
 **Status**: 🔴 CRITICAL BUG FOUND - Leaf values are garbage, parsing is broken.
 
@@ -28,11 +135,6 @@ Min/max values: NaN / NaN
 
 **The VDB parser is NOT correctly reading/decompressing v222 leaf values.**
 
-This explains:
-1. Why sphere tracing returns `nothing` - SDF values are garbage
-2. Why the renderer produces blank images
-3. Why issue `path-tracer-52o` (tracer bullet verification) exists
-
 ### File Details
 
 - **cube.vdb**: Format v222, NoCompression in header
@@ -44,37 +146,6 @@ This explains:
 | File | Change |
 |------|--------|
 | `src/Ray.jl` | Fixed BBox construction (tuple → Coord) in 3 places |
-
-### What Needs Investigation
-
-1. **Values.jl** - `read_leaf_values` may be reading wrong bytes or wrong format
-2. **TreeRead.jl** - Tree construction may be corrupting values
-3. **Compression.jl** - Decompression may be returning garbage
-
-### Debug Scripts
-
-There are **27 debug scripts** in `scripts/` from previous sessions. Issue `path-tracer-6q6` tracks cleanup.
-
-### Next Steps
-
-1. Read `docs/VDB_FORMAT_COMPLETE.md` for v222 leaf value format
-2. Trace exact bytes being read for leaf values in cube.vdb
-3. Compare against OpenVDB C++ reference output
-4. Fix value parsing before any renderer work
-
-### Beads Issue Chain (in order)
-
-**SCOPE: cube.vdb ONLY until chain complete**
-
-| Issue | Status | Description |
-|-------|--------|-------------|
-| `path-tracer-fdb` | READY | Read VDB_FORMAT_COMPLETE.md for v222 leaf format |
-| `path-tracer-5vn` | blocked by fdb | Trace exact bytes read for cube.vdb leaves |
-| `path-tracer-wfo` | blocked by 5vn | Fix v222 leaf value parsing |
-| `path-tracer-2zj` | blocked by wfo | BLOCKER: leaf values are garbage |
-| `path-tracer-52o` | blocked by 2zj | Tracer bullet: cube.vdb verification |
-
-**Next agent MUST start with `path-tracer-fdb`** - read the format spec before any code changes.
 
 ---
 

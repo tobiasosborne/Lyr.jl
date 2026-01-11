@@ -47,6 +47,20 @@ v220 leaf values:  [origin 12B][numBuffers 1B][raw active values...]
 v222+ leaf values: [metadata 1B][inactive vals?][selection mask?][compressed values...]
 ```
 
+### ⚠️ CRITICAL: Grid Descriptor Offsets
+
+**All offsets in GridDescriptor are ABSOLUTE from file start, not relative!**
+
+```julia
+# byte_offset  = absolute position of grid data start
+# block_offset = absolute position of values section start
+# end_offset   = absolute position of grid end
+
+# To convert to Julia 1-indexed:
+values_start = Int(block_offset) + 1  # CORRECT
+values_start = grid_start + block_offset  # WRONG - double counts!
+```
+
 ## TDD: The Law
 
 ```

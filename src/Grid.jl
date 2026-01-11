@@ -43,8 +43,10 @@ end
 Parse a complete grid from bytes.
 
 For VDB v222+, topology and values are stored in separate sections:
-- Topology section: from grid start to grid_start + block_offset
-- Values section: from grid_start + block_offset onwards
+- Topology section: from current position
+- Values section: at absolute file offset `block_offset`
+
+Note: `block_offset` is an ABSOLUTE offset from file start (0-indexed), not relative to grid.
 
 For older versions, topology and values are interleaved per-subtree.
 
@@ -59,8 +61,8 @@ function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask
     background, pos = read_tile_value(T, bytes, pos)
 
     # Calculate values section start position for v222+
-    # In Julia 1-indexed: values_start = grid_start_pos + block_offset
-    values_start = grid_start_pos + Int(block_offset)
+    # block_offset is ABSOLUTE from file start (0-indexed), convert to Julia 1-indexed
+    values_start = Int(block_offset) + 1
 
     # Read tree
     tree, pos = read_tree(T, bytes, pos, codec, mask_compressed, background, grid_class, version, values_start)
