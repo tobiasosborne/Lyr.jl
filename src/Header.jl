@@ -16,6 +16,7 @@ Header information from a VDB file.
 - `library_minor::UInt32` - Library minor version
 - `has_grid_offsets::Bool` - Whether grid offsets are stored
 - `compression::Codec` - File-level compression codec
+- `active_mask_compression::Bool` - Whether COMPRESS_ACTIVE_MASK is set (sparse value storage)
 - `uuid::String` - Unique file identifier (36-char ASCII UUID string)
 """
 struct VDBHeader
@@ -24,6 +25,7 @@ struct VDBHeader
     library_minor::UInt32
     has_grid_offsets::Bool
     compression::Codec
+    active_mask_compression::Bool
     uuid::String
 end
 
@@ -73,23 +75,28 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     uuid_bytes, pos = read_bytes(bytes, pos, 36)
     uuid = String(uuid_bytes)
 
-    # Read compression (4 bytes u32 LE) if version >= 222
-    # For older versions, default to ZipCodec (standard OpenVDB behavior)
-    compression = if format_version >= 222
-        compression_u32, pos = read_u32_le(bytes, pos)
-        if compression_u32 == 0
-            NoCompression()
-        elseif compression_u32 == 1
-            ZipCodec()
-        elseif compression_u32 == 2
-            BloscCodec()
-        else
-            NoCompression()  # Unknown, assume none
-        end
+    # Read compression flags (4 bytes u32 LE) if version >= 222
+    # Flags are a bitfield: 0x1=ZIP, 0x2=ACTIVE_MASK, 0x4=BLOSC
+    # For older versions, default to ZipCodec with ACTIVE_MASK (standard OpenVDB behavior)
+    compression_flags = if format_version >= 222
+        flags, pos = read_u32_le(bytes, pos)
+        flags
     else
-        ZipCodec()
+        UInt32(0x3)  # ZIP + ACTIVE_MASK default for pre-222
     end
 
-    header = VDBHeader(format_version, library_major, library_minor, has_grid_offsets, compression, uuid)
+    # Determine codec from flags
+    compression = if (compression_flags & 0x4) != 0
+        BloscCodec()
+    elseif (compression_flags & 0x1) != 0
+        ZipCodec()
+    else
+        NoCompression()
+    end
+
+    # Check COMPRESS_ACTIVE_MASK flag (0x2)
+    active_mask_compression = (compression_flags & 0x2) != 0
+
+    header = VDBHeader(format_version, library_major, library_minor, has_grid_offsets, compression, active_mask_compression, uuid)
     (header, pos)
 end

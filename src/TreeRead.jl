@@ -175,27 +175,29 @@ function read_leaf_values_v222_raw(::Type{T}, bytes::Vector{UInt8}, pos::Int, se
 end
 
 """
-    materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32) -> Tuple{InternalNode2{T}, Int}
+    materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, version::UInt32) -> Tuple{InternalNode2{T}, Int}
 
 Materialize values for an I2 subtree from the values section (v222+ format).
 
-V222+ level set format per-leaf:
-1. Selection mask (64 bytes) - indicates which voxels have stored values
-2. Raw Float32 values for selected voxels (no compression, no metadata)
-3. Non-selected voxels use background value
+V222+ value format per-leaf:
+1. Metadata byte (1 byte) - determines format variant
+2. Optional inactive value(s) based on metadata
+3. Optional selection mask (64 bytes) for metadata 3/4/5
+4. Compressed values - count depends on mask_compressed flag:
+   - If mask_compressed: only active values (value_mask.countOn())
+   - Otherwise: all 512 values
 """
-function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
-    # V222+ level set format: interleaved [64-byte selection mask][raw values] per leaf
+function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
+    # V222+ format: each leaf has [metadata][optional inactive vals][optional selection mask][compressed values]
     i1_nodes = Vector{InternalNode1{T}}()
 
     for i1_topo in i2_topo.children
         leaf_nodes = Vector{LeafNode{T}}()
 
         for leaf_topo in i1_topo.leaves
-            # Read 64-byte selection mask inline
-            selection_mask, pos = read_mask(LeafMask, bytes, pos)
-            # Read raw values for selected voxels
-            values, pos = read_leaf_values_v222_raw(T, bytes, pos, selection_mask, background)
+            # Use read_leaf_values which handles the v222+ format with metadata byte,
+            # optional selection mask, and compressed values
+            values, pos = read_leaf_values(T, bytes, pos, codec, mask_compressed, leaf_topo.value_mask, background, version)
             push!(leaf_nodes, LeafNode{T}(leaf_topo.origin, leaf_topo.value_mask, values))
         end
 
@@ -243,11 +245,11 @@ function is_valid_i2_origin(x::Int32, y::Int32, z::Int32)::Bool
 end
 
 """
-    read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32, values_start::Int) -> Tuple{Tree{T}, Int}
+    read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int) -> Tuple{Tree{T}, Int}
 
 Read a complete VDB tree for v222+ format where topology and values are separate.
 """
-function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32, values_start::Int)::Tuple{Tree{T}, Int} where T
+function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int)::Tuple{Tree{T}, Int} where T
     # Read background_active (only for fog volumes)
     background_active = false
     if grid_class == GRID_FOG_VOLUME || grid_class == GRID_UNKNOWN
@@ -333,8 +335,8 @@ function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec,
     pos = values_start
 
     for (origin, i2_topo) in zip(i2_origins, i2_topos)
-        # materialize_i2_values_v222 reads selection masks inline with values
-        node, pos = materialize_i2_values_v222(T, i2_topo, bytes, pos, codec, background, version)
+        # materialize_i2_values_v222 reads values per-leaf with proper format handling
+        node, pos = materialize_i2_values_v222(T, i2_topo, bytes, pos, codec, mask_compressed, background, version)
         table[origin] = node
     end
 
@@ -425,11 +427,11 @@ function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos
 end
 
 """
-    read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32) -> Tuple{Tree{T}, Int}
+    read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32) -> Tuple{Tree{T}, Int}
 
 Read a complete VDB tree with interleaved topology and values (pre-v222 format).
 """
-function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
+function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
     # Read counts (no background_active for pre-v222)
     tile_count, pos = read_u32_le(bytes, pos)
     child_count, pos = read_u32_le(bytes, pos)
@@ -469,15 +471,15 @@ end
 # =============================================================================
 
 """
-    read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32, values_start::Int) -> Tuple{Tree{T}, Int}
+    read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int) -> Tuple{Tree{T}, Int}
 
 Read a complete VDB tree structure.
 Dispatches to v222+ or pre-v222 format based on version.
 """
-function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, grid_class::GridClass, version::UInt32, values_start::Int)::Tuple{Tree{T}, Int} where T
+function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int)::Tuple{Tree{T}, Int} where T
     if version >= 222
-        read_tree_v222(T, bytes, pos, codec, background, grid_class, version, values_start)
+        read_tree_v222(T, bytes, pos, codec, mask_compressed, background, grid_class, version, values_start)
     else
-        read_tree_interleaved(T, bytes, pos, codec, background, grid_class, version)
+        read_tree_interleaved(T, bytes, pos, codec, mask_compressed, background, grid_class, version)
     end
 end

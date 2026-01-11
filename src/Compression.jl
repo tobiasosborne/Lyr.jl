@@ -77,9 +77,9 @@ end
 Read a size-prefixed compressed block and decompress it.
 The block format is: compressed_size (i64) | data
 
-- If compressed_size < 0: Data is uncompressed. Read abs(compressed_size) bytes.
+- If compressed_size <= 0: Data is uncompressed. Read expected_size bytes directly.
+  (The sign is just a flag; the actual size is always expected_size for uncompressed data)
 - If compressed_size > 0: Data is compressed. Read compressed_size bytes then decompress.
-- If compressed_size = 0: Empty.
 
 For NoCompression, the format is just raw bytes (this function shouldn't be called typically, or handled by size=expected).
 """
@@ -87,20 +87,10 @@ function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, exp
     # Read chunk size (signed Int64)
     chunk_size, pos = read_i64_le(bytes, pos)
 
-    if chunk_size == 0
-        return (UInt8[], pos)
-    end
-
-    if chunk_size < 0
-        # Uncompressed data
-        # Size is -chunk_size
-        raw_size = -chunk_size
-        if raw_size != expected_size
-            throw(ChunkSizeMismatchError(pos, expected_size, Int(raw_size), chunk_size))
-        end
-        
-        # Read raw bytes directly
-        data, pos = read_bytes(bytes, pos, Int(raw_size))
+    if chunk_size <= 0
+        # Uncompressed data (chunk_size <= 0 is just a flag, not the size)
+        # Read expected_size raw bytes directly
+        data, pos = read_bytes(bytes, pos, expected_size)
         return (data, pos)
     else
         # Compressed data

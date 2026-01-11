@@ -1,12 +1,16 @@
 # Values.jl - Parse node values
 
 """
-    read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T) -> Tuple{Vector{T}, Int}
+    read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T) -> Tuple{Vector{T}, Int}
 
 Read node values from bytes using VDB's internal compression schemes. Returns a dense vector of size N.
 Used for both LeafNodes and InternalNodes.
+
+The `mask_compressed` flag (COMPRESS_ACTIVE_MASK) determines whether only active values are stored:
+- If mask_compressed AND metadata != 6: read active_count values
+- Otherwise: read all N values
 """
-function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::Mask{N,W}, background::T)::Tuple{Vector{T}, Int} where {T,N,W}
+function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T)::Tuple{Vector{T}, Int} where {T,N,W}
     # 1. Read metadata byte
     metadata, pos = read_u8(bytes, pos)
 
@@ -38,35 +42,33 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
         selection_mask, pos = read_mask(Mask{N,W}, bytes, pos)
     end
 
-    # 4. Read active values
+    # 4. Determine how many values to read
+    # If COMPRESS_ACTIVE_MASK is set AND metadata != 6: only active values are stored
+    # Otherwise: all values are stored
     active_count = count_on(mask)
+    use_sparse = mask_compressed && metadata != 6
 
-    expected_size = if metadata == 6 # NO_MASK_AND_ALL_VALS
-        N * sizeof(T)
-    else
+    expected_size = if use_sparse
         active_count * sizeof(T)
+    else
+        N * sizeof(T)
     end
 
     # Always call read_compressed_bytes to handle stream structure (e.g. size prefix)
     data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
-    active_values = reinterpret(T, data)
+    stored_values = reinterpret(T, data)
 
     # 5. Assemble final values array
     all_values = Vector{T}(undef, N)
 
-    if metadata == 6 # NO_MASK_AND_ALL_VALS
-        # All values are stored densely, regardless of mask
-        for i in 1:N
-            all_values[i] = active_values[i]
-        end
-    else
+    if use_sparse
         # Sparse storage: only active values are stored
         active_idx = 1
         for i in 0:(N-1)
             if is_on(mask, i)
                 # Safely access active values
-                if active_idx <= length(active_values)
-                    all_values[i+1] = active_values[active_idx]
+                if active_idx <= length(stored_values)
+                    all_values[i+1] = stored_values[active_idx]
                     active_idx += 1
                 else
                     # Fallback if active values are missing (e.g. chunk_size=0)
@@ -81,17 +83,26 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
                 end
             end
         end
+    else
+        # Dense storage: all values stored, use directly
+        for i in 1:N
+            if i <= length(stored_values)
+                all_values[i] = stored_values[i]
+            else
+                all_values[i] = inactive_val1
+            end
+        end
     end
 
     (all_values, pos)
 end
 
 """
-    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T, version::UInt32) -> Tuple{NTuple{512,T}, Int}
+    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32) -> Tuple{NTuple{512,T}, Int}
 
 Wrapper for read_dense_values for LeafNodes.
 """
-function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask::LeafMask, background::T, version::UInt32)::Tuple{NTuple{512,T}, Int} where T
+function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32)::Tuple{NTuple{512,T}, Int} where T
     if version < 222
         # v220/v221: Origin + numBuffers precede values (13 bytes)
         # Skip origin (3 × Int32 = 12 bytes) - already have it from topology
@@ -125,7 +136,7 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
         end
         (NTuple{512, T}(all_values), pos)
     else
-        values, pos = read_dense_values(T, bytes, pos, codec, mask, background)
+        values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, mask, background)
         (NTuple{512, T}(values), pos)
     end
 end

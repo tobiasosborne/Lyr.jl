@@ -1,6 +1,171 @@
 # Lyr.jl Handoff Document
 
-## Latest Session (2026-01-11) - Pivot to Tracer Bullet with Small VDBs
+## Latest Session (2026-01-11) - Deep v222 Values Section Format Investigation
+
+**Status**: 🔬 IN PROGRESS - Major discoveries about v222 values section format. Bug identified in `read_compressed_bytes`, but format still not fully understood.
+
+### The Core Problem
+
+~65% of active voxels in torus.vdb are returning background values instead of actual SDF values. The issue is in how we parse the values section for v222+ format.
+
+### Key Discoveries This Session
+
+#### 1. Compression Flags are a Bitfield
+The file header's `compression_flags` is NOT just a codec selector - it's a bitfield:
+- `0x1` = COMPRESS_ZIP (use zlib)
+- `0x2` = COMPRESS_ACTIVE_MASK (only store active values, not all 512)
+- `0x4` = COMPRESS_BLOSC (use blosc)
+
+torus.vdb has `compression_flags=1` (ZIP only, no ACTIVE_MASK), meaning ALL 512 values should be stored per leaf, not just active ones.
+
+**Code added**: `active_mask_compression::Bool` field to `VDBHeader` in Header.jl
+
+#### 2. Bug Fixed: `read_compressed_bytes` chunk_size=0 Handling
+The OpenVDB/tinyvdbio reference shows that when `chunk_size <= 0`, we should read raw uncompressed data:
+```cpp
+if (numZippedBytes <= 0) {
+    sr->read(element_size * count, ...);  // Read expected_size bytes directly
+}
+```
+
+Our code was treating `chunk_size == 0` as "empty data" and returning nothing.
+
+**Fix applied** in Compression.jl:
+```julia
+if chunk_size <= 0
+    # Uncompressed data - read expected_size bytes directly
+    data, pos = read_bytes(bytes, pos, expected_size)
+    return (data, pos)
+```
+
+#### 3. Values Section Format Mystery (UNSOLVED)
+
+Even with the compression fix, we're reading garbage. Extensive debugging revealed:
+
+**File positions**:
+- `values_start = 490225`
+- File size: 5,449,013 bytes
+
+**Hexdump of first 64 bytes from values_start**:
+```
+   0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80  |................|
+  16: c0 e0 80 c0 e0 f0 f8 f8 fc fc 00 db c7 14 3e 33  |..............>3|
+  32: 8e 15 3e 2a ee 0b 3e 9d 27 17 3e da a2 0c 3e e9  |..>*..>.'.>...>.|
+  48: 7e 04 3e 6c a1 15 3e 13 7c 14 3e d8 cc 0a 3e 63  |~.>l..>.|.>...>c|
+```
+
+**Key observation**: Valid Float32 SDF values (0.145, 0.146, etc.) start at **offset 27** (position 490252), NOT at offset 9 (after metadata+chunk_size).
+
+The first 27 bytes appear to be:
+- Bytes 0-14: All zeros (15 bytes)
+- Byte 15: `0x80` (128)
+- Bytes 16-25: `c0 e0 80 c0 e0 f0 f8 f8 fc fc` (bit patterns)
+- Byte 26: `0x00`
+- Byte 27+: Valid Float32 values
+
+#### 4. Possible Interpretations of the 27-byte Header
+
+**Theory A: RLE-encoded selection mask**
+The bytes 0-25 could be a run-length encoded selection mask for inactive value reconstruction. The pattern `80 c0 e0 80 c0 e0 f0 f8 f8 fc fc` shows increasing bit counts.
+
+**Theory B: Value mask stored in values section**
+tinyvdbio code shows `sr->seek_from_current(value_mask_.memUsage())` in ReadBuffer, suggesting the value_mask (64 bytes) might be stored in the values section. But 27 ≠ 64.
+
+**Theory C: Different metadata format**
+The format might be:
+```
+[some header 27 bytes][Float32 values...]
+```
+Where the 27-byte header is an unknown structure.
+
+#### 5. Tree Structure Analysis
+
+From `check_i2_structure.jl`:
+- Root: 0 tiles, 8 children (I2 nodes)
+- I2 node 1 at (-4096, -4096, -4096): 3 I1 children, 0 tiles
+- Total I1 tiles: 2065
+- Total leaves: 3152
+- Topology ends at position 213,722
+- Values section at position 490,225
+- **Gap between topology end and values: 276,503 bytes**
+
+The huge gap suggests something else is stored between topology and values that we're not accounting for.
+
+### Files Modified This Session
+
+1. **src/Header.jl**: Added `active_mask_compression::Bool` field
+2. **src/Compression.jl**: Fixed `read_compressed_bytes` for `chunk_size <= 0`
+3. **src/File.jl**: Pass `active_mask_compression` to `read_grid`
+4. **src/Grid.jl**: Accept and pass `mask_compressed` parameter
+5. **src/TreeRead.jl**: Pass `mask_compressed` through tree reading
+6. **src/Values.jl**: Use `mask_compressed` in `read_dense_values`
+
+### Debug Scripts Created
+
+All in `scripts/` directory:
+- `check_compression.jl` - Verify compression flags interpretation
+- `check_block_offset.jl` - Verify block_offset calculation
+- `check_i2_structure.jl` - Analyze tree structure and tile counts
+- `test_raw_read.jl` - Test different format interpretations
+- `find_pattern.jl` - Analyze byte patterns
+- `try_decompress.jl` - Test zlib decompression at various offsets
+- `verify_chunk_zero.jl` - Test chunk_size=0 handling
+- `examine_gap.jl` - Examine bytes between expected and actual data
+- `debug_position.jl` - Trace leaf parsing positions
+- `verify_format_v222.jl` - Test v222 format with value_mask first
+- `try_raw_values.jl` - Search for valid SDF sequences
+- `hexdump_values.jl` - Detailed hex dump of values section
+
+### Current Error
+
+After the compression fix, parsing torus.vdb gives:
+```
+CompressionBoundsError at position 496477: chunk_size=8528248400640619708 exceeds file_size=5449013
+```
+
+This indicates we're still reading at wrong positions - the format interpretation is incorrect.
+
+### Next Steps (Priority Order)
+
+1. **Understand the 27-byte header**: What are bytes 0-26 at values_start?
+   - Could be RLE-encoded masks
+   - Could be per-I2-node headers
+   - Could be alignment padding + metadata
+
+2. **Investigate the 276KB gap**: What's between topology (213,722) and values (490,225)?
+   - 276,503 bytes of unknown data
+   - Might be internal node tile values
+   - Might be additional metadata
+
+3. **Cross-reference with OpenVDB C++**: The tinyvdbio code shows `seek_from_current(value_mask_.memUsage())` - we need to understand if value_mask is duplicated in values section.
+
+4. **Consider version 222 vs 224 differences**: torus.vdb is v222, but cube/sphere/icosahedron are also v222 and seem to work. What's different about torus?
+
+### Repository State
+
+- Working tree: **modified** (uncommitted changes to Header.jl, Compression.jl, etc.)
+- Tests: **NOT RUN** this session
+- Beads: Issue `path-tracer-q8t` still in progress
+
+### Quick Resume Commands
+
+```bash
+# See current changes
+git diff
+
+# Run the hexdump script to see values section
+julia --project scripts/hexdump_values.jl
+
+# Search for valid SDF values
+julia --project scripts/try_raw_values.jl
+
+# Check tree structure
+julia --project scripts/check_i2_structure.jl
+```
+
+---
+
+## Previous Session (2026-01-11) - Pivot to Tracer Bullet with Small VDBs
 
 **Status**: ✅ Pivoted away from v220/bunny. Downloaded small reference VDBs. Created P0 tracer bullet issues.
 

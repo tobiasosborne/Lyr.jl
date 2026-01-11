@@ -83,13 +83,13 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
 
         # Parse the grid
         if T == Float32
-            grid, pos = read_grid(Float32, bytes, pos, header.compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(Float32, bytes, pos, header.compression, header.active_mask_compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
             push!(grids_temp, grid)
         elseif T == Float64
-            grid, pos = read_grid(Float64, bytes, pos, header.compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(Float64, bytes, pos, header.compression, header.active_mask_compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
             push!(grids_temp, grid)
         elseif T == NTuple{3, Float32}
-            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, header.compression, header.active_mask_compression, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
             push!(grids_temp, grid)
         end
     end
