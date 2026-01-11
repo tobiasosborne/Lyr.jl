@@ -2,7 +2,56 @@
 
 ---
 
-## Latest Session (2026-01-11) - TinyVDB AUDIT REQUIRED
+## Latest Session (2026-01-11) - TinyVDB Audit Progress
+
+**Status**: 🟡 IN PROGRESS - 2/10 audits complete, Parser.jl fixed
+
+### Summary
+
+Audited Binary.jl (PASS) and Parser.jl (4 bugs fixed). Parser now gets past metadata, transform, and buffer_count. Next blocker is Topology.jl type mismatch.
+
+### Fixes Applied This Session
+
+1. **Parser.jl `read_transform`** - Fixed 4 bugs:
+   - Case: `"UniformScaleMap"` not `"uniformScaleMap"`
+   - Case: `"UniformScaleTranslateMap"` not `"uniformScaleTranslateMap"`
+   - Byte count: 15 doubles (120B) not 12 or 4
+
+2. **Parser.jl `read_metadata`** (previous session) - Added size prefixes
+
+3. **Parser.jl `read_grid`** (previous session) - Added buffer_count read
+
+### Current Blocker
+
+**Topology.jl:155** - Type mismatch:
+```
+MethodError: read_internal_topology expects Int32 for log2dim, got Int64
+```
+
+### Audit Issues Status
+
+| Issue ID | File | Status |
+|----------|------|--------|
+| path-tracer-g73 | Binary.jl | ✅ CLOSED (PASS) |
+| path-tracer-o0y | Parser.jl | ✅ CLOSED (4 bugs fixed) |
+| path-tracer-2yl | Topology.jl | open |
+| path-tracer-31s | Values.jl | open |
+| path-tracer-btf | Compression.jl | open |
+| path-tracer-z0t | GridDescriptor.jl | open |
+| path-tracer-dwx | Header.jl | open |
+| path-tracer-5vr | Mask.jl | open |
+| path-tracer-kck | Types.jl | open |
+| path-tracer-3jb | TinyVDB.jl | open |
+
+### Next Steps
+
+1. Take **path-tracer-2yl** (Topology.jl audit) - this is the current blocker
+2. Fix the Int32/Int64 type mismatch
+3. Continue through remaining audits
+
+---
+
+## Previous Session (2026-01-11) - TinyVDB AUDIT REQUIRED
 
 **Status**: 🔴 CRITICAL - Previous implementations did NOT match C++ reference
 
