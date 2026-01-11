@@ -53,7 +53,7 @@ For production use with these files, DDA ray marching through the tree structure
 
 ### Commits
 
-- TBD (changes staged)
+- `cc57140` - feat: Add sphere tracing renderer for VDB level sets
 
 ---
 
