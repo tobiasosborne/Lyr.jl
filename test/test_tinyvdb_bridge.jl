@@ -110,6 +110,54 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
         @test get_value(grid.tree, Coord(Int32(99999), Int32(99999), Int32(99999))) == grid.tree.background
     end
 
+    # Additional VDB file tests (sphere, icosahedron, torus, utahteapot)
+    for (filename, grid_name, min_leaves) in [
+        ("sphere.vdb",      "ls_sphere",       1000),
+        ("icosahedron.vdb", "ls_icosahedron",  1500),
+        ("torus.vdb",       "ls_torus",        5000),
+        ("utahteapot.vdb",  "ls_utahteapot",  30000),
+    ]
+        @testset "end-to-end: $filename" begin
+            path = joinpath(@__DIR__, "fixtures", "samples", filename)
+            if !isfile(path)
+                @warn "$filename not found, skipping"
+                continue
+            end
+
+            # Parse
+            tiny = TinyVDB.parse_tinyvdb(path)
+            @test haskey(tiny.grids, grid_name)
+            tiny_grid = tiny.grids[grid_name]
+
+            # Convert
+            grid = convert_tinyvdb_grid(tiny_grid)
+            @test grid isa Grid{Float32}
+
+            # Structure
+            lc = leaf_count(grid.tree)
+            @test lc >= min_leaves
+            @test active_voxel_count(grid.tree) > 0
+
+            # Bounding box
+            bbox = active_bounding_box(grid.tree)
+            @test bbox !== nothing
+
+            # Value access consistency
+            n = 0
+            for (c, val) in active_voxels(grid.tree)
+                @test get_value(grid.tree, c) == val
+                @test is_active(grid.tree, c)
+                @test isfinite(val)
+                n += 1
+                n >= 5 && break
+            end
+            @test n == 5
+
+            # Background
+            @test get_value(grid.tree, Coord(Int32(99999), Int32(99999), Int32(99999))) == grid.tree.background
+        end
+    end
+
     @testset "render cube.vdb" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
