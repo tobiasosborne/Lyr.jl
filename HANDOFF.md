@@ -2,31 +2,25 @@
 
 ---
 
-## Latest Session (2026-02-12) - Convention Fix + Multi-File Testing
+## Latest Session (2026-02-12) - Fix smoke.vdb + Plan TinyVDB Promotion
 
-**Status**: 🟢 COMPLETE - 3 issues closed, 643 tests pass
+**Status**: 🟢 COMPLETE - 1 bug fixed, promotion plan decomposed into beads
 
 ### Summary
 
-Fixed the x↔z axis convention mismatch (Coordinates.jl now matches OpenVDB natively), optimized `active_bounding_box` from O(voxels) to O(leaves), and validated TinyVDB parser against 5 VDB files (cube, sphere, icosahedron, torus, utahteapot).
+Fixed smoke.vdb parsing failure caused by `UniformScaleTranslateMap` reading wrong byte count (120 instead of 144). The tinyvdbio.h C++ reference has the same bug. Then decomposed the "Promote TinyVDB as primary parser" feature into 3 ordered implementation beads with detailed descriptions.
 
 ### Session Changes
 
 | File | Change |
 |------|--------|
-| `src/Coordinates.jl` | Index functions now use OpenVDB convention (`x*DIM²+y*DIM+z`) |
-| `src/Topology.jl` | `child_origin_*` reverse-index matches OpenVDB |
-| `src/Accessors.jl` | `_advance_voxels` offset decomposition updated; `active_bounding_box` O(leaves) |
-| `src/TinyVDBBridge.jl` | Removed transposition layer — direct copy now |
-| `test/test_coordinates.jl` | Updated expected values for OpenVDB convention |
-| `test/test_topology.jl` | Updated expected values for OpenVDB convention |
-| `test/test_accessors.jl` | Updated coordinate expectations |
-| `test/test_interpolation.jl` | Updated value layout for OpenVDB convention |
-| `test/test_tinyvdb_bridge.jl` | Removed transpose expectations; added 4 new VDB file tests |
+| `src/TinyVDB/Parser.jl` | `read_transform`: `UniformScaleTranslateMap` now reads 3 translation doubles (24B) + 15 scale doubles (120B) = 144B total |
+| `test/test_tinyvdb.jl` | +2 tests: synthetic `UniformScaleTranslateMap` transform, smoke.vdb end-to-end (5 subtests) |
 
 ### Test Results
 
 ```
+TinyVDB tests:   290 pass, 0 fail
 Full Pkg.test():  643 pass, 0 fail, 3 errors (pre-existing: bunny_cloud×2, sphere_points×1)
 ```
 
@@ -34,23 +28,25 @@ Full Pkg.test():  643 pass, 0 fail, 3 errors (pre-existing: bunny_cloud×2, sphe
 
 | ID | Title |
 |---|---|
-| `path-tracer-da6` | Fix x↔z axis swap in Coordinates.jl ✅ |
-| `path-tracer-mbt` | Optimize active_bounding_box O(voxels)→O(leaves) ✅ |
-| `path-tracer-bre` | Test with additional VDB files ✅ |
+| `path-tracer-26p` | Fix smoke.vdb parsing failure (UniformScaleTranslateMap 144-byte layout) ✅ |
 
-### Issues Created
+### Issues Created (TinyVDB Promotion DAG)
 
-| ID | P | Title |
-|---|---|---|
-| `path-tracer-26p` | P2 | Fix smoke.vdb parsing failure (half-precision fog volume position drift) |
+| ID | P | Title | Blocked By |
+|---|---|---|---|
+| `path-tracer-30y` | P1 | Return metadata dict from TinyVDB `read_metadata` | — |
+| `path-tracer-tw3` | P1 | Add `convert_tinyvdb_file` + `is_tinyvdb_compatible` to bridge | 30y |
+| `path-tracer-am0` | P1 | Route `parse_vdb` through TinyVDB for compatible files | tw3 |
 
 ### Open Issues
 
-| ID | P | Title |
-|---|---|---|
-| `path-tracer-26p` | P2 | Fix smoke.vdb parsing (fog volume, half-precision) |
-| `path-tracer-90i` | P3 | Support non-UniformScaleMap transforms |
-| `path-tracer-2ul` | P2 | **Promote TinyVDB as primary parser** (was blocked by da6✅, bre✅ — check remaining blockers) |
+| ID | P | Title | Status |
+|---|---|---|---|
+| `path-tracer-30y` | P1 | Return metadata dict from TinyVDB `read_metadata` | Ready |
+| `path-tracer-tw3` | P1 | Add `convert_tinyvdb_file` + `is_tinyvdb_compatible` | Blocked by 30y |
+| `path-tracer-am0` | P1 | Route `parse_vdb` through TinyVDB | Blocked by tw3 |
+| `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella) | Blocked by am0 |
+| `path-tracer-90i` | P3 | Support non-UniformScaleMap transforms | Ready |
 
 ---
 
