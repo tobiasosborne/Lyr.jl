@@ -150,7 +150,12 @@ pixels = render_image(grid, camera, 512, 512)
 """
 function convert_tinyvdb_grid(tg::TinyVDB.TinyGrid)::Grid{Float32}
     tree = convert_tinyvdb_root(tg.root)
-    transform = UniformScaleTransform(tg.voxel_size)
+    transform = if tg.translation == (0.0, 0.0, 0.0)
+        UniformScaleTransform(tg.voxel_size)
+    else
+        s = tg.voxel_size
+        LinearTransform((s, 0.0, 0.0, 0.0, s, 0.0, 0.0, 0.0, s), tg.translation)
+    end
     grid_class = parse_grid_class(tg.grid_class)
     Grid{Float32}(tg.name, grid_class, transform, tree)
 end

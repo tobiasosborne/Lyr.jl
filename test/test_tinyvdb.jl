@@ -1213,12 +1213,13 @@ end
         i2 = InternalNodeData(Int32(5), i2_child_mask, NodeMask(Int32(5)), Float32[], [])
         root = RootNodeData(0.0f0, Int32(0), Int32(0), [], [])
 
-        grid = TinyGrid("density", root, 1.0, "unknown")
+        grid = TinyGrid("density", root, 1.0, "unknown", (0.0, 0.0, 0.0))
 
         @test grid.name == "density"
         @test grid.root.background == 0.0f0
         @test grid.voxel_size == 1.0
         @test grid.grid_class == "unknown"
+        @test grid.translation == (0.0, 0.0, 0.0)
     end
 
     @testset "TinyVDBFile structure" begin
@@ -1332,9 +1333,10 @@ end
         end
 
         bytes = Vector{UInt8}(bytes)
-        voxel_size, pos = read_transform(bytes, 1)
+        voxel_size, translation, pos = read_transform(bytes, 1)
 
         @test voxel_size == 0.5
+        @test translation == (0.0, 0.0, 0.0)
         # Should be past the transform data: 4 (len) + 15 (str) + 120 (5 vec3d) + 1 = 140
         @test pos == 140
     end
@@ -1438,8 +1440,9 @@ end
         append!(buf, reinterpret(UInt8, [1.0]))
     end
 
-    voxel_size, pos = TinyVDB.read_transform(buf, 1)
+    voxel_size, translation, pos = TinyVDB.read_transform(buf, 1)
     @test voxel_size ≈ 0.5
+    @test translation == (10.0, 20.0, 30.0)
     @test pos == length(buf) + 1  # consumed all bytes
 end
 

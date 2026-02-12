@@ -25,6 +25,7 @@ struct TinyGrid
     root::RootNodeData
     voxel_size::Float64
     grid_class::String
+    translation::NTuple{3, Float64}
 end
 
 """
@@ -110,11 +111,11 @@ end
 # =============================================================================
 
 """
-    read_transform(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float64, Int}
+    read_transform(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float64, NTuple{3,Float64}, Int}
 
-Read grid transform and extract the voxel size (uniform scale).
+Read grid transform and extract the voxel size and translation.
 
-Returns (voxel_size, new_pos).
+Returns (voxel_size, translation, new_pos).
 
 Per tinyvdbio.h ReadTransform (lines 2620-2669):
 UniformScaleMap reads 5 Vec3d = 15 doubles = 120 bytes:
@@ -124,7 +125,7 @@ UniformScaleMap reads 5 Vec3d = 15 doubles = 120 bytes:
   - inv_scale_squared (3 doubles)
   - inv_twice_scale (3 doubles)
 """
-function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
+function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, NTuple{3, Float64}, Int}
     # Read transform type string
     transform_type, pos = read_string(bytes, pos)
 
@@ -135,19 +136,19 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
         for _ in 2:15
             _, pos = read_f64(bytes, pos)
         end
-        return (scale_x, pos)
+        return (scale_x, (0.0, 0.0, 0.0), pos)
     elseif transform_type == "UniformScaleTranslateMap"
         # Translation Vec3d (3 doubles = 24 bytes) THEN 5 Vec3d (15 doubles = 120 bytes)
         # Total: 18 doubles = 144 bytes
         # OpenVDB ScaleTranslateMap::write() emits translation first, then ScaleMap data
-        for _ in 1:3
-            _, pos = read_f64(bytes, pos)  # skip translation
-        end
+        tx, pos = read_f64(bytes, pos)
+        ty, pos = read_f64(bytes, pos)
+        tz, pos = read_f64(bytes, pos)
         scale_x, pos = read_f64(bytes, pos)
         for _ in 2:15
             _, pos = read_f64(bytes, pos)
         end
-        return (scale_x, pos)
+        return (scale_x, (tx, ty, tz), pos)
     else
         error("Unsupported transform type: $transform_type (only UniformScaleMap and UniformScaleTranslateMap supported)")
     end
@@ -178,8 +179,8 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     metadata, pos = read_metadata(bytes, pos)
     grid_class = get(metadata, "class", "unknown")
 
-    # Read transform (capture voxel size)
-    voxel_size, pos = read_transform(bytes, pos)
+    # Read transform (capture voxel size and translation)
+    voxel_size, translation, pos = read_transform(bytes, pos)
 
     # Read buffer_count (TreeBase) - must be 1
     buffer_count, pos = read_i32(bytes, pos)
@@ -197,7 +198,7 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     root, pos = read_tree_values(bytes, pos, root, file_version, compression_flags;
                                 value_size=value_size)
 
-    return TinyGrid(gd.grid_name, root, voxel_size, grid_class)
+    return TinyGrid(gd.grid_name, root, voxel_size, grid_class, translation)
 end
 
 # =============================================================================
