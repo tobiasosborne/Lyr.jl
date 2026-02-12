@@ -2,51 +2,53 @@
 
 ---
 
-## Latest Session (2026-02-12) - Fix smoke.vdb + Plan TinyVDB Promotion
+## Latest Session (2026-02-12) - TinyVDB Promotion: Metadata + Bridge + Teapot Render
 
-**Status**: 🟢 COMPLETE - 1 bug fixed, promotion plan decomposed into beads
+**Status**: 🟢 COMPLETE - 2 issues closed, 1024x1024 teapot rendered
 
 ### Summary
 
-Fixed smoke.vdb parsing failure caused by `UniformScaleTranslateMap` reading wrong byte count (120 instead of 144). The tinyvdbio.h C++ reference has the same bug. Then decomposed the "Promote TinyVDB as primary parser" feature into 3 ordered implementation beads with detailed descriptions.
+Closed two issues from the TinyVDB promotion DAG: (1) `read_metadata` now returns `Dict{String,String}` with string-typed entries instead of discarding them, and `TinyGrid` gained a `grid_class` field. (2) Bridge updated: `convert_tinyvdb_grid` derives `GridClass` from metadata, new `convert_tinyvdb_file` converts entire TinyVDBFiles, new `is_tinyvdb_compatible` checks file compatibility. Rendered 1024x1024 Utah teapot sphere trace as demo.
 
 ### Session Changes
 
 | File | Change |
 |------|--------|
-| `src/TinyVDB/Parser.jl` | `read_transform`: `UniformScaleTranslateMap` now reads 3 translation doubles (24B) + 15 scale doubles (120B) = 144B total |
-| `test/test_tinyvdb.jl` | +2 tests: synthetic `UniformScaleTranslateMap` transform, smoke.vdb end-to-end (5 subtests) |
+| `src/TinyVDB/Parser.jl` | `read_metadata` returns `Tuple{Dict{String,String}, Int}`; `TinyGrid` gains `grid_class::String` |
+| `src/TinyVDBBridge.jl` | `convert_tinyvdb_grid` uses `parse_grid_class(tg.grid_class)`; new `convert_tinyvdb_file`, `is_tinyvdb_compatible` |
+| `src/Lyr.jl` | Exports `convert_tinyvdb_file`, `is_tinyvdb_compatible` |
+| `test/test_tinyvdb.jl` | +5 tests: metadata dict return, empty metadata, string-only collection, cube/smoke grid_class |
+| `test/test_tinyvdb_bridge.jl` | +13 tests: grid_class usage, convert_file, is_compatible |
+| `scripts/render_teapot.jl` | **NEW** — 1024x1024 sphere trace of Utah teapot |
 
 ### Test Results
 
 ```
-TinyVDB tests:   290 pass, 0 fail
-Full Pkg.test():  643 pass, 0 fail, 3 errors (pre-existing: bunny_cloud×2, sphere_points×1)
+TinyVDB tests:   305 pass, 0 fail
+Bridge tests:    142 pass, 0 fail
+Full Pkg.test(): 656 pass, 0 fail, 3 errors (pre-existing: bunny_cloud×2, sphere_points×1)
 ```
 
 ### Issues Closed
 
 | ID | Title |
 |---|---|
-| `path-tracer-26p` | Fix smoke.vdb parsing failure (UniformScaleTranslateMap 144-byte layout) ✅ |
-
-### Issues Created (TinyVDB Promotion DAG)
-
-| ID | P | Title | Blocked By |
-|---|---|---|---|
-| `path-tracer-30y` | P1 | Return metadata dict from TinyVDB `read_metadata` | — |
-| `path-tracer-tw3` | P1 | Add `convert_tinyvdb_file` + `is_tinyvdb_compatible` to bridge | 30y |
-| `path-tracer-am0` | P1 | Route `parse_vdb` through TinyVDB for compatible files | tw3 |
+| `path-tracer-30y` | Return metadata dict from TinyVDB `read_metadata` ✅ |
+| `path-tracer-tw3` | Add `convert_tinyvdb_file` + `is_tinyvdb_compatible` to bridge ✅ |
 
 ### Open Issues
 
 | ID | P | Title | Status |
 |---|---|---|---|
-| `path-tracer-30y` | P1 | Return metadata dict from TinyVDB `read_metadata` | Ready |
-| `path-tracer-tw3` | P1 | Add `convert_tinyvdb_file` + `is_tinyvdb_compatible` | Blocked by 30y |
-| `path-tracer-am0` | P1 | Route `parse_vdb` through TinyVDB | Blocked by tw3 |
+| `path-tracer-am0` | P1 | Route `parse_vdb` through TinyVDB for compatible files | Ready (unblocked) |
 | `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella) | Blocked by am0 |
 | `path-tracer-90i` | P3 | Support non-UniformScaleMap transforms | Ready |
+
+### Render Output
+
+- `teapot.png`: 1024x1024 sphere-traced Utah teapot (73KB)
+- Classic 3/4 view, auto-framed from bounding box, Lambertian shading
+- 194k of 1M pixels hit the teapot surface
 
 ---
 
