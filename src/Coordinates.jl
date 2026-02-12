@@ -94,8 +94,9 @@ This function returns a **0-based index** for compatibility with bitmask operati
 access, add 1: `values[leaf_offset(c) + 1]`.
 
 # Algorithm
-Uses linear indexing: `offset = x + 8*y + 64*z` where x, y, z are the local
-coordinates within the leaf (each 0-7).
+Uses OpenVDB linear indexing: `offset = 64*x + 8*y + z` where x, y, z are the
+local coordinates within the leaf (each 0-7). This matches the C++ reference
+convention where x varies slowest.
 
 # Example
 ```julia
@@ -110,7 +111,7 @@ function leaf_offset(c::Coord)::Int
     lx = c.x & (LEAF_DIM - 1)
     ly = c.y & (LEAF_DIM - 1)
     lz = c.z & (LEAF_DIM - 1)
-    Int(lx) + Int(ly) * 8 + Int(lz) * 64
+    Int(lx) * 64 + Int(ly) * 8 + Int(lz)
 end
 
 """
@@ -134,7 +135,7 @@ function internal1_child_index(c::Coord)::Int
     iy = (c.y >> shift) & mask
     iz = (c.z >> shift) & mask
 
-    Int(ix) + Int(iy) * 16 + Int(iz) * 256
+    Int(ix) * 256 + Int(iy) * 16 + Int(iz)
 end
 
 """
@@ -158,7 +159,7 @@ function internal2_child_index(c::Coord)::Int
     iy = (c.y >> shift) & mask
     iz = (c.z >> shift) & mask
 
-    Int(ix) + Int(iy) * 32 + Int(iz) * 1024
+    Int(ix) * 1024 + Int(iy) * 32 + Int(iz)
 end
 
 """

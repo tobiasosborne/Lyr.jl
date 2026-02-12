@@ -93,33 +93,33 @@
     @testset "leaf_offset" begin
         # Corner cases
         @test leaf_offset(coord(0, 0, 0)) == 0
-        @test leaf_offset(coord(7, 7, 7)) == 7 + 7*8 + 7*64  # 511
+        @test leaf_offset(coord(7, 7, 7)) == 7*64 + 7*8 + 7  # 511
 
-        # x varies fastest
-        @test leaf_offset(coord(1, 0, 0)) == 1
+        # OpenVDB convention: x varies slowest (x*64 + y*8 + z)
+        @test leaf_offset(coord(1, 0, 0)) == 64
         @test leaf_offset(coord(0, 1, 0)) == 8
-        @test leaf_offset(coord(0, 0, 1)) == 64
+        @test leaf_offset(coord(0, 0, 1)) == 1
 
         # Works with any origin
         @test leaf_offset(coord(8, 0, 0)) == 0
-        @test leaf_offset(coord(9, 0, 0)) == 1
+        @test leaf_offset(coord(9, 0, 0)) == 64
     end
 
     @testset "internal1_child_index" begin
         @test internal1_child_index(coord(0, 0, 0)) == 0
-        @test internal1_child_index(coord(8, 0, 0)) == 1  # One leaf over
+        @test internal1_child_index(coord(8, 0, 0)) == 256  # OpenVDB: x varies slowest
         @test internal1_child_index(coord(0, 8, 0)) == 16
-        @test internal1_child_index(coord(0, 0, 8)) == 256
+        @test internal1_child_index(coord(0, 0, 8)) == 1
 
         # Max index
-        @test internal1_child_index(coord(120, 120, 120)) == 15 + 15*16 + 15*256  # 4095
+        @test internal1_child_index(coord(120, 120, 120)) == 15*256 + 15*16 + 15  # 4095
     end
 
     @testset "internal2_child_index" begin
         @test internal2_child_index(coord(0, 0, 0)) == 0
-        @test internal2_child_index(coord(128, 0, 0)) == 1  # One Internal1 over
+        @test internal2_child_index(coord(128, 0, 0)) == 1024  # OpenVDB: x varies slowest
         @test internal2_child_index(coord(0, 128, 0)) == 32
-        @test internal2_child_index(coord(0, 0, 128)) == 1024
+        @test internal2_child_index(coord(0, 0, 128)) == 1
     end
 
     @testset "BBox" begin

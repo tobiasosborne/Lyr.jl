@@ -2,15 +2,16 @@
     # Create a tree with known values for testing
     function make_test_tree()
         # Fill a 2x2x2 region with values 1-8
+        # OpenVDB convention: index = x*64 + y*8 + z (1-based array access: +1)
         values = ntuple(i -> Float32(0), 512)
-        values = Base.setindex(values, 1.0f0, 1)    # (0,0,0)
-        values = Base.setindex(values, 2.0f0, 2)    # (1,0,0)
-        values = Base.setindex(values, 3.0f0, 9)    # (0,1,0)
-        values = Base.setindex(values, 4.0f0, 10)   # (1,1,0)
-        values = Base.setindex(values, 5.0f0, 65)   # (0,0,1)
-        values = Base.setindex(values, 6.0f0, 66)   # (1,0,1)
-        values = Base.setindex(values, 7.0f0, 73)   # (0,1,1)
-        values = Base.setindex(values, 8.0f0, 74)   # (1,1,1)
+        values = Base.setindex(values, 1.0f0, 1)    # (0,0,0) → 0+1
+        values = Base.setindex(values, 2.0f0, 65)   # (1,0,0) → 64+1
+        values = Base.setindex(values, 3.0f0, 9)    # (0,1,0) → 8+1
+        values = Base.setindex(values, 4.0f0, 73)   # (1,1,0) → 72+1
+        values = Base.setindex(values, 5.0f0, 2)    # (0,0,1) → 1+1
+        values = Base.setindex(values, 6.0f0, 66)   # (1,0,1) → 65+1
+        values = Base.setindex(values, 7.0f0, 10)   # (0,1,1) → 9+1
+        values = Base.setindex(values, 8.0f0, 74)   # (1,1,1) → 73+1
 
         # Create mask with these 8 positions active
         mask_words = ntuple(_ -> UInt64(0), 8)

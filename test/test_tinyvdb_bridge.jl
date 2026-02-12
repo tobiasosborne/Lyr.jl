@@ -14,14 +14,14 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_mask" begin
         # Create a TinyVDB mask with known bits (OpenVDB convention)
         tiny_mask = NodeMask(Int32(3))
-        set_on!(tiny_mask, 0)    # (0,0,0) → Lyr bit 0
-        set_on!(tiny_mask, 255)  # x=3,y=7,z=7 → Lyr: 3 + 7*8 + 7*64 = 507
-        set_on!(tiny_mask, 511)  # (7,7,7) → Lyr bit 511
+        set_on!(tiny_mask, 0)    # (0,0,0) → bit 0
+        set_on!(tiny_mask, 255)  # stays at bit 255 (no transpose needed)
+        set_on!(tiny_mask, 511)  # (7,7,7) → bit 511
 
         lyr_mask = Lyr.convert_tinyvdb_mask(tiny_mask, LeafMask)
         @test lyr_mask isa LeafMask
         @test Lyr.is_on(lyr_mask, 0)
-        @test Lyr.is_on(lyr_mask, 507)   # bit 255 transposed to 507
+        @test Lyr.is_on(lyr_mask, 255)  # same bit position, no transposition
         @test Lyr.is_on(lyr_mask, 511)
         @test Lyr.count_on(lyr_mask) == 3
     end
@@ -29,8 +29,8 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_leaf" begin
         # Build a leaf with known values
         value_mask = NodeMask(Int32(3))
-        set_on!(value_mask, 0)   # (0,0,0) → Lyr bit 0
-        set_on!(value_mask, 7)   # OpenVDB 7 = z=7,y=0,x=0 → Lyr: 0 + 0 + 7*64 = 448
+        set_on!(value_mask, 0)   # (0,0,0) → bit 0
+        set_on!(value_mask, 7)   # z=7 → bit 7 (same in both conventions)
         leaf = TinyVDB.LeafNodeData(value_mask, collect(Float32, 1.0:512.0))
 
         origin = Coord(Int32(0), Int32(0), Int32(0))
@@ -38,11 +38,11 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
 
         @test lyr_leaf isa LeafNode{Float32}
         @test lyr_leaf.origin == origin
-        # Values are transposed: OpenVDB index 0 → Lyr index 0, OpenVDB index 511 → Lyr index 511
-        @test lyr_leaf.values[1] == 1.0f0    # index 0 → 0 (both)
-        @test lyr_leaf.values[512] == 512.0f0 # index 511 → 511 (both: (7,7,7))
+        # Values are direct copy (no transposition needed)
+        @test lyr_leaf.values[1] == 1.0f0    # index 0
+        @test lyr_leaf.values[512] == 512.0f0 # index 511
         @test Lyr.is_on(lyr_leaf.value_mask, 0)
-        @test Lyr.is_on(lyr_leaf.value_mask, 448)  # bit 7 transposed to 448
+        @test Lyr.is_on(lyr_leaf.value_mask, 7)  # same bit position
     end
 
     @testset "convert_tinyvdb_internal1" begin

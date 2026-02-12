@@ -281,10 +281,10 @@ function _advance_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, 
 
                 if iter_result !== nothing
                     offset, next_leaf_state = iter_result
-                    # Compute coordinate from leaf origin + offset
-                    lx = offset & 7
+                    # Compute coordinate from leaf origin + offset (OpenVDB: x*64 + y*8 + z)
+                    lz = offset & 7
                     ly = (offset >> 3) & 7
-                    lz = (offset >> 6) & 7
+                    lx = (offset >> 6) & 7
                     c = Coord(leaf.origin.x + Int32(lx),
                               leaf.origin.y + Int32(ly),
                               leaf.origin.z + Int32(lz))

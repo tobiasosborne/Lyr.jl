@@ -30,9 +30,9 @@
     @testset "get_value" begin
         tree = make_simple_tree()
 
-        # Query active voxel
+        # Query active voxel (bits 0-7 = z coords 0-7 in OpenVDB convention)
         @test get_value(tree, coord(0, 0, 0)) == 1.0f0
-        @test get_value(tree, coord(1, 0, 0)) == 2.0f0
+        @test get_value(tree, coord(0, 0, 1)) == 2.0f0
 
         # Query background (outside any node)
         @test get_value(tree, coord(10000, 0, 0)) == -1.0f0
@@ -41,9 +41,9 @@
     @testset "is_active" begin
         tree = make_simple_tree()
 
-        # Active voxels (first 8 in leaf)
+        # Active voxels (bits 0-7 = z coords 0-7 in OpenVDB convention)
         @test is_active(tree, coord(0, 0, 0)) == true
-        @test is_active(tree, coord(7, 0, 0)) == true
+        @test is_active(tree, coord(0, 0, 7)) == true
 
         # Inactive voxel in leaf
         @test is_active(tree, coord(0, 1, 0)) == false
