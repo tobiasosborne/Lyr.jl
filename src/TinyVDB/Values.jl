@@ -47,7 +47,7 @@ Returns (updated LeafNodeData with full 512 values, new_pos).
 """
 function read_leaf_values(bytes::Vector{UInt8}, pos::Int, leaf::LeafNodeData,
                          file_version::UInt32, compression_flags::UInt32,
-                         background::Float32)::Tuple{LeafNodeData, Int}
+                         background::Float32; value_size::Int=4)::Tuple{LeafNodeData, Int}
     num_voxels = 512  # 8x8x8
 
     # Step 1: Skip over value_mask (64 bytes for log2dim=3, already read in topology)
@@ -73,10 +73,22 @@ function read_leaf_values(bytes::Vector{UInt8}, pos::Int, leaf::LeafNodeData,
     if per_node_flag == NO_MASK_AND_ONE_INACTIVE_VAL ||
        per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
        per_node_flag == MASK_AND_TWO_INACTIVE_VALS
-        inactiveVal0, pos = read_f32(bytes, pos)
+        if value_size == 2
+            raw, pos = read_u8(bytes, pos)
+            raw2, pos = read_u8(bytes, pos)
+            inactiveVal0 = Float32(reinterpret(Float16, UInt16(raw) | UInt16(raw2) << 8))
+        else
+            inactiveVal0, pos = read_f32(bytes, pos)
+        end
 
         if per_node_flag == MASK_AND_TWO_INACTIVE_VALS
-            inactiveVal1, pos = read_f32(bytes, pos)
+            if value_size == 2
+                raw, pos = read_u8(bytes, pos)
+                raw2, pos = read_u8(bytes, pos)
+                inactiveVal1 = Float32(reinterpret(Float16, UInt16(raw) | UInt16(raw2) << 8))
+            else
+                inactiveVal1, pos = read_f32(bytes, pos)
+            end
         end
     end
 
@@ -96,7 +108,7 @@ function read_leaf_values(bytes::Vector{UInt8}, pos::Int, leaf::LeafNodeData,
     end
 
     # Step 7: Read compressed/decompressed values into temp buffer
-    temp_values, pos = read_f32_values(bytes, pos, read_count, compression_flags)
+    temp_values, pos = read_float_values(bytes, pos, read_count, compression_flags, value_size)
 
     # Step 8: Reconstruct full 512-value buffer
     if mask_compressed && read_count != num_voxels
@@ -136,7 +148,7 @@ This function recursively reads values for all child nodes.
 """
 function read_internal_values(bytes::Vector{UInt8}, pos::Int, internal::InternalNodeData,
                              file_version::UInt32, compression_flags::UInt32,
-                             background::Float32)::Tuple{InternalNodeData, Int}
+                             background::Float32; value_size::Int=4)::Tuple{InternalNodeData, Int}
     is_leaf_child = (internal.log2dim - 1) == LOG2DIM_LEAF
 
     for i in 1:length(internal.children)
@@ -144,11 +156,13 @@ function read_internal_values(bytes::Vector{UInt8}, pos::Int, internal::Internal
 
         if is_leaf_child
             updated_child, pos = read_leaf_values(bytes, pos, child::LeafNodeData,
-                                                  file_version, compression_flags, background)
+                                                  file_version, compression_flags, background;
+                                                  value_size=value_size)
             internal.children[i] = (child_pos, updated_child)
         else
             updated_child, pos = read_internal_values(bytes, pos, child::InternalNodeData,
-                                                      file_version, compression_flags, background)
+                                                      file_version, compression_flags, background;
+                                                      value_size=value_size)
             internal.children[i] = (child_pos, updated_child)
         end
     end
@@ -170,13 +184,15 @@ Performs a depth-first traversal, reading values for all leaf nodes.
 Uses root.background for inactive value reconstruction.
 """
 function read_tree_values(bytes::Vector{UInt8}, pos::Int, root::RootNodeData,
-                         file_version::UInt32, compression_flags::UInt32)::Tuple{RootNodeData, Int}
+                         file_version::UInt32, compression_flags::UInt32;
+                         value_size::Int=4)::Tuple{RootNodeData, Int}
     background = root.background
 
     for i in 1:length(root.children)
         coord, child = root.children[i]
         updated_child, pos = read_internal_values(bytes, pos, child,
-                                                  file_version, compression_flags, background)
+                                                  file_version, compression_flags, background;
+                                                  value_size=value_size)
         root.children[i] = (coord, updated_child)
     end
 

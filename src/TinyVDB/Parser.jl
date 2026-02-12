@@ -150,6 +150,9 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     # Start at grid_pos (1-indexed for Julia)
     pos = Int(gd.grid_pos) + 1
 
+    # Determine value element size: 2 for half precision, 4 for full
+    value_size = gd.half_precision ? 2 : 4
+
     # Read per-grid compression (v222+)
     compression_flags, pos = read_grid_compression(bytes, pos, file_version)
 
@@ -168,10 +171,12 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     # Read tree topology
     root, pos = read_root_topology(bytes, pos;
                                    file_version=file_version,
-                                   compression_flags=compression_flags)
+                                   compression_flags=compression_flags,
+                                   value_size=value_size)
 
     # Read tree values
-    root, pos = read_tree_values(bytes, pos, root, file_version, compression_flags)
+    root, pos = read_tree_values(bytes, pos, root, file_version, compression_flags;
+                                value_size=value_size)
 
     return TinyGrid(gd.grid_name, root)
 end

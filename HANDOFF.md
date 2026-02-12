@@ -2,9 +2,37 @@
 
 ---
 
-## Latest Session (2026-02-12) - Full Code Review + Values.jl Fix
+## Latest Session (2026-02-12) - Fix cube.vdb BoundsError (Half Precision)
 
-**Status**: 🟡 IN PROGRESS - Values.jl rewritten, unit tests pass, cube.vdb still BoundsError
+**Status**: 🟢 COMPLETE - cube.vdb parses successfully, all 283 TinyVDB tests pass
+
+### Root Cause
+
+cube.vdb stores values as **Float16 (half precision)** — the grid type is `Tree_float_5_4_3_HalfFloat`. All value-reading code hardcoded `element_size=4` (Float32), consuming twice the bytes per value. This caused accumulated position drift until BoundsError at leaf ~3175 of 6812.
+
+### Fix
+
+Threaded `value_size` parameter (2 for half, 4 for float) through the entire read pipeline:
+- `Compression.jl`: Added `read_float_values()` that handles Float16→Float32 conversion
+- `Topology.jl`: `skip_mask_values`, `read_internal_topology`, `read_root_topology` accept `value_size`
+- `Values.jl`: `read_leaf_values`, `read_internal_values`, `read_tree_values` accept `value_size`
+- `Parser.jl`: `read_grid` determines `value_size` from `gd.half_precision`
+
+### Diagnostic Finding
+
+The topology phase (pos after topology = 514618 = block_pos+1, diff=0) was already correct because internal nodes in this level-set grid have ~0 tile values, making element_size irrelevant for them.
+
+### Test Results
+```
+TinyVDB tests: 283 pass, 0 fail (including cube.vdb end-to-end)
+Full suite:    514 pass, 4 errors (all pre-existing in main Lyr, not TinyVDB)
+```
+
+---
+
+## Previous Session (2026-02-12) - Full Code Review + Values.jl Fix
+
+**Status**: 🟡 SUPERSEDED by half-precision fix above
 
 ### Summary
 

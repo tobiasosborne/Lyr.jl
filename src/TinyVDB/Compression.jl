@@ -128,3 +128,25 @@ function read_f32_values(bytes::Vector{UInt8}, pos::Int, count::Int,
     values = reinterpret(Float32, data)
     return (Vector{Float32}(values), pos)
 end
+
+"""
+    read_float_values(bytes::Vector{UInt8}, pos::Int, count::Int,
+                     compression_flags::UInt32, value_size::Int) -> Tuple{Vector{Float32}, Int}
+
+Read float values (Float32 or Float16), handling compression if needed.
+When value_size=2 (half precision), reads Float16 and converts to Float32.
+When value_size=4, reads Float32 directly.
+
+Returns (Float32 values, new_pos).
+"""
+function read_float_values(bytes::Vector{UInt8}, pos::Int, count::Int,
+                          compression_flags::UInt32, value_size::Int)::Tuple{Vector{Float32}, Int}
+    data, pos = read_compressed_data(bytes, pos, count, value_size, compression_flags)
+    if value_size == 2
+        half_values = reinterpret(Float16, data)
+        return (Float32.(half_values), pos)
+    else
+        values = reinterpret(Float32, data)
+        return (Vector{Float32}(values), pos)
+    end
+end

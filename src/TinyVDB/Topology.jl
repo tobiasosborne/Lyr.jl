@@ -116,14 +116,14 @@ end
 """
     skip_mask_values(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
                     file_version::UInt32, compression_flags::UInt32,
-                    value_mask::NodeMask) -> Int
+                    value_mask::NodeMask; value_size::Int=4) -> Int
 
 Skip over internal node values during topology reading (ReadMaskValues equivalent).
 
 Per tinyvdbio.h ReadMaskValues, for v222+ internal nodes read:
 1. per_node_flag (1 byte)
-2. inactiveVal0 (4 bytes) - if flag indicates
-3. inactiveVal1 (4 bytes) - if flag indicates
+2. inactiveVal0 (value_size bytes) - if flag indicates
+3. inactiveVal1 (value_size bytes) - if flag indicates
 4. selection_mask (mask bytes) - if flag indicates
 5. compressed values via ReadAndDecompressData
 
@@ -131,7 +131,7 @@ Returns new position after skipping all value data.
 """
 function skip_mask_values(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
                          file_version::UInt32, compression_flags::UInt32,
-                         value_mask::NodeMask)::Int
+                         value_mask::NodeMask; value_size::Int=4)::Int
     mask_compressed = (compression_flags & COMPRESS_ACTIVE_MASK) != 0
     num_values = 1 << (3 * log2dim)
 
@@ -145,11 +145,11 @@ function skip_mask_values(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
     if per_node_flag == NO_MASK_AND_ONE_INACTIVE_VAL ||
        per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
        per_node_flag == MASK_AND_TWO_INACTIVE_VALS
-        pos += 4  # Float32 size
+        pos += value_size  # inactiveVal0
 
         # Skip inactiveVal1 if two inactive values
         if per_node_flag == MASK_AND_TWO_INACTIVE_VALS
-            pos += 4  # Float32 size
+            pos += value_size  # inactiveVal1
         end
     end
 
@@ -171,7 +171,7 @@ function skip_mask_values(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
 
     # Skip compressed/uncompressed values via read_compressed_data
     # We read and discard the data to advance stream position correctly
-    _, pos = read_compressed_data(bytes, pos, read_count, 4, compression_flags)
+    _, pos = read_compressed_data(bytes, pos, read_count, value_size, compression_flags)
 
     return pos
 end
@@ -201,7 +201,7 @@ Returns (InternalNodeData, new_pos).
 """
 function read_internal_topology(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
                                 file_version::UInt32, compression_flags::UInt32,
-                                background::Float32)::Tuple{InternalNodeData, Int}
+                                background::Float32; value_size::Int=4)::Tuple{InternalNodeData, Int}
     # Read masks
     child_mask, pos = read_mask(bytes, pos, log2dim)
     value_mask, pos = read_mask(bytes, pos, log2dim)
@@ -211,7 +211,8 @@ function read_internal_topology(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
     # For v222+, internal node values are embedded in topology (ReadMaskValues).
     # We skip over them here; values are read during buffer pass.
     if file_version >= FILE_VERSION_NODE_MASK_COMPRESSION
-        pos = skip_mask_values(bytes, pos, log2dim, file_version, compression_flags, value_mask)
+        pos = skip_mask_values(bytes, pos, log2dim, file_version, compression_flags, value_mask;
+                              value_size=value_size)
     end
     values = Float32[]
 
@@ -227,7 +228,8 @@ function read_internal_topology(bytes::Vector{UInt8}, pos::Int, log2dim::Int32,
                 child, pos = read_leaf_topology(bytes, pos)
             else
                 child, pos = read_internal_topology(bytes, pos, child_log2dim,
-                                                   file_version, compression_flags, background)
+                                                   file_version, compression_flags, background;
+                                                   value_size=value_size)
             end
             push!(children, (Int32(i), child))
         end
@@ -259,7 +261,8 @@ Returns (RootNodeData, new_pos).
 """
 function read_root_topology(bytes::Vector{UInt8}, pos::Int;
                            file_version::UInt32=UInt32(222),
-                           compression_flags::UInt32=COMPRESS_NONE)::Tuple{RootNodeData, Int}
+                           compression_flags::UInt32=COMPRESS_NONE,
+                           value_size::Int=4)::Tuple{RootNodeData, Int}
     # Read background value
     background, pos = read_f32(bytes, pos)
 
@@ -287,7 +290,8 @@ function read_root_topology(bytes::Vector{UInt8}, pos::Int;
 
         # Children of root are always I2 nodes (log2dim=5)
         child, pos = read_internal_topology(bytes, pos, LOG2DIM_I2,
-                                           file_version, compression_flags, background)
+                                           file_version, compression_flags, background;
+                                           value_size=value_size)
         push!(children, (Coord(x, y, z), child))
     end
 
