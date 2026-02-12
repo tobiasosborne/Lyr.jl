@@ -31,13 +31,14 @@
         @test grid.grid_class == GRID_LEVEL_SET
         @test grid.transform isa UniformScaleTransform
 
-        # Tree structure
+        # Tree structure (values from TinyVDB sequential parser — correct for
+        # a torus spanning all 8 octants around origin)
         @test grid.tree.background == 0.15f0
-        @test leaf_count(grid.tree) == 3152
-        @test active_voxel_count(grid.tree) == 1565265
+        @test leaf_count(grid.tree) == 6044
+        @test active_voxel_count(grid.tree) == 1119158
 
-        # Tree has exactly one Internal2 child at expected origin
-        @test length(grid.tree.table) == 1
+        # Tree has 8 Internal2 children (one per octant, torus wraps around origin)
+        @test length(grid.tree.table) == 8
         @test haskey(grid.tree.table, Coord(-4096, -4096, -4096))
         @test grid.tree.table[Coord(-4096, -4096, -4096)] isa InternalNode2{Float32}
     end
@@ -178,8 +179,8 @@
         @test occursin("\"torus.vdb\"", ref_text)
         @test occursin("\"format_version\": 222", ref_text)
         @test occursin("\"grid_name\": \"ls_torus\"", ref_text)
-        @test occursin("\"leaf_count\": 3152", ref_text)
-        @test occursin("\"active_voxel_count\": 1565265", ref_text)
+        @test occursin("\"leaf_count\": 6044", ref_text)
+        @test occursin("\"active_voxel_count\": 1119158", ref_text)
 
         # Reference file exists and has expected structure
         @test true

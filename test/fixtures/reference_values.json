@@ -6,10 +6,17 @@
     "grid_class": "GRID_LEVEL_SET",
     "transform_type": "UniformScaleTransform",
     "background": 0.15,
-    "leaf_count": 3152,
-    "active_voxel_count": 1565265,
+    "leaf_count": 6044,
+    "active_voxel_count": 1119158,
     "root_children": [
-      {"origin": [-4096, -4096, -4096], "type": "InternalNode2"}
+      {"origin": [-4096, -4096, -4096], "type": "InternalNode2"},
+      {"origin": [-4096, -4096, 0], "type": "InternalNode2"},
+      {"origin": [-4096, 0, -4096], "type": "InternalNode2"},
+      {"origin": [-4096, 0, 0], "type": "InternalNode2"},
+      {"origin": [0, -4096, -4096], "type": "InternalNode2"},
+      {"origin": [0, -4096, 0], "type": "InternalNode2"},
+      {"origin": [0, 0, -4096], "type": "InternalNode2"},
+      {"origin": [0, 0, 0], "type": "InternalNode2"}
     ]
   },
   "smoke.vdb": {

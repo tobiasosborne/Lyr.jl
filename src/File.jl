@@ -16,11 +16,11 @@ struct VDBFile
 end
 
 """
-    parse_vdb(bytes::Vector{UInt8}) -> VDBFile
+    _parse_vdb_legacy(bytes::Vector{UInt8}) -> VDBFile
 
-Parse a complete VDB file from bytes.
+Parse a complete VDB file from bytes using the legacy (offset-seeking) parser.
 """
-function parse_vdb(bytes::Vector{UInt8})::VDBFile
+function _parse_vdb_legacy(bytes::Vector{UInt8})::VDBFile
     pos = 1
 
     # Read header
@@ -114,6 +114,27 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
     end
 
     VDBFile(header, grids_temp)
+end
+
+"""
+    parse_vdb(bytes::Vector{UInt8}) -> VDBFile
+
+Parse a complete VDB file from bytes.
+
+Routes through TinyVDB for compatible files (v222+, Float32, no Blosc) for
+correct sequential parsing. Falls back to the legacy offset-seeking parser
+for incompatible files or if TinyVDB parsing fails.
+"""
+function parse_vdb(bytes::Vector{UInt8})::VDBFile
+    if is_tinyvdb_compatible(bytes)
+        try
+            tf = TinyVDB.parse_tinyvdb(bytes)
+            return convert_tinyvdb_file(tf)
+        catch
+            # Fall back to legacy parser on any TinyVDB failure
+        end
+    end
+    return _parse_vdb_legacy(bytes)
 end
 
 """
