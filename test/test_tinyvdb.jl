@@ -953,12 +953,17 @@ end
 @testset "TinyVDB Values" begin
 
     @testset "NodeMaskFlag constants" begin
+        # Must match tinyvdbio.h enum exactly
         @test NO_MASK_OR_INACTIVE_VALS == 0
-        @test NO_MASK_AND_ONE_INACTIVE_VAL == 1
+        @test NO_MASK_AND_MINUS_BG == 1
+        @test NO_MASK_AND_ONE_INACTIVE_VAL == 2
+        @test MASK_AND_NO_INACTIVE_VALS == 3
+        @test MASK_AND_ONE_INACTIVE_VAL == 4
+        @test MASK_AND_TWO_INACTIVE_VALS == 5
         @test NO_MASK_AND_ALL_VALS == 6
     end
 
-    @testset "read_leaf_values - uncompressed, all values" begin
+    @testset "read_leaf_values - uncompressed, all values (flag 6)" begin
         # Create a leaf with some active voxels
         value_mask = NodeMask(Int32(3))
         set_on!(value_mask, 0)
@@ -966,6 +971,7 @@ end
         set_on!(value_mask, 511)
 
         leaf = LeafNodeData(value_mask, Float32[])
+        background = 3.0f0
 
         # Build bytes: value_mask (64 bytes) + per_node_flag (1 byte) + 512 float32 values
         bytes = UInt8[]
@@ -987,7 +993,7 @@ end
         append!(bytes, reinterpret(UInt8, values))
 
         bytes = Vector{UInt8}(bytes)
-        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222), COMPRESS_NONE)
+        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222), COMPRESS_NONE, background)
 
         @test length(result_leaf.values) == 512
         @test result_leaf.values[1] == 1.0f0
@@ -996,7 +1002,7 @@ end
         @test pos == 2114  # 64 + 1 + 2048 + 1
     end
 
-    @testset "read_leaf_values - compressed" begin
+    @testset "read_leaf_values - compressed (flag 6)" begin
         using CodecZlib
 
         value_mask = NodeMask(Int32(3))
@@ -1018,10 +1024,139 @@ end
         append!(bytes, compressed)
 
         bytes = Vector{UInt8}(bytes)
-        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222), COMPRESS_ZIP)
+        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222), COMPRESS_ZIP, 0.0f0)
 
         @test length(result_leaf.values) == 512
         @test all(v -> v == 1.0f0, result_leaf.values)
+    end
+
+    @testset "read_leaf_values - flag 0: inactive = +background" begin
+        # Flag 0 (NO_MASK_OR_INACTIVE_VALS): inactive voxels get +background
+        # With COMPRESS_ACTIVE_MASK, only active values are stored
+        background = 3.0f0
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)    # Only voxel 0 is active
+        set_on!(value_mask, 100)  # And voxel 100
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        bytes = UInt8[]
+        append!(bytes, zeros(UInt8, 64))  # value_mask (skipped)
+        push!(bytes, UInt8(NO_MASK_OR_INACTIVE_VALS))  # flag = 0
+        # Only 2 active values stored (no compression codec, just ACTIVE_MASK)
+        append!(bytes, reinterpret(UInt8, [Float32(1.0)]))  # voxel 0
+        append!(bytes, reinterpret(UInt8, [Float32(2.0)]))  # voxel 100
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, pos = read_leaf_values(bytes, 1, leaf, UInt32(222),
+                                            COMPRESS_ACTIVE_MASK, background)
+
+        @test length(result_leaf.values) == 512
+        @test result_leaf.values[1] == 1.0f0      # active voxel 0
+        @test result_leaf.values[101] == 2.0f0     # active voxel 100 (1-indexed)
+        @test result_leaf.values[2] == 3.0f0       # inactive = +background
+        @test result_leaf.values[512] == 3.0f0     # inactive = +background
+    end
+
+    @testset "read_leaf_values - flag 1: inactive = -background" begin
+        background = 3.0f0
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        bytes = UInt8[]
+        append!(bytes, zeros(UInt8, 64))  # value_mask
+        push!(bytes, UInt8(NO_MASK_AND_MINUS_BG))  # flag = 1
+        append!(bytes, reinterpret(UInt8, [Float32(1.0)]))  # 1 active value
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, _ = read_leaf_values(bytes, 1, leaf, UInt32(222),
+                                          COMPRESS_ACTIVE_MASK, background)
+
+        @test length(result_leaf.values) == 512
+        @test result_leaf.values[1] == 1.0f0       # active
+        @test result_leaf.values[2] == -3.0f0      # inactive = -background
+    end
+
+    @testset "read_leaf_values - flag 2: one inactive val read from stream" begin
+        background = 3.0f0
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        bytes = UInt8[]
+        append!(bytes, zeros(UInt8, 64))  # value_mask
+        push!(bytes, UInt8(NO_MASK_AND_ONE_INACTIVE_VAL))  # flag = 2
+        append!(bytes, reinterpret(UInt8, [Float32(7.0)]))  # inactiveVal0
+        append!(bytes, reinterpret(UInt8, [Float32(1.0)]))  # 1 active value
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, _ = read_leaf_values(bytes, 1, leaf, UInt32(222),
+                                          COMPRESS_ACTIVE_MASK, background)
+
+        @test length(result_leaf.values) == 512
+        @test result_leaf.values[1] == 1.0f0       # active
+        @test result_leaf.values[2] == 7.0f0       # inactive = inactiveVal0 (read)
+    end
+
+    @testset "read_leaf_values - flag 3: selection mask, bg/-bg" begin
+        background = 3.0f0
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        # selection_mask: bit 1 ON → inactiveVal1 (+bg), bit 2 OFF → inactiveVal0 (-bg)
+        sel_mask = NodeMask(Int32(3))
+        set_on!(sel_mask, 1)  # voxel 1 selected → +background
+
+        bytes = UInt8[]
+        append!(bytes, zeros(UInt8, 64))  # value_mask (skip)
+        push!(bytes, UInt8(MASK_AND_NO_INACTIVE_VALS))  # flag = 3
+        # selection_mask (64 bytes)
+        for w in sel_mask.words
+            append!(bytes, reinterpret(UInt8, [w]))
+        end
+        # 1 active value
+        append!(bytes, reinterpret(UInt8, [Float32(1.0)]))
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, _ = read_leaf_values(bytes, 1, leaf, UInt32(222),
+                                          COMPRESS_ACTIVE_MASK, background)
+
+        @test length(result_leaf.values) == 512
+        @test result_leaf.values[1] == 1.0f0       # active
+        @test result_leaf.values[2] == 3.0f0       # sel ON → inactiveVal1 = +bg
+        @test result_leaf.values[3] == -3.0f0      # sel OFF → inactiveVal0 = -bg
+    end
+
+    @testset "read_leaf_values - flag 5: two inactive vals + selection mask" begin
+        background = 3.0f0
+        value_mask = NodeMask(Int32(3))
+        set_on!(value_mask, 0)
+        leaf = LeafNodeData(value_mask, Float32[])
+
+        sel_mask = NodeMask(Int32(3))
+        set_on!(sel_mask, 1)  # voxel 1 → inactiveVal1
+
+        bytes = UInt8[]
+        append!(bytes, zeros(UInt8, 64))  # value_mask
+        push!(bytes, UInt8(MASK_AND_TWO_INACTIVE_VALS))  # flag = 5
+        append!(bytes, reinterpret(UInt8, [Float32(10.0)]))  # inactiveVal0
+        append!(bytes, reinterpret(UInt8, [Float32(20.0)]))  # inactiveVal1
+        # selection_mask
+        for w in sel_mask.words
+            append!(bytes, reinterpret(UInt8, [w]))
+        end
+        # 1 active value
+        append!(bytes, reinterpret(UInt8, [Float32(1.0)]))
+
+        bytes = Vector{UInt8}(bytes)
+        result_leaf, _ = read_leaf_values(bytes, 1, leaf, UInt32(222),
+                                          COMPRESS_ACTIVE_MASK, background)
+
+        @test length(result_leaf.values) == 512
+        @test result_leaf.values[1] == 1.0f0       # active
+        @test result_leaf.values[2] == 20.0f0      # sel ON → inactiveVal1
+        @test result_leaf.values[3] == 10.0f0      # sel OFF → inactiveVal0
     end
 
     @testset "read_tree_values" begin
@@ -1150,6 +1285,77 @@ end
         @test pos == 140
     end
 
+end
+
+@testset "TinyVDB End-to-End: cube.vdb" begin
+    cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+    if isfile(cube_path)
+        @testset "parse_tinyvdb succeeds" begin
+            vdb = parse_tinyvdb(cube_path)
+
+            @test vdb.header.file_version >= UInt32(222)
+            @test !isempty(vdb.grids)
+        end
+
+        @testset "grid structure is plausible" begin
+            vdb = parse_tinyvdb(cube_path)
+
+            # Should have at least one grid
+            @test length(vdb.grids) >= 1
+
+            # Get the first grid
+            grid = first(values(vdb.grids))
+
+            # Root should have children
+            @test grid.root.num_children > 0
+
+            # Count leaves
+            leaf_count = 0
+            for (_, i2) in grid.root.children
+                for (_, child) in i2.children
+                    if child isa InternalNodeData
+                        leaf_count += length(child.children)
+                    end
+                end
+            end
+            @test leaf_count > 0
+        end
+
+        @testset "leaf values are plausible SDF" begin
+            vdb = parse_tinyvdb(cube_path)
+            grid = first(values(vdb.grids))
+
+            # Collect some leaf values
+            all_ok = true
+            sample_count = 0
+            for (_, i2) in grid.root.children
+                for (_, i1_any) in i2.children
+                    i1 = i1_any::InternalNodeData
+                    for (_, leaf_any) in i1.children
+                        leaf = leaf_any::LeafNodeData
+                        if !isempty(leaf.values)
+                            @test length(leaf.values) == 512
+                            # SDF values should be finite, not NaN
+                            for v in leaf.values
+                                if !isfinite(v)
+                                    all_ok = false
+                                end
+                            end
+                            sample_count += 1
+                        end
+                        sample_count >= 10 && break
+                    end
+                    sample_count >= 10 && break
+                end
+                sample_count >= 10 && break
+            end
+
+            @test all_ok  # No NaN or Inf values
+            @test sample_count >= 1  # We found at least one leaf with values
+        end
+    else
+        @warn "cube.vdb not found at $cube_path, skipping end-to-end test"
+    end
 end
 
 println("All TinyVDB tests completed!")
