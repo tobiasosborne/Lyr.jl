@@ -190,26 +190,27 @@ end
     active_bounding_box(tree::Tree{T}) -> Union{BBox, Nothing}
 
 Compute the bounding box of all active voxels. Returns `nothing` if there are no active voxels.
+
+Runs in O(leaves) by using each leaf's origin rather than iterating every voxel.
+The result may overestimate by up to 7 voxels per axis (one leaf dimension).
 """
 function active_bounding_box(tree::Tree{T})::Union{BBox, Nothing} where T
     min_coord = nothing
     max_coord = nothing
+    leaf_max = Coord(Int32(7), Int32(7), Int32(7))
 
-    for (coord, val) in active_voxels(tree)
+    for leaf in leaves(tree)
+        count_on(leaf.value_mask) == 0 && continue
         if min_coord === nothing
-            min_coord = coord
-            max_coord = coord
+            min_coord = leaf.origin
+            max_coord = leaf.origin + leaf_max
         else
-            min_coord = min(min_coord, coord)
-            max_coord = max(max_coord, coord)
+            min_coord = min(min_coord, leaf.origin)
+            max_coord = max(max_coord, leaf.origin + leaf_max)
         end
     end
 
-    if min_coord === nothing
-        return nothing
-    end
-
-    BBox(min_coord, max_coord)
+    min_coord === nothing ? nothing : BBox(min_coord, max_coord)
 end
 
 """
