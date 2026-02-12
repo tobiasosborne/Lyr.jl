@@ -21,6 +21,7 @@ A parsed VDB grid with its tree structure.
 struct TinyGrid
     name::String
     root::RootNodeData
+    voxel_size::Float64
 end
 
 """
@@ -103,36 +104,41 @@ end
 # =============================================================================
 
 """
-    read_transform(bytes::Vector{UInt8}, pos::Int) -> Int
+    read_transform(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float64, Int}
 
-Read and skip over grid transform.
+Read grid transform and extract the voxel size (uniform scale).
 
-TinyVDB doesn't process transforms, just skips over them.
-Returns the new position after the transform data.
+Returns (voxel_size, new_pos).
+
+Per tinyvdbio.h ReadTransform (lines 2620-2669):
+UniformScaleMap reads 5 Vec3d = 15 doubles = 120 bytes:
+  - scale_values (3 doubles) ← voxel_size is scale_values[1]
+  - voxel_size (3 doubles)
+  - scale_values_inverse (3 doubles)
+  - inv_scale_squared (3 doubles)
+  - inv_twice_scale (3 doubles)
 """
-function read_transform(bytes::Vector{UInt8}, pos::Int)::Int
+function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
     # Read transform type string
     transform_type, pos = read_string(bytes, pos)
 
-    # Based on type, skip the appropriate amount of data
-    # Per tinyvdbio.h ReadTransform (lines 2620-2669):
-    # UniformScaleMap and UniformScaleTranslateMap read 5 Vec3d = 15 doubles = 120 bytes:
-    #   - scale_values (3 doubles)
-    #   - voxel_size (3 doubles)
-    #   - scale_values_inverse (3 doubles)
-    #   - inv_scale_squared (3 doubles)
-    #   - inv_twice_scale (3 doubles)
-    if transform_type == "UniformScaleMap" || transform_type == "UniformScaleTranslateMap"
-        # 5 Vec3d = 15 doubles = 120 bytes
-        for _ in 1:15
+    if transform_type == "UniformScaleMap"
+        # First double is scale_x (= voxel size for uniform scale)
+        scale_x, pos = read_f64(bytes, pos)
+        for _ in 2:15
             _, pos = read_f64(bytes, pos)
         end
+        return (scale_x, pos)
+    elseif transform_type == "UniformScaleTranslateMap"
+        # 5 Vec3d = 15 doubles (same layout as UniformScaleMap)
+        scale_x, pos = read_f64(bytes, pos)
+        for _ in 2:15
+            _, pos = read_f64(bytes, pos)
+        end
+        return (scale_x, pos)
     else
-        # Unsupported transform type - error like C++ does
         error("Unsupported transform type: $transform_type (only UniformScaleMap and UniformScaleTranslateMap supported)")
     end
-
-    return pos
 end
 
 # =============================================================================
@@ -159,8 +165,8 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     # Read metadata (skip over for TinyVDB)
     pos = read_metadata(bytes, pos)
 
-    # Read transform (skip over for TinyVDB)
-    pos = read_transform(bytes, pos)
+    # Read transform (capture voxel size)
+    voxel_size, pos = read_transform(bytes, pos)
 
     # Read buffer_count (TreeBase) - must be 1
     buffer_count, pos = read_i32(bytes, pos)
@@ -178,7 +184,7 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     root, pos = read_tree_values(bytes, pos, root, file_version, compression_flags;
                                 value_size=value_size)
 
-    return TinyGrid(gd.grid_name, root)
+    return TinyGrid(gd.grid_name, root, voxel_size)
 end
 
 # =============================================================================

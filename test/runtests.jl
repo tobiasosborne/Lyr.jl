@@ -20,6 +20,7 @@ using Cthulhu
     include("test_ray.jl")
     include("test_render.jl")
     include("test_integration.jl")
+    include("test_tinyvdb_bridge.jl")
     include("test_properties.jl")
     include("test_type_stability.jl")
     include("test_jet.jl")

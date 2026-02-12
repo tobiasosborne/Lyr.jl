@@ -73,16 +73,19 @@ Returns (hit_point, normal) or nothing if no hit.
 For level sets, the value at each point is the signed distance to the surface.
 We step by this distance until we're close enough to the surface.
 """
-function sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int) where T <: AbstractFloat
+function sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int;
+                      world_bounds::Union{Nothing, Tuple{NTuple{3,Float64}, NTuple{3,Float64}}}=nothing) where T <: AbstractFloat
     # Get grid bounds for early termination
-    bbox = active_bounding_box(grid.tree)
-    if bbox === nothing
-        return nothing
+    if world_bounds !== nothing
+        world_min, world_max = world_bounds
+    else
+        bbox = active_bounding_box(grid.tree)
+        if bbox === nothing
+            return nothing
+        end
+        world_min = index_to_world(grid.transform, bbox.min)
+        world_max = index_to_world(grid.transform, bbox.max)
     end
-
-    # Transform bbox to world coordinates
-    world_min = index_to_world(grid.transform, bbox.min)
-    world_max = index_to_world(grid.transform, bbox.max)
 
     # Ray-box intersection in world space (float coordinates)
     t_enter, t_exit = _intersect_float_bbox(ray, world_min, world_max)
@@ -249,6 +252,14 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
     # Normalize light direction
     light = _normalize(light_dir)
 
+    # Pre-compute world bounds once (active_bounding_box is O(active_voxels))
+    bbox = active_bounding_box(grid.tree)
+    wb = if bbox !== nothing
+        (index_to_world(grid.transform, bbox.min), index_to_world(grid.transform, bbox.max))
+    else
+        nothing
+    end
+
     for y in 1:height
         for x in 1:width
             # Convert pixel to normalized coordinates
@@ -257,7 +268,7 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
             v = 1.0 - (Float64(y) - 0.5) / Float64(height)
 
             ray = camera_ray(camera, u, v, aspect)
-            result = sphere_trace(ray, grid, max_steps)
+            result = sphere_trace(ray, grid, max_steps; world_bounds=wb)
 
             if result !== nothing
                 _, normal = result

@@ -1213,10 +1213,11 @@ end
         i2 = InternalNodeData(Int32(5), i2_child_mask, NodeMask(Int32(5)), Float32[], [])
         root = RootNodeData(0.0f0, Int32(0), Int32(0), [], [])
 
-        grid = TinyGrid("density", root)
+        grid = TinyGrid("density", root, 1.0)
 
         @test grid.name == "density"
         @test grid.root.background == 0.0f0
+        @test grid.voxel_size == 1.0
     end
 
     @testset "TinyVDBFile structure" begin
@@ -1262,9 +1263,8 @@ end
         @test pos == length(bytes) + 1
     end
 
-    @testset "read_transform - skip over" begin
+    @testset "read_transform - extract voxel size" begin
         # Per tinyvdbio.h, UniformScaleMap reads 5 Vec3d = 15 doubles = 120 bytes
-        # For now we just skip transforms
 
         # Build a UniformScaleMap transform
         bytes = UInt8[]
@@ -1273,14 +1273,16 @@ end
         append!(bytes, reinterpret(UInt8, [UInt32(15)]))
         append!(bytes, Vector{UInt8}("UniformScaleMap"))
 
-        # 5 Vec3d = 15 doubles = 120 bytes
-        for _ in 1:15
+        # 5 Vec3d = 15 doubles: first is scale_x (voxel size)
+        append!(bytes, reinterpret(UInt8, [Float64(0.5)]))  # scale_x
+        for _ in 2:15
             append!(bytes, reinterpret(UInt8, [Float64(1.0)]))
         end
 
         bytes = Vector{UInt8}(bytes)
-        pos = read_transform(bytes, 1)
+        voxel_size, pos = read_transform(bytes, 1)
 
+        @test voxel_size == 0.5
         # Should be past the transform data: 4 (len) + 15 (str) + 120 (5 vec3d) + 1 = 140
         @test pos == 140
     end

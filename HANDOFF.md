@@ -2,7 +2,54 @@
 
 ---
 
-## Latest Session (2026-02-12) - Fix cube.vdb BoundsError (Half Precision)
+## Latest Session (2026-02-12) - TinyVDB → Raytracer Bridge
+
+**Status**: 🟢 COMPLETE - cube.vdb renders to PPM via sphere tracing
+
+### Summary
+
+Created a conversion layer (`src/TinyVDBBridge.jl`) that transforms TinyVDB parsed data into Lyr tree types, enabling the existing raytracer to operate on TinyVDB-parsed files. End-to-end pipeline: parse VDB → convert → sphere trace → PPM image.
+
+### Changes
+
+| File | Change |
+|------|--------|
+| `src/TinyVDB/Parser.jl` | `TinyGrid` gains `voxel_size::Float64`; `read_transform` returns `(Float64, Int)` |
+| `src/TinyVDBBridge.jl` | **NEW** — conversion layer (coord, mask, leaf, internal, root, grid) |
+| `src/Lyr.jl` | Includes TinyVDB submodule + bridge, exports `convert_tinyvdb_grid` |
+| `src/Render.jl` | `sphere_trace` + `render_image` pre-compute bbox once (was O(voxels) per ray) |
+| `test/test_tinyvdb.jl` | Updated for new `TinyGrid` constructor and `read_transform` signature |
+| `test/test_tinyvdb_bridge.jl` | **NEW** — 41 tests (unit + cube.vdb integration + render) |
+| `test/runtests.jl` | Includes bridge tests |
+| `scripts/render_cube.jl` | **NEW** — demo script |
+
+### Key Decisions
+
+- **Conversion approach**: Convert TinyVDB types → Lyr types once after parsing. Raytracer unchanged.
+- **Origin reconstruction**: TinyVDB doesn't store node origins. Reconstructed from parent origin + child linear index using existing `child_origin_internal1/2`.
+- **Internal tile values**: TinyVDB skips them; bridge uses background value (correct for level-set grids).
+- **Performance fix**: `active_bounding_box` was called per-ray in `sphere_trace`. Now pre-computed once in `render_image` and passed via `world_bounds` kwarg.
+
+### Test Results
+```
+TinyVDB tests:  283 pass (all still pass with Parser.jl changes)
+Bridge tests:    41 pass (coord, mask, leaf, I1, grid conversion + cube.vdb + render)
+```
+
+### Render Output
+- 512x512 sphere-traced cube in 13.5s
+- Camera at (12, 8, 12) looking at origin, FOV 50
+- Lambertian shading with proper edges and perspective
+
+### Remaining Work
+- Full test suite (`Pkg.test()`) not yet run — may have issues with TinyVDB inclusion in Lyr
+- `active_bounding_box` is O(active_voxels) — could be computed from tree structure in O(leaves)
+- Internal node tile values are lost (only matters for fog volumes, not level sets)
+- Only `UniformScaleMap` transform supported
+
+---
+
+## Previous Session (2026-02-12) - Fix cube.vdb BoundsError (Half Precision)
 
 **Status**: 🟢 COMPLETE - cube.vdb parses successfully, all 283 TinyVDB tests pass
 

@@ -31,6 +31,10 @@ include("Interpolation.jl")
 include("Ray.jl")
 include("Render.jl")
 
+# TinyVDB parser and bridge
+include("TinyVDB/TinyVDB.jl")
+include("TinyVDBBridge.jl")
+
 # Exports - Binary
 export read_u8, read_u32_le, read_u64_le
 export read_i32_le, read_i64_le
@@ -101,5 +105,8 @@ export ValueCountError
 export Camera, camera_ray
 export sphere_trace, shade
 export render_image, write_ppm
+
+# Exports - TinyVDB Bridge
+export convert_tinyvdb_grid
 
 end # module
