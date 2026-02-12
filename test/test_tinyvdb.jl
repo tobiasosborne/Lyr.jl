@@ -1360,4 +1360,73 @@ end
     end
 end
 
+@testset "TinyVDB Transform: UniformScaleTranslateMap" begin
+    # UniformScaleTranslateMap has 3 translation doubles THEN 15 scale doubles (144 bytes total)
+    # Build a synthetic transform: type string + 18 doubles
+    buf = UInt8[]
+    type_str = "UniformScaleTranslateMap"
+    append!(buf, reinterpret(UInt8, [Int32(length(type_str))]))
+    append!(buf, Vector{UInt8}(type_str))
+    # Translation: 3 doubles
+    for v in [10.0, 20.0, 30.0]
+        append!(buf, reinterpret(UInt8, [v]))
+    end
+    # scale_values: 3 doubles (voxel_size source)
+    for v in [0.5, 0.5, 0.5]
+        append!(buf, reinterpret(UInt8, [v]))
+    end
+    # remaining 12 doubles (voxel_size, inverse, inv_sq, inv_twice)
+    for _ in 1:12
+        append!(buf, reinterpret(UInt8, [1.0]))
+    end
+
+    voxel_size, pos = TinyVDB.read_transform(buf, 1)
+    @test voxel_size ≈ 0.5
+    @test pos == length(buf) + 1  # consumed all bytes
+end
+
+@testset "TinyVDB End-to-End: smoke.vdb" begin
+    smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+    if isfile(smoke_path)
+        @testset "parse_tinyvdb succeeds" begin
+            vdb = parse_tinyvdb(smoke_path)
+            @test haskey(vdb.grids, "density")
+        end
+
+        @testset "grid structure is plausible" begin
+            vdb = parse_tinyvdb(smoke_path)
+            grid = vdb.grids["density"]
+            @test grid.root.num_children >= 1
+            @test grid.voxel_size > 0.0
+        end
+
+        @testset "leaf values are valid" begin
+            vdb = parse_tinyvdb(smoke_path)
+            grid = vdb.grids["density"]
+            # Fog volume: density values should be in [0, 1] range mostly
+            sample_count = 0
+            all_finite = true
+            for (_, i2) in grid.root.children
+                for (_, i1) in i2.children
+                    for (_, leaf) in i1.children
+                        if leaf isa TinyVDB.LeafNodeData && !isempty(leaf.values)
+                            sample_count += 1
+                            if any(!isfinite, leaf.values)
+                                all_finite = false
+                            end
+                            sample_count >= 10 && break
+                        end
+                    end
+                    sample_count >= 10 && break
+                end
+                sample_count >= 10 && break
+            end
+            @test all_finite
+            @test sample_count >= 1
+        end
+    else
+        @warn "smoke.vdb not found at $smoke_path, skipping end-to-end test"
+    end
+end
+
 println("All TinyVDB tests completed!")

@@ -123,6 +123,7 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
     transform_type, pos = read_string(bytes, pos)
 
     if transform_type == "UniformScaleMap"
+        # 5 Vec3d = 15 doubles = 120 bytes
         # First double is scale_x (= voxel size for uniform scale)
         scale_x, pos = read_f64(bytes, pos)
         for _ in 2:15
@@ -130,7 +131,12 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
         end
         return (scale_x, pos)
     elseif transform_type == "UniformScaleTranslateMap"
-        # 5 Vec3d = 15 doubles (same layout as UniformScaleMap)
+        # Translation Vec3d (3 doubles = 24 bytes) THEN 5 Vec3d (15 doubles = 120 bytes)
+        # Total: 18 doubles = 144 bytes
+        # OpenVDB ScaleTranslateMap::write() emits translation first, then ScaleMap data
+        for _ in 1:3
+            _, pos = read_f64(bytes, pos)  # skip translation
+        end
         scale_x, pos = read_f64(bytes, pos)
         for _ in 2:15
             _, pos = read_f64(bytes, pos)
