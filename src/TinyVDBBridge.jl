@@ -135,11 +135,10 @@ function convert_tinyvdb_root(root::TinyVDB.RootNodeData)::RootNode{Float32}
 end
 
 """
-    convert_tinyvdb_grid(tg::TinyVDB.TinyGrid;
-                         grid_class::GridClass=GRID_LEVEL_SET) -> Grid{Float32}
+    convert_tinyvdb_grid(tg::TinyVDB.TinyGrid) -> Grid{Float32}
 
 Convert a TinyVDB grid to a Lyr Grid, enabling use with Accessors, Interpolation,
-Ray, and Render modules.
+Ray, and Render modules. Grid class is derived from the grid's metadata.
 
 # Example
 ```julia
@@ -149,9 +148,78 @@ bbox = active_bounding_box(grid.tree)
 pixels = render_image(grid, camera, 512, 512)
 ```
 """
-function convert_tinyvdb_grid(tg::TinyVDB.TinyGrid;
-                              grid_class::GridClass=GRID_LEVEL_SET)::Grid{Float32}
+function convert_tinyvdb_grid(tg::TinyVDB.TinyGrid)::Grid{Float32}
     tree = convert_tinyvdb_root(tg.root)
     transform = UniformScaleTransform(tg.voxel_size)
+    grid_class = parse_grid_class(tg.grid_class)
     Grid{Float32}(tg.name, grid_class, transform, tree)
+end
+
+"""
+    convert_tinyvdb_file(tf::TinyVDB.TinyVDBFile) -> VDBFile
+
+Convert an entire TinyVDBFile to a Lyr VDBFile, mapping header fields and
+converting all grids (sorted by name).
+"""
+function convert_tinyvdb_file(tf::TinyVDB.TinyVDBFile)::VDBFile
+    h = tf.header
+    header = VDBHeader(
+        h.file_version,
+        h.major_version,
+        h.minor_version,
+        true,              # has_grid_offsets (TinyVDB requires it)
+        ZipCodec(),        # compression (TinyVDB supports zip)
+        false,             # active_mask_compression (per-grid in v222+)
+        h.uuid
+    )
+
+    sorted_names = sort(collect(keys(tf.grids)))
+    grids = Union{Grid{Float32}, Grid{Float64}, Grid{NTuple{3, Float32}}}[
+        convert_tinyvdb_grid(tf.grids[name]) for name in sorted_names
+    ]
+
+    VDBFile(header, grids)
+end
+
+"""
+    is_tinyvdb_compatible(bytes::Vector{UInt8}) -> Bool
+
+Check if a VDB byte stream is compatible with the TinyVDB parser:
+v222+, all grids are Tree_float_5_4_3, and no Blosc compression.
+
+Returns false (rather than throwing) for invalid or incompatible data.
+"""
+function is_tinyvdb_compatible(bytes::Vector{UInt8})::Bool
+    try
+        header, pos = TinyVDB.read_header(bytes, 1)
+
+        if header.file_version < 222
+            return false
+        end
+
+        # Skip file-level metadata
+        _, pos = TinyVDB.read_metadata(bytes, pos)
+
+        # Read grid descriptors
+        descriptors, _ = TinyVDB.read_grid_descriptors(bytes, pos)
+
+        for (_, gd) in descriptors
+            if gd.grid_type != "Tree_float_5_4_3"
+                return false
+            end
+        end
+
+        # Check per-grid compression for Blosc
+        for (_, gd) in descriptors
+            grid_pos = Int(gd.grid_pos) + 1
+            flags, _ = TinyVDB.read_grid_compression(bytes, grid_pos, header.file_version)
+            if (flags & TinyVDB.COMPRESS_BLOSC) != 0
+                return false
+            end
+        end
+
+        return true
+    catch
+        return false
+    end
 end

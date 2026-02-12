@@ -107,6 +107,6 @@ export sphere_trace, shade
 export render_image, write_ppm
 
 # Exports - TinyVDB Bridge
-export convert_tinyvdb_grid
+export convert_tinyvdb_grid, convert_tinyvdb_file, is_tinyvdb_compatible
 
 end # module

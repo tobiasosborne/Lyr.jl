@@ -68,6 +68,77 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
         @test lyr_i1.table[1].origin == Coord(Int32(0), Int32(0), Int32(0))
     end
 
+    @testset "convert_tinyvdb_grid uses grid_class from metadata" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if !isfile(cube_path)
+            @warn "cube.vdb not found, skipping"
+            return
+        end
+        tiny = TinyVDB.parse_tinyvdb(cube_path)
+        tiny_grid = first(values(tiny.grids))
+        grid = convert_tinyvdb_grid(tiny_grid)
+        @test grid.grid_class == GRID_LEVEL_SET
+    end
+
+    @testset "convert_tinyvdb_grid - smoke.vdb fog volume class" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @warn "smoke.vdb not found, skipping"
+            return
+        end
+        tiny = TinyVDB.parse_tinyvdb(smoke_path)
+        grid = convert_tinyvdb_grid(tiny.grids["density"])
+        @test grid.grid_class == GRID_FOG_VOLUME
+    end
+
+    @testset "convert_tinyvdb_file - cube.vdb" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if !isfile(cube_path)
+            @warn "cube.vdb not found, skipping"
+            return
+        end
+        tiny = TinyVDB.parse_tinyvdb(cube_path)
+        vdb = convert_tinyvdb_file(tiny)
+
+        @test vdb isa VDBFile
+        @test vdb.header.format_version == tiny.header.file_version
+        @test vdb.header.library_major == tiny.header.major_version
+        @test vdb.header.library_minor == tiny.header.minor_version
+        @test vdb.header.uuid == tiny.header.uuid
+        @test length(vdb.grids) == length(tiny.grids)
+        @test vdb.grids[1] isa Grid{Float32}
+    end
+
+    @testset "convert_tinyvdb_file - grids sorted by name" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @warn "smoke.vdb not found, skipping"
+            return
+        end
+        tiny = TinyVDB.parse_tinyvdb(smoke_path)
+        vdb = convert_tinyvdb_file(tiny)
+        # Grids should be sorted alphabetically by name
+        names = [g.name for g in vdb.grids]
+        @test names == sort(names)
+    end
+
+    @testset "is_tinyvdb_compatible - cube.vdb" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if !isfile(cube_path)
+            @warn "cube.vdb not found, skipping"
+            return
+        end
+        bytes = read(cube_path)
+        @test is_tinyvdb_compatible(bytes) == true
+    end
+
+    @testset "is_tinyvdb_compatible - invalid/old data" begin
+        # Too short
+        @test is_tinyvdb_compatible(UInt8[0x00]) == false
+        # Wrong magic
+        @test is_tinyvdb_compatible(zeros(UInt8, 200)) == false
+    end
+
     @testset "convert_tinyvdb_grid - cube.vdb end-to-end" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
