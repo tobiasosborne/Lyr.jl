@@ -2,30 +2,57 @@
 
 ---
 
-## Latest Session (2026-02-12) - Fix x↔z Axis Transposition
+## Latest Session (2026-02-12) - End-to-End Pipeline Complete
 
-**Status**: 🟢 COMPLETE - cube renders correctly as a proper cube
+**Status**: 🟢 COMPLETE - VDB file → parse → convert → sphere trace → PPM/PNG
 
 ### Summary
 
-Fixed "cube behind a cube" rendering artifact caused by x↔z axis swap between OpenVDB and Lyr linear index conventions. OpenVDB uses `x*DIM²+y*DIM+z`, Lyr uses `x+y*DIM+z*DIM²`. Added transposition in the bridge layer.
+Built the complete end-to-end pipeline: TinyVDB parses cube.vdb, bridge converts to Lyr types, raytracer sphere-traces to image. Fixed axis transposition bug and verified full test suite.
 
-### Changes
+### Pipeline
+
+```
+cube.vdb → TinyVDB.parse_tinyvdb() → convert_tinyvdb_grid() → render_image() → write_ppm() → convert → PNG
+```
+
+### Session Changes
 
 | File | Change |
 |------|--------|
-| `src/TinyVDBBridge.jl` | Added `_transpose_xz`, `_transpose_mask`, `_transpose_leaf_values`; children sorted by transposed bit position |
-| `test/test_tinyvdb_bridge.jl` | Updated unit test assertions for transposed bit positions |
+| `src/TinyVDB/Parser.jl` | `TinyGrid` gains `voxel_size::Float64`; `read_transform` returns `(Float64, Int)` |
+| `src/TinyVDBBridge.jl` | **NEW** — conversion layer with x↔z axis transposition |
+| `src/Lyr.jl` | Includes TinyVDB + bridge, exports `convert_tinyvdb_grid` |
+| `src/Render.jl` | `sphere_trace` pre-computes bbox once (was O(voxels) per ray) |
+| `test/test_tinyvdb_bridge.jl` | **NEW** — 41 tests (unit + cube.vdb integration + render) |
+| `test/runtests.jl` | Includes bridge tests |
+| `scripts/render_cube.jl` | **NEW** — demo script |
 
-### Verification
+### Test Results
 
-- BBox now symmetric: (-112,-112,-112) to (112,112,112) — was (-4096,±112,-4096) before
-- All 285 TinyVDB tests pass, all 41 bridge tests pass
-- Rendered 256x256 cube_fixed.ppm looks correct
+```
+Full Pkg.test():  555 pass, 0 fail, 3 errors (all pre-existing old Lyr parser)
+TinyVDB:          285 pass
+Bridge:            41 pass
+```
 
-### Known Issue (Not Fixed)
+The 3 errors are: bunny_cloud.vdb v220 (×2), sphere_points.vdb PointDataGrid (×1) — old Lyr parser bugs, not TinyVDB.
 
-- Lyr's `Coordinates.jl` has x↔z swapped vs OpenVDB convention throughout (`leaf_offset`, `internal1_child_index`, `internal2_child_index`, `child_origin_internal1/2`). Fix is applied in bridge only — fixing Coordinates.jl would break existing Lyr tests.
+### Key Technical Decisions
+
+- **x↔z axis transposition**: OpenVDB uses `x*DIM²+y*DIM+z`, Lyr uses `x+y*DIM+z*DIM²`. Bridge transposes masks, values, and child ordering. Lyr's Coordinates.jl untouched (would break existing tests).
+- **One-time conversion**: Convert TinyVDB types → Lyr types once after parsing. Raytracer unchanged.
+- **Bbox pre-computation**: `active_bounding_box` called once in `render_image`, not per-ray.
+
+### Open Issues (5 ready + 1 blocked)
+
+| ID | P | Title |
+|---|---|---|
+| `path-tracer-da6` | P2 | Fix x↔z axis swap in Coordinates.jl |
+| `path-tracer-bre` | P2 | Test with additional VDB files |
+| `path-tracer-mbt` | P3 | Optimize active_bounding_box O(voxels)→O(leaves) |
+| `path-tracer-90i` | P3 | Support non-UniformScaleMap transforms |
+| `path-tracer-2ul` | P2 | **Promote TinyVDB as primary parser** (blocked by da6, bre, og2✓) |
 
 ---
 
