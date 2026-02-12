@@ -17,11 +17,14 @@ A parsed VDB grid with its tree structure.
 # Fields
 - `name::String`: Grid name
 - `root::RootNodeData`: Root of the tree containing all voxel data
+- `voxel_size::Float64`: Uniform voxel size from transform
+- `grid_class::String`: Grid class from metadata (e.g. "level set", "fog volume")
 """
 struct TinyGrid
     name::String
     root::RootNodeData
     voxel_size::Float64
+    grid_class::String
 end
 
 """
@@ -43,19 +46,21 @@ end
 # =============================================================================
 
 """
-    read_metadata(bytes::Vector{UInt8}, pos::Int) -> Int
+    read_metadata(bytes::Vector{UInt8}, pos::Int) -> Tuple{Dict{String,String}, Int}
 
-Read and skip over grid metadata.
+Read grid metadata, collecting string-typed entries into a dictionary.
 
-Returns the new position after all metadata.
+Returns (metadata_dict, new_pos). Non-string metadata types are skipped over.
 """
-function read_metadata(bytes::Vector{UInt8}, pos::Int)::Int
+function read_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,String}, Int}
+    metadata = Dict{String,String}()
+
     # Read count
     count, pos = read_i32(bytes, pos)
 
     for _ in 1:count
         # name string
-        _, pos = read_string(bytes, pos)
+        name, pos = read_string(bytes, pos)
 
         # type string
         type_name, pos = read_string(bytes, pos)
@@ -63,7 +68,8 @@ function read_metadata(bytes::Vector{UInt8}, pos::Int)::Int
         # value - depends on type
         # Note: All typed values (except string) have a 4-byte size prefix per C++ reference
         if type_name == "string"
-            _, pos = read_string(bytes, pos)
+            value, pos = read_string(bytes, pos)
+            metadata[name] = value
         elseif type_name == "bool"
             _, pos = read_i32(bytes, pos)  # size prefix
             _, pos = read_u8(bytes, pos)
@@ -96,7 +102,7 @@ function read_metadata(bytes::Vector{UInt8}, pos::Int)::Int
         end
     end
 
-    return pos
+    return (metadata, pos)
 end
 
 # =============================================================================
@@ -168,8 +174,9 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     # Read per-grid compression (v222+)
     compression_flags, pos = read_grid_compression(bytes, pos, file_version)
 
-    # Read metadata (skip over for TinyVDB)
-    pos = read_metadata(bytes, pos)
+    # Read metadata and extract grid class
+    metadata, pos = read_metadata(bytes, pos)
+    grid_class = get(metadata, "class", "unknown")
 
     # Read transform (capture voxel size)
     voxel_size, pos = read_transform(bytes, pos)
@@ -190,7 +197,7 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt3
     root, pos = read_tree_values(bytes, pos, root, file_version, compression_flags;
                                 value_size=value_size)
 
-    return TinyGrid(gd.grid_name, root, voxel_size)
+    return TinyGrid(gd.grid_name, root, voxel_size, grid_class)
 end
 
 # =============================================================================
@@ -228,7 +235,7 @@ function parse_tinyvdb(filepath::String)::TinyVDBFile
     end
 
     # Read and skip file-level metadata
-    pos = read_metadata(bytes, pos)
+    _, pos = read_metadata(bytes, pos)
 
     # Read grid descriptors
     descriptors, pos = read_grid_descriptors(bytes, pos)
@@ -264,7 +271,7 @@ function parse_tinyvdb(bytes::Vector{UInt8})::TinyVDBFile
     end
 
     # Read and skip file-level metadata
-    pos = read_metadata(bytes, pos)
+    _, pos = read_metadata(bytes, pos)
 
     # Read grid descriptors
     descriptors, pos = read_grid_descriptors(bytes, pos)

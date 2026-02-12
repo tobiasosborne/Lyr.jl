@@ -1213,11 +1213,12 @@ end
         i2 = InternalNodeData(Int32(5), i2_child_mask, NodeMask(Int32(5)), Float32[], [])
         root = RootNodeData(0.0f0, Int32(0), Int32(0), [], [])
 
-        grid = TinyGrid("density", root, 1.0)
+        grid = TinyGrid("density", root, 1.0, "unknown")
 
         @test grid.name == "density"
         @test grid.root.background == 0.0f0
         @test grid.voxel_size == 1.0
+        @test grid.grid_class == "unknown"
     end
 
     @testset "TinyVDBFile structure" begin
@@ -1237,7 +1238,7 @@ end
         @test isempty(file.grids)
     end
 
-    @testset "read_metadata - skip over" begin
+    @testset "read_metadata - returns dict" begin
         # Build minimal metadata: count = 1, name = "test", type = "string", value = "hello"
         bytes = UInt8[]
 
@@ -1257,9 +1258,60 @@ end
         append!(bytes, Vector{UInt8}("hello"))
 
         bytes = Vector{UInt8}(bytes)
-        pos = read_metadata(bytes, 1)
+        meta, pos = read_metadata(bytes, 1)
 
-        # Should skip over all metadata
+        # Should return dict with the string entry and advance past all metadata
+        @test meta isa Dict{String,String}
+        @test meta["test"] == "hello"
+        @test pos == length(bytes) + 1
+    end
+
+    @testset "read_metadata - empty metadata" begin
+        # count = 0 → empty dict
+        bytes = Vector{UInt8}(reinterpret(UInt8, [Int32(0)]))
+        meta, pos = read_metadata(bytes, 1)
+
+        @test meta isa Dict{String,String}
+        @test isempty(meta)
+        @test pos == 5
+    end
+
+    @testset "read_metadata - collects string types only" begin
+        # 3 entries: 2 strings + 1 int32 → dict has 2 keys
+        bytes = UInt8[]
+        append!(bytes, reinterpret(UInt8, [Int32(3)]))
+
+        # Entry 1: name="class", type="string", value="level set"
+        append!(bytes, reinterpret(UInt8, [UInt32(5)]))
+        append!(bytes, Vector{UInt8}("class"))
+        append!(bytes, reinterpret(UInt8, [UInt32(6)]))
+        append!(bytes, Vector{UInt8}("string"))
+        append!(bytes, reinterpret(UInt8, [UInt32(9)]))
+        append!(bytes, Vector{UInt8}("level set"))
+
+        # Entry 2: name="version", type="int32", value=1
+        append!(bytes, reinterpret(UInt8, [UInt32(7)]))
+        append!(bytes, Vector{UInt8}("version"))
+        append!(bytes, reinterpret(UInt8, [UInt32(5)]))
+        append!(bytes, Vector{UInt8}("int32"))
+        append!(bytes, reinterpret(UInt8, [Int32(4)]))  # size prefix
+        append!(bytes, reinterpret(UInt8, [Int32(1)]))   # value
+
+        # Entry 3: name="creator", type="string", value="Houdini"
+        append!(bytes, reinterpret(UInt8, [UInt32(7)]))
+        append!(bytes, Vector{UInt8}("creator"))
+        append!(bytes, reinterpret(UInt8, [UInt32(6)]))
+        append!(bytes, Vector{UInt8}("string"))
+        append!(bytes, reinterpret(UInt8, [UInt32(7)]))
+        append!(bytes, Vector{UInt8}("Houdini"))
+
+        bytes = Vector{UInt8}(bytes)
+        meta, pos = read_metadata(bytes, 1)
+
+        @test length(meta) == 2
+        @test meta["class"] == "level set"
+        @test meta["creator"] == "Houdini"
+        @test !haskey(meta, "version")  # int32 not collected
         @test pos == length(bytes) + 1
     end
 
@@ -1321,6 +1373,12 @@ end
                 end
             end
             @test leaf_count > 0
+        end
+
+        @testset "grid has class metadata" begin
+            vdb = parse_tinyvdb(cube_path)
+            grid = first(values(vdb.grids))
+            @test grid.grid_class == "level set"
         end
 
         @testset "leaf values are plausible SDF" begin
@@ -1398,6 +1456,12 @@ end
             grid = vdb.grids["density"]
             @test grid.root.num_children >= 1
             @test grid.voxel_size > 0.0
+        end
+
+        @testset "grid has fog volume class" begin
+            vdb = parse_tinyvdb(smoke_path)
+            grid = vdb.grids["density"]
+            @test grid.grid_class == "fog volume"
         end
 
         @testset "leaf values are valid" begin
