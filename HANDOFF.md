@@ -2,57 +2,55 @@
 
 ---
 
-## Latest Session (2026-02-12) - End-to-End Pipeline Complete
+## Latest Session (2026-02-12) - Convention Fix + Multi-File Testing
 
-**Status**: 🟢 COMPLETE - VDB file → parse → convert → sphere trace → PPM/PNG
+**Status**: 🟢 COMPLETE - 3 issues closed, 643 tests pass
 
 ### Summary
 
-Built the complete end-to-end pipeline: TinyVDB parses cube.vdb, bridge converts to Lyr types, raytracer sphere-traces to image. Fixed axis transposition bug and verified full test suite.
-
-### Pipeline
-
-```
-cube.vdb → TinyVDB.parse_tinyvdb() → convert_tinyvdb_grid() → render_image() → write_ppm() → convert → PNG
-```
+Fixed the x↔z axis convention mismatch (Coordinates.jl now matches OpenVDB natively), optimized `active_bounding_box` from O(voxels) to O(leaves), and validated TinyVDB parser against 5 VDB files (cube, sphere, icosahedron, torus, utahteapot).
 
 ### Session Changes
 
 | File | Change |
 |------|--------|
-| `src/TinyVDB/Parser.jl` | `TinyGrid` gains `voxel_size::Float64`; `read_transform` returns `(Float64, Int)` |
-| `src/TinyVDBBridge.jl` | **NEW** — conversion layer with x↔z axis transposition |
-| `src/Lyr.jl` | Includes TinyVDB + bridge, exports `convert_tinyvdb_grid` |
-| `src/Render.jl` | `sphere_trace` pre-computes bbox once (was O(voxels) per ray) |
-| `test/test_tinyvdb_bridge.jl` | **NEW** — 41 tests (unit + cube.vdb integration + render) |
-| `test/runtests.jl` | Includes bridge tests |
-| `scripts/render_cube.jl` | **NEW** — demo script |
+| `src/Coordinates.jl` | Index functions now use OpenVDB convention (`x*DIM²+y*DIM+z`) |
+| `src/Topology.jl` | `child_origin_*` reverse-index matches OpenVDB |
+| `src/Accessors.jl` | `_advance_voxels` offset decomposition updated; `active_bounding_box` O(leaves) |
+| `src/TinyVDBBridge.jl` | Removed transposition layer — direct copy now |
+| `test/test_coordinates.jl` | Updated expected values for OpenVDB convention |
+| `test/test_topology.jl` | Updated expected values for OpenVDB convention |
+| `test/test_accessors.jl` | Updated coordinate expectations |
+| `test/test_interpolation.jl` | Updated value layout for OpenVDB convention |
+| `test/test_tinyvdb_bridge.jl` | Removed transpose expectations; added 4 new VDB file tests |
 
 ### Test Results
 
 ```
-Full Pkg.test():  555 pass, 0 fail, 3 errors (all pre-existing old Lyr parser)
-TinyVDB:          285 pass
-Bridge:            41 pass
+Full Pkg.test():  643 pass, 0 fail, 3 errors (pre-existing: bunny_cloud×2, sphere_points×1)
 ```
 
-The 3 errors are: bunny_cloud.vdb v220 (×2), sphere_points.vdb PointDataGrid (×1) — old Lyr parser bugs, not TinyVDB.
+### Issues Closed
 
-### Key Technical Decisions
+| ID | Title |
+|---|---|
+| `path-tracer-da6` | Fix x↔z axis swap in Coordinates.jl ✅ |
+| `path-tracer-mbt` | Optimize active_bounding_box O(voxels)→O(leaves) ✅ |
+| `path-tracer-bre` | Test with additional VDB files ✅ |
 
-- **x↔z axis transposition**: OpenVDB uses `x*DIM²+y*DIM+z`, Lyr uses `x+y*DIM+z*DIM²`. Bridge transposes masks, values, and child ordering. Lyr's Coordinates.jl untouched (would break existing tests).
-- **One-time conversion**: Convert TinyVDB types → Lyr types once after parsing. Raytracer unchanged.
-- **Bbox pre-computation**: `active_bounding_box` called once in `render_image`, not per-ray.
-
-### Open Issues (5 ready + 1 blocked)
+### Issues Created
 
 | ID | P | Title |
 |---|---|---|
-| `path-tracer-da6` | P2 | Fix x↔z axis swap in Coordinates.jl |
-| `path-tracer-bre` | P2 | Test with additional VDB files |
-| `path-tracer-mbt` | P3 | Optimize active_bounding_box O(voxels)→O(leaves) |
+| `path-tracer-26p` | P2 | Fix smoke.vdb parsing failure (half-precision fog volume position drift) |
+
+### Open Issues
+
+| ID | P | Title |
+|---|---|---|
+| `path-tracer-26p` | P2 | Fix smoke.vdb parsing (fog volume, half-precision) |
 | `path-tracer-90i` | P3 | Support non-UniformScaleMap transforms |
-| `path-tracer-2ul` | P2 | **Promote TinyVDB as primary parser** (blocked by da6, bre, og2✓) |
+| `path-tracer-2ul` | P2 | **Promote TinyVDB as primary parser** (was blocked by da6✅, bre✅ — check remaining blockers) |
 
 ---
 
