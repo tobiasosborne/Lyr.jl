@@ -2,7 +2,34 @@
 
 ---
 
-## Latest Session (2026-02-12) - TinyVDB → Raytracer Bridge
+## Latest Session (2026-02-12) - Fix x↔z Axis Transposition
+
+**Status**: 🟢 COMPLETE - cube renders correctly as a proper cube
+
+### Summary
+
+Fixed "cube behind a cube" rendering artifact caused by x↔z axis swap between OpenVDB and Lyr linear index conventions. OpenVDB uses `x*DIM²+y*DIM+z`, Lyr uses `x+y*DIM+z*DIM²`. Added transposition in the bridge layer.
+
+### Changes
+
+| File | Change |
+|------|--------|
+| `src/TinyVDBBridge.jl` | Added `_transpose_xz`, `_transpose_mask`, `_transpose_leaf_values`; children sorted by transposed bit position |
+| `test/test_tinyvdb_bridge.jl` | Updated unit test assertions for transposed bit positions |
+
+### Verification
+
+- BBox now symmetric: (-112,-112,-112) to (112,112,112) — was (-4096,±112,-4096) before
+- All 285 TinyVDB tests pass, all 41 bridge tests pass
+- Rendered 256x256 cube_fixed.ppm looks correct
+
+### Known Issue (Not Fixed)
+
+- Lyr's `Coordinates.jl` has x↔z swapped vs OpenVDB convention throughout (`leaf_offset`, `internal1_child_index`, `internal2_child_index`, `child_origin_internal1/2`). Fix is applied in bridge only — fixing Coordinates.jl would break existing Lyr tests.
+
+---
+
+## Previous Session (2026-02-12) - TinyVDB → Raytracer Bridge
 
 **Status**: 🟢 COMPLETE - cube.vdb renders to PPM via sphere tracing
 
