@@ -2,7 +2,56 @@
 
 ---
 
-## Latest Session (2026-02-12) - TinyVDB Routing + Transform Support
+## Latest Session (2026-02-13) - Parser Unification Analysis + Phase 3 Plan
+
+**Status**: 🟡 ANALYSIS COMPLETE — Implementation not started
+
+### Summary
+
+Conducted deep comparative analysis of Main Lyr vs TinyVDB parsers. Identified the exact root cause of Main Lyr's v222+ parsing bugs and designed a surgical fix strategy. Updated PRD.md with Phase 3 plan. Created beads issues for all implementation steps.
+
+### Key Finding: The Bug Is One Missing Function Call
+
+Main Lyr's `read_i2_topology_v222` (TreeRead.jl:90-117) reads I2/I1 masks but does **not** skip the embedded internal node values that follow them in v222+ format. This leaves `pos` wrong after topology, forcing the compensating seek at line 335 (`pos = values_start`). All heuristic guards (origin validation, padding detection) are band-aids for this misalignment.
+
+TinyVDB handles this correctly via `skip_mask_values` calls after each mask read. Porting this single concept into Main Lyr's topology pass fixes the root cause.
+
+### Architecture Decision
+
+**Fix Main Lyr, keep TinyVDB as test oracle.** Rationale:
+- Main Lyr's type system (`LeafNode{T}` + `NTuple{512,T}`, `Mask{N,W}` + `NTuple{W,UInt64}`) is superior Julia — immutable, parametric, zero-alloc
+- TinyVDB's mutable `Vector`-based types would need complete rewrite to be idiomatic
+- Main Lyr already has Float64, Vec3f, Blosc, v220, full feature stack (accessors, rendering)
+- The fix is surgical: ~30 lines added, ~40 lines deleted in TreeRead.jl
+- Two independent implementations that agree is stronger correctness than one
+
+### Phase 3 Steps (see PRD.md for details)
+
+1. Add `skip_internal_values` to v222+ topology pass (TreeRead.jl)
+2. Remove seek to `block_offset` + heuristic guards (TreeRead.jl)
+3. Replace heuristic metadata parsing (Metadata.jl)
+4. Add half-precision support to Main Lyr
+5. Parser equivalence tests (Main Lyr == TinyVDB on all compatible files)
+6. Delete TinyVDBBridge, demote TinyVDB to test-only
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `PRD.md` | Complete rewrite — Phase 3 plan with comparative analysis |
+| `HANDOFF.md` | This session summary |
+
+### Test Results
+
+No code changes — existing tests unchanged:
+```
+TinyVDB: 308 pass, 0 fail
+Full suite: 756 pass, 0 fail, 3 errors (pre-existing)
+```
+
+---
+
+## Previous Session (2026-02-12) - TinyVDB Routing + Transform Support
 
 **Status**: 🟢 COMPLETE - 2 issues closed
 

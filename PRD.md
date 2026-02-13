@@ -1,292 +1,206 @@
 # Lyr.jl — Product Requirements Document
 
-## Status: 85% Complete. Do NOT start from scratch.
+## Status: Phase 3 — Unify Parsers
 
-**Date:** 2026-02-12
-**Scope:** TinyVDB parser — minimal, correct VDB file reader
+**Date:** 2026-02-13
+**Scope:** Bring TinyVDB's correct sequential reading into Main Lyr's idiomatic type system
 
 ---
 
 ## 1. Executive Summary
 
-Lyr.jl is a pure Julia OpenVDB file format parser. The project has two implementations:
+Lyr.jl is a pure Julia OpenVDB file format parser with two implementations:
 
-| Implementation | LOC | Status |
+| Implementation | LOC | Tests | Status |
+|---|---|---|---|
+| **Main Lyr (src/*.jl)** | ~3,850 | 756 total (3 errors) | Rich types, buggy v222+ parser |
+| **TinyVDB (src/TinyVDB/*.jl)** | ~1,540 | 308 (all pass) | Correct parser, flat types |
+
+**Previous strategy** (Phases 1-2): Fix TinyVDB, bridge to Lyr types, route compatible files through TinyVDB. This is complete — 196/197 beads issues closed.
+
+**New strategy** (Phase 3): Port TinyVDB's sequential reading into Main Lyr's parser. Main Lyr's type system (`LeafNode{T}`, `Mask{N,W}`, `NTuple{512,T}`) is superior Julia. TinyVDB's sequential reading is correct. Combine them. TinyVDB becomes a test oracle.
+
+---
+
+## 2. Comparative Analysis
+
+### 2.1 What Main Lyr Does Well
+
+- **Parametric immutable types**: `LeafNode{T}` with `NTuple{512,T}` — stack-friendly, zero-alloc
+- **Immutable bitmasks**: `Mask{N,W}` with `NTuple{W,UInt64}` — compiler-optimizable
+- **Full type hierarchy**: `AbstractNode{T}` with proper dispatch
+- **Multi-type support**: Float32, Float64, NTuple{3,Float32}
+- **Full feature set**: Accessors, Interpolation, Ray tracing, Rendering
+- **v220 support**: Pre-v222 interleaved format (bunny_cloud.vdb)
+- **Blosc compression**: Production VDB files
+- **Rich transforms**: 5 transform types including general affine
+
+### 2.2 What TinyVDB Does Well
+
+- **Sequential reading**: Never seeks to `block_offset`, matches C++ reference exactly
+- **Spec-driven metadata**: Clean type-dispatched approach, no heuristics
+- **Half-precision**: Detects `_HalfFloat`, threads `value_size` through pipeline
+- **No heuristic guards**: Trusts file-declared counts, no origin validation hacks
+- **Line-for-line C++ correspondence**: Every function maps to tinyvdbio.h
+
+### 2.3 What TinyVDB Lacks (Un-Julian Design)
+
+- **Mutable types**: `mutable struct LeafNodeData` with `Vector{Float32}` — heap-allocated
+- **Type erasure**: `children::Vector{Tuple{Int32, Any}}` — loses compile-time dispatch
+- **Hardcoded Float32**: No parametric types
+- **No feature stack**: Relies on TinyVDBBridge for accessors, rendering, etc.
+
+---
+
+## 3. The Root Bug in Main Lyr
+
+### 3.1 Diagnosis
+
+Main Lyr's v222+ parser (`read_tree_v222` in TreeRead.jl) has a two-phase design that is sound in principle. The bug is that the topology pass doesn't skip embedded internal node values.
+
+**TinyVDB topology pass** (correct):
+```
+read I2 masks → skip_mask_values(I2) → read I1 masks → skip_mask_values(I1) → read leaf masks
+```
+
+**Main Lyr topology pass** (buggy):
+```
+read I2 masks → [MISSING: skip I2 values] → read I1 masks → [MISSING: skip I1 values] → read leaf masks
+```
+
+Because `pos` is wrong after topology, Main Lyr compensates with:
+- `pos = values_start` (seek to `block_offset`) — TreeRead.jl:335
+- Origin validation `abs(x) <= 100000` — TreeRead.jl:243-244
+- Padding detection (peek 128 bytes for zeros) — TreeRead.jl:308-321
+- Early exit `pos >= values_start` — TreeRead.jl:287-288
+
+These are all band-aids. The fix is to make the topology pass correctly advance `pos`.
+
+### 3.2 Why the Pre-v222 Path Works
+
+`read_tree_interleaved` reads topology and values together per-subtree, never seeking. It's already correct. The bug is ONLY in the v222+ separated-topology path.
+
+---
+
+## 4. Implementation Plan — Phase 3
+
+### Step 1: Add `skip_internal_values` to v222+ Topology Pass
+
+**Files:** `TreeRead.jl`
+**Effort:** ~30 lines
+
+Add a function (or inline logic) equivalent to TinyVDB's `skip_mask_values` that advances `pos` past embedded internal node values during the v222+ topology pass. Call it after reading I2 masks and after reading I1 masks in `read_i2_topology_v222`.
+
+Main Lyr already has `read_dense_values` in Values.jl which handles the same metadata-byte + inactive-vals + selection-mask + compressed-data format. A skip variant just advances `pos` without constructing values.
+
+**Precondition:** Read TinyVDB's `skip_mask_values` (Topology.jl:132-177) and Main Lyr's `read_dense_values` (Values.jl:13-98) for the format.
+
+### Step 2: Remove Seek and Heuristic Guards
+
+**Files:** `TreeRead.jl`
+**Effort:** Delete ~40 lines
+
+- Delete `pos = values_start` (line 335)
+- Delete `is_valid_i2_origin` function and its call (lines 237-245, 299)
+- Delete padding detection block (lines 303-321)
+- Delete `pos >= values_start` early exit (lines 287-289)
+- Remove `values_start` parameter from `read_tree_v222` and `read_tree` signatures
+- Remove `block_offset` from `read_grid` in Grid.jl
+
+After Step 1, `pos` flows correctly through topology → values. No seeking needed.
+
+### Step 3: Replace Heuristic Metadata Parsing
+
+**Files:** `Metadata.jl`
+**Effort:** Replace ~150 lines with ~40 lines
+
+Replace `read_grid_metadata` with a clean spec-following implementation:
+- Read `tree_version` (u32) + `metadata_count` (u32)
+- For each entry: size-prefixed key, size-prefixed type, size-prefixed value
+- No ASCII scanning heuristics, no nested loops
+
+Also fix `File.jl` line 37: v222+ file-level metadata values need 4-byte size prefix before value bytes (currently calls `skip_metadata_value_heuristic` which reads values directly).
+
+**Reference:** TinyVDB `read_metadata` in Parser.jl for the correct format.
+
+### Step 4: Add Half-Precision Support
+
+**Files:** `GridDescriptor.jl`, `Grid.jl`, `TreeRead.jl`, `Values.jl`
+**Effort:** ~20 lines of threading
+
+- Detect `_HalfFloat` suffix in grid type string → set `half_precision` flag
+- Compute `value_size = half_precision ? 2 : 4`
+- Thread `value_size` through: `read_grid` → `read_tree_v222` → `skip_internal_values` → `read_dense_values`
+- In `read_dense_values`: read Float16 values and convert to Float32 when `value_size == 2`
+
+**Reference:** TinyVDB threads `value_size` through Compression.jl, Topology.jl, Values.jl, Parser.jl.
+
+### Step 5: Add Parser Equivalence Tests
+
+**Files:** `test/test_parser_equivalence.jl` (new)
+**Effort:** ~60 lines
+
+For every compatible test file (v222+, Float32, no Blosc), parse with both Main Lyr and TinyVDB (via bridge), assert identical:
+- Tree structure (root children count, I2/I1/leaf counts)
+- Active voxel counts per leaf
+- Value arrays (within floating-point tolerance)
+- Background values
+
+TinyVDB becomes a permanent test oracle.
+
+### Step 6: Demote TinyVDB, Remove Bridge
+
+**Files:** `File.jl`, `TinyVDBBridge.jl`
+**Effort:** ~20 lines changed, ~230 lines deleted
+
+- Remove routing logic in `parse_vdb` (TinyVDB try-catch path)
+- `parse_vdb` calls `_parse_vdb_legacy` directly (now fixed, rename back to `parse_vdb`)
+- Delete `TinyVDBBridge.jl` (no longer needed — Main Lyr parses correctly)
+- TinyVDB stays in `src/TinyVDB/` as reference implementation, only used by tests
+
+---
+
+## 5. What Stays Unchanged
+
+| Component | Files | Why |
 |---|---|---|
-| **Main (src/*.jl)** | ~2,800 | Functional but has offset bugs on real files |
-| **TinyVDB (src/TinyVDB/*.jl)** | ~1,400 | 247 unit tests pass; crashes on real VDB files |
-
-The main implementation works for synthetic data but fails on real VDB files due to an architectural flaw (seeks to `block_offset` instead of reading sequentially). TinyVDB was created to fix this by following the C++ reference's sequential reading approach.
-
-**TinyVDB is the path forward.** It has one critical bug: `read_leaf_values` in `Values.jl` does not read `inactiveVal0`, `inactiveVal1`, or `selection_mask` after `per_node_flag`, and does not reconstruct the full 512-value buffer from compressed active-only data. This causes stream position corruption when parsing real VDB files.
-
-Fixing this bug (~40 lines of code) unblocks the entire project.
-
----
-
-## 2. Architecture
-
-### 2.1 Module Structure (TinyVDB)
-
-```
-src/TinyVDB/
-├── TinyVDB.jl        ✅ Module root (includes + exports)
-├── Binary.jl         ✅ Primitives: u8, u32, i32, i64, f32, f64, string
-├── Types.jl          ✅ Coord, VDBHeader, NodeType enum
-├── Mask.jl           ✅ NodeMask: is_on, set_on!, count_on, read_mask
-├── Header.jl         ✅ read_header, VDB_MAGIC
-├── GridDescriptor.jl ✅ read_grid_descriptor, read_grid_descriptors
-├── Compression.jl    ✅ read_compressed_data, read_f32_values
-├── Topology.jl       ✅ read_root/internal/leaf_topology, skip_mask_values
-├── Values.jl         🐛 read_leaf_values (THE BUG), read_tree_values
-└── Parser.jl         ✅ read_metadata, read_transform, parse_tinyvdb
-```
-
-### 2.2 Reading Flow
-
-```
-parse_tinyvdb(filepath)
-  ├── read(filepath) → bytes
-  ├── read_header(bytes, 1) → (header, pos)
-  ├── read_metadata(bytes, pos) → pos          # file-level metadata
-  ├── read_grid_descriptors(bytes, pos) → (descriptors, pos)
-  └── for each descriptor:
-      └── read_grid(bytes, gd, file_version) → TinyGrid
-          ├── seek to gd.grid_pos
-          ├── read_grid_compression → compression_flags
-          ├── read_metadata (skip)
-          ├── read_transform (skip)
-          ├── read_i32 → buffer_count (must be 1)
-          ├── read_root_topology    ──┐
-          │   ├── background, tiles   │ Phase 1: Topology
-          │   └── read_internal_topology (recursive)
-          │       ├── child_mask, value_mask
-          │       ├── skip_mask_values ← (correctly skips inactive vals)
-          │       └── read_leaf_topology
-          │           └── value_mask  ─┘
-          └── read_tree_values      ──┐
-              └── read_internal_values │ Phase 2: Values
-                  └── read_leaf_values ← 🐛 THE BUG
-                      └── (broken)   ─┘
-```
-
-### 2.3 VDB Tree Hierarchy
-
-```
-RootNode (hash map)
-  └── InternalNode2 (32³ = 32768 slots, log2dim=5)
-       └── InternalNode1 (16³ = 4096 slots, log2dim=4)
-            └── LeafNode (8³ = 512 voxels, log2dim=3)
-```
+| Type system | `TreeTypes.jl`, `Masks.jl` | Already excellent |
+| Value reading | `Values.jl` (v222+ `read_dense_values`) | Already handles full ReadMaskValues algorithm |
+| Pre-v222 parsing | `TreeRead.jl` (`read_tree_interleaved`) | Already correct (sequential) |
+| Binary primitives | `Binary.jl` | Solid |
+| Compression | `Compression.jl` | Solid |
+| Accessors | `Accessors.jl` | Untouched |
+| Interpolation | `Interpolation.jl` | Untouched |
+| Ray tracing | `Ray.jl` | Untouched |
+| Rendering | `Render.jl` | Untouched |
+| Coordinates | `Coordinates.jl` | Untouched |
+| Transforms | `Transforms.jl` | Untouched |
+| TinyVDB | `src/TinyVDB/*` | Stays as test oracle |
 
 ---
 
-## 3. The Bug
+## 6. Success Criteria
 
-### 3.1 Location
-
-`src/TinyVDB/Values.jl`, function `read_leaf_values` (lines 55-86).
-
-### 3.2 Root Cause
-
-The current implementation mirrors the **buggy** `ReadBuffer` function from `reference/tinyvdbio.h` (line 2352), which itself is incomplete. The **correct** algorithm is `ReadMaskValues` (line 2017), used for internal node tile values.
-
-The C++ `ReadBuffer` for leaf nodes:
-1. Skips value_mask (already read in topology)
-2. Reads per_node_flag
-3. Computes read_count
-4. **Calls `ReadValues` (thin wrapper)** — does NOT read inactive values or selection_mask
-
-The C++ `ReadMaskValues` (the correct algorithm):
-1. Reads per_node_flag
-2. **Reads inactiveVal0** (conditional on flag)
-3. **Reads inactiveVal1** (conditional on flag)
-4. **Reads selection_mask** (conditional on flag)
-5. Computes read_count
-6. Reads compressed data into temp buffer
-7. **Reconstructs full N-value buffer** using value_mask + selection_mask + inactive values
-
-### 3.3 What's Missing in Julia
-
-The current `read_leaf_values`:
-```julia
-# ❌ Current (broken)
-function read_leaf_values(bytes, pos, leaf, file_version, compression_flags)
-    pos += 64                                    # skip value_mask
-    per_node_flag, pos = read_u8(bytes, pos)     # read flag
-    # MISSING: read inactiveVal0
-    # MISSING: read inactiveVal1
-    # MISSING: read selection_mask
-    read_count = mask_compressed ? count_on(leaf.value_mask) : 512
-    values, pos = read_f32_values(bytes, pos, read_count, compression_flags)
-    leaf.values = values                         # WRONG: only active values, not full 512
-    return (leaf, pos)
-end
-```
-
-### 3.4 The Correct Algorithm
-
-Per `ReadMaskValues` in `reference/tinyvdbio.h` (lines 2017-2127):
-
-```
-read_leaf_values(bytes, pos, leaf, file_version, compression_flags, background):
-  1. Skip value_mask (64 bytes)
-  2. Read per_node_flag (1 byte)
-  3. Initialize inactive values from flag:
-     - flag 0: inactiveVal0 = +background
-     - flag 1: inactiveVal0 = -background
-     - flag 2: read inactiveVal0 (4 bytes), inactiveVal1 = background
-     - flag 3: inactiveVal0 = -background, inactiveVal1 = +background, read selection_mask
-     - flag 4: read inactiveVal0, inactiveVal1 = background, read selection_mask
-     - flag 5: read inactiveVal0, read inactiveVal1, read selection_mask
-     - flag 6: no mask compression, all 512 values stored
-  4. Compute read_count:
-     - If mask_compressed AND flag != 6: read_count = count_on(value_mask)
-     - Else: read_count = 512
-  5. Read read_count compressed Float32 values → temp_values
-  6. Reconstruct full 512-value buffer:
-     - If mask_compressed AND read_count != 512:
-       For each index 0..511:
-         - If value_mask.isOn(i): copy next from temp_values (active voxel)
-         - Else if selection_mask.isOn(i): write inactiveVal1
-         - Else: write inactiveVal0
-     - Else: values = temp_values (all 512 present)
-  7. Return (leaf with full 512 values, new_pos)
-```
-
-### 3.5 Impact
-
-Without this fix:
-- Stream position after each leaf is wrong (missing bytes for inactive values + selection mask)
-- Position error compounds over thousands of leaf nodes
-- Eventually causes `BoundsError` crash (observed at Compression.jl:112 on cube.vdb)
-- Even if it didn't crash, leaf values would be wrong (only active values, not full 512)
-
-### 3.6 Note: `skip_mask_values` Already Correct
-
-The Topology.jl function `skip_mask_values` (lines 132-177) already correctly handles all 7 per_node_flag cases for internal node tile values. The leaf value reader just needs to follow the same pattern with actual value reconstruction instead of skipping.
+1. `julia --project -e 'using Pkg; Pkg.test()'` — 0 errors (currently 3)
+2. All test VDB files parsed by Main Lyr directly (no TinyVDB routing)
+3. Parser equivalence tests pass: Main Lyr == TinyVDB for all compatible files
+4. Half-precision cube.vdb parsed correctly by Main Lyr
+5. No heuristic guards in TreeRead.jl
+6. No heuristic metadata parsing in Metadata.jl
+7. TinyVDBBridge.jl deleted
 
 ---
 
-## 4. Additional Issues (Minor)
+## 7. Design Decision: Why Not Just Promote TinyVDB?
 
-### 4.1 Missing `background` Parameter
+The previous PRD recommended promoting TinyVDB as the sole parser. After analysis, **fixing Main Lyr is better** because:
 
-`read_leaf_values` needs the `background` value to reconstruct inactive voxels (flags 0, 1, 3). Currently the function signature doesn't include it. The background is available from `RootNodeData.background` and needs to be threaded through `read_tree_values` → `read_internal_values` → `read_leaf_values`.
+1. **Type system**: Main Lyr's `LeafNode{T}` with `NTuple{512,T}` and `Mask{N,W}` with `NTuple{W,UInt64}` are zero-alloc, immutable, and parametric. TinyVDB's mutable `Vector`-based types would need a complete rewrite to match.
 
-### 4.2 Duplicate Constants
+2. **Generality**: Main Lyr handles Float64, Vec3f, Blosc, v220, general transforms. Extending TinyVDB to match would effectively recreate Main Lyr.
 
-`Topology.jl` and `Values.jl` both define the same `NO_MASK_*` / `MASK_AND_*` constants. The second `include` will cause a redefinition warning. Move constants to one location (Compression.jl or a shared Constants.jl).
+3. **Feature stack**: Accessors, interpolation, ray tracing all operate on Main Lyr's types. Keeping them avoids a rewrite.
 
-### 4.3 `num_tiles` / `num_children` Type
+4. **The fix is surgical**: The bug is ~1 missing function call in the topology pass. Everything else in Main Lyr is sound.
 
-`Topology.jl:267-268` reads these as `read_i32` (signed). The C++ uses `int32_t` which is signed, so this is actually correct. No change needed.
-
-### 4.4 `Manifest.toml` Stale Reference
-
-`Manifest.toml` references `VDB` as the package name instead of `Lyr`. This causes no runtime issues but is confusing.
-
-### 4.5 Debug Dependencies in Runtime
-
-`Debugger` and `Infiltrator` are in `[deps]` instead of `[extras]` in `Project.toml`.
-
-### 4.6 Untracked Debug Scripts
-
-12 untracked files in `scripts/` and root directory from previous debugging sessions. Should be `.gitignore`d or deleted.
-
----
-
-## 5. Test Coverage
-
-### 5.1 Current (247 tests passing)
-
-| Component | Tests | Coverage |
-|---|---|---|
-| Binary primitives | 61 | Complete |
-| NodeMask | 55 | Complete |
-| Data structures | 22 | Complete |
-| Header parsing | 14 | Complete |
-| Grid descriptor | 29 | Complete |
-| Compression | 16 | Complete |
-| Topology | 29 | Good (unit-level, no real file) |
-| Values | 15 | **Insufficient** (no mask compression cases) |
-| Parser | 6 | Structure only (no real file) |
-
-### 5.2 Missing Tests
-
-1. **read_leaf_values with mask compression** — flags 0-5 with inactive value reconstruction
-2. **End-to-end parse on cube.vdb** — the real file test that currently crashes
-3. **Value correctness validation** — compare parsed values against known-good output
-
----
-
-## 6. Implementation Plan
-
-### Phase 1: Fix the Bug (Priority: CRITICAL)
-
-**Task 1.1: Move constants to single location**
-- Move `NO_MASK_*` / `MASK_AND_*` constants from both `Topology.jl` and `Values.jl` to `Compression.jl`
-- Remove duplicates
-
-**Task 1.2: Add `background` parameter threading**
-- Add `background::Float32` parameter to `read_leaf_values`, `read_internal_values`, `read_tree_values`
-- Pass `root.background` from `read_grid` through the call chain
-
-**Task 1.3: Write failing tests for mask compression**
-- Test each per_node_flag value (0-6) with synthetic data
-- Test inactive value reconstruction produces correct 512-value buffer
-
-**Task 1.4: Implement correct `read_leaf_values`**
-- Follow `ReadMaskValues` algorithm (Section 3.4 above)
-- Read inactiveVal0, inactiveVal1, selection_mask based on per_node_flag
-- Reconstruct full 512-value buffer
-
-**Task 1.5: End-to-end test on cube.vdb**
-- Parse cube.vdb successfully without crash
-- Verify grid structure (correct number of root children, internal nodes, leaves)
-- Verify value ranges are plausible for a signed distance field
-
-### Phase 2: Validation & Polish
-
-**Task 2.1: Cross-validate with C++ reference output**
-- Use `vdb_print` or write a small C++ program to dump cube.vdb values
-- Compare Julia output against C++ output byte-for-byte
-
-**Task 2.2: Clean up project**
-- Remove/gitignore debug scripts
-- Fix Manifest.toml package name
-- Move debug deps to extras
-
-**Task 2.3: Update CLAUDE.md beads status table**
-
-### Phase 3: Main Implementation (Future)
-
-Once TinyVDB parses correctly, backport the sequential reading approach to the main Lyr module, or promote TinyVDB to be the main parser.
-
----
-
-## 7. Test Fixture
-
-**Use `cube.vdb` only** (3.7MB). It is:
-- v222 format
-- Float32 level set (signed distance field)
-- Small enough to parse quickly
-- Uses `UniformScaleMap` transform
-- Has `Tree_float_5_4_3` grid type
-
-Path: `test/fixtures/samples/cube.vdb`
-
----
-
-## 8. Decision: TinyVDB vs Main
-
-**Recommendation: Promote TinyVDB as the sole parser.**
-
-Rationale:
-- TinyVDB's sequential reading is architecturally correct (matches C++ reference)
-- Main implementation's offset-seeking approach is fundamentally fragile
-- TinyVDB is 1,400 LOC vs main's 2,800 LOC — simpler is better
-- All 247 tests pass on TinyVDB; main has 3 errors
-- The main module's higher-level features (Accessors, Interpolation, Ray, Render) can be layered on top of TinyVDB's data structures
-
-Once TinyVDB parses real files correctly, the main implementation can be deprecated and its useful higher-level code adapted to work with TinyVDB's types.
+5. **TinyVDB as oracle**: A line-for-line C++ port is more valuable as a correctness reference than as production code. Two independent implementations that agree is stronger than one.
