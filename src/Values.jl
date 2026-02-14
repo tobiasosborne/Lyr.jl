@@ -122,13 +122,21 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
         pos += 12  # skip origin (3 × Int32)
         pos += 1   # skip numBuffers (Int8)
 
-        expected_size = 512 * sizeof(T)
+        expected_size = 512 * value_size
         data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
-        all_values_raw = reinterpret(T, data)
 
-        all_values = Vector{T}(undef, 512)
-        for i in 1:512
-            all_values[i] = all_values_raw[i]
+        is_half = (value_size != sizeof(T))
+        all_values = if is_half
+            halfs = reinterpret(Float16, data)
+            if T <: NTuple
+                n = length(T.parameters)
+                ET = T.parameters[1]
+                [ntuple(j -> ET(halfs[(i-1)*n + j]), n) for i in 1:512]
+            else
+                T.(halfs)
+            end
+        else
+            collect(reinterpret(T, data))
         end
         (NTuple{512, T}(all_values), pos)
     else

@@ -201,6 +201,65 @@
         @test active_voxel_count(grid.tree) == 1452218
     end
 
+    # =========================================================================
+    # Multi-grid files (from OpenVDB test suite)
+    # =========================================================================
+
+    OPENVDB_DIR = joinpath(@__DIR__, "fixtures", "openvdb")
+
+    @testset "explosion.vdb (v220 multi-grid: density + vec3s + temperature)" begin
+        filepath = joinpath(OPENVDB_DIR, "explosion.vdb")
+        if !isfile(filepath)
+            @test_skip "explosion.vdb not available"
+            return
+        end
+
+        vdb = parse_vdb(filepath)
+        @test vdb.header.format_version == 220
+        @test length(vdb.grids) == 3
+
+        @test vdb.grids[1].name == "density"
+        @test vdb.grids[1].tree isa RootNode{Float32}
+        @test vdb.grids[2].name == "v"
+        @test vdb.grids[2].tree isa RootNode{NTuple{3, Float32}}
+        @test vdb.grids[3].name == "temperature"
+        @test vdb.grids[3].tree isa RootNode{Float32}
+    end
+
+    @testset "fire.vdb (v222 multi-grid: density_HalfFloat + temperature)" begin
+        filepath = joinpath(OPENVDB_DIR, "fire.vdb")
+        if !isfile(filepath)
+            @test_skip "fire.vdb not available"
+            return
+        end
+
+        vdb = parse_vdb(filepath)
+        @test vdb.header.format_version == 222
+        @test length(vdb.grids) == 2
+
+        @test vdb.grids[1].name == "density"
+        @test vdb.grids[1].tree isa RootNode{Float32}
+        @test vdb.grids[2].name == "temperature"
+        @test vdb.grids[2].tree isa RootNode{Float32}
+    end
+
+    @testset "smoke2.vdb (v220 multi-grid: vec3s_HalfFloat + density)" begin
+        filepath = joinpath(OPENVDB_DIR, "smoke2.vdb")
+        if !isfile(filepath)
+            @test_skip "smoke2.vdb not available"
+            return
+        end
+
+        vdb = parse_vdb(filepath)
+        @test vdb.header.format_version == 220
+        @test length(vdb.grids) == 2
+
+        @test vdb.grids[1].name == "v"
+        @test vdb.grids[1].tree isa RootNode{NTuple{3, Float32}}
+        @test vdb.grids[2].name == "density"
+        @test vdb.grids[2].tree isa RootNode{Float32}
+    end
+
     @testset "Reference values" begin
         # Test against known reference values from sample files
         REF_FILE = joinpath(@__DIR__, "fixtures", "reference_values.json")

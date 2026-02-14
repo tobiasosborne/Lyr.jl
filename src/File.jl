@@ -32,26 +32,20 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
     # Read grid count
     grid_count, pos = read_u32_le(bytes, pos)
 
-    # Read grid descriptors
-    descriptors = Vector{GridDescriptor}(undef, grid_count)
-    for i in 1:grid_count
-        descriptors[i], pos = read_grid_descriptor(bytes, pos, header.has_grid_offsets)
-    end
-
-    # Parse each grid - collect into temporary vector then filter
+    # Parse each grid — descriptors are interleaved with grid data in the file,
+    # so we read each descriptor then its grid (or seek to end_offset to skip).
     grids_temp = Union{Grid{Float32}, Grid{Float64}, Grid{NTuple{3, Float32}}}[]
 
     for i in 1:grid_count
-        desc = descriptors[i]
+        # Read this grid's descriptor (immediately precedes its data)
+        desc, pos = read_grid_descriptor(bytes, pos, header.has_grid_offsets)
 
-        # Skip instanced grids for now
+        # Skip instanced grids
         if !isempty(desc.instance_parent)
+            if header.has_grid_offsets && desc.end_offset > 0
+                pos = Int(desc.end_offset) + 1
+            end
             continue
-        end
-
-        # Seek to grid data if byte offsets are present
-        if header.has_grid_offsets && desc.byte_offset > 0
-            pos = Int(desc.byte_offset) + 1  # byte_offset is 0-indexed, pos is 1-indexed
         end
 
         # For v222+, read per-grid compression flags (4 bytes)
@@ -83,7 +77,9 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
         end
 
         half_precision = endswith(desc.grid_type, "_HalfFloat")
-        value_size = half_precision ? 2 : sizeof(T)
+        # Half-precision stores each component as Float16 (2 bytes)
+        n_components = T <: NTuple ? length(T.parameters) : 1
+        value_size = half_precision ? 2 * n_components : sizeof(T)
 
         # Read per-grid metadata (includes "class" entry)
         grid_metadata, pos = read_grid_metadata(bytes, pos)
@@ -102,6 +98,11 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
         elseif T == NTuple{3, Float32}
             grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version; value_size)
             push!(grids_temp, grid)
+        end
+
+        # Seek to end_offset for next grid descriptor (robust for multi-grid files)
+        if header.has_grid_offsets && desc.end_offset > 0
+            pos = Int(desc.end_offset) + 1
         end
     end
 

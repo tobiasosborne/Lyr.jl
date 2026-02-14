@@ -201,6 +201,7 @@
                 small_coord_gen())
 
             result = check(gen) do (bg, tile_val, c)
+                isnan(tile_val) && return true
                 tile = Tile{Float32}(tile_val, true)
                 origin = internal2_origin(c)
                 table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}(origin => tile)

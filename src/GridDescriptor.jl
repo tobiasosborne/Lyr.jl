@@ -58,19 +58,24 @@ end
 Parse the value type from a grid type string.
 """
 function parse_value_type(grid_type::String)::Union{DataType, Nothing}
-    if Base.contains(grid_type, "float") || Base.contains(grid_type, "Float")
-        Float32
-    elseif Base.contains(grid_type, "double") || Base.contains(grid_type, "Double")
-        Float64
-    elseif Base.contains(grid_type, "int32") || Base.contains(grid_type, "Int32")
-        Int32
-    elseif Base.contains(grid_type, "int64") || Base.contains(grid_type, "Int64")
-        Int64
-    elseif Base.contains(grid_type, "Vec3f") || Base.contains(grid_type, "vec3f")
+    # Extract value type token from "Tree_{TYPE}_5_4_3[_HalfFloat]"
+    # Match vec3 types first to avoid "float" matching the "_HalfFloat" suffix
+    m = match(r"^Tree_(\w+)_\d+_\d+_\d+", grid_type)
+    vtype = m === nothing ? grid_type : m.captures[1]
+
+    if vtype in ("vec3s", "Vec3s", "vec3f", "Vec3f")
         NTuple{3, Float32}
-    elseif Base.contains(grid_type, "Vec3d") || Base.contains(grid_type, "vec3d")
+    elseif vtype in ("vec3d", "Vec3d")
         NTuple{3, Float64}
-    elseif Base.contains(grid_type, "bool") || Base.contains(grid_type, "Bool")
+    elseif vtype in ("float", "Float")
+        Float32
+    elseif vtype in ("double", "Double")
+        Float64
+    elseif vtype in ("int32", "Int32")
+        Int32
+    elseif vtype in ("int64", "Int64")
+        Int64
+    elseif vtype in ("bool", "Bool")
         Bool
     else
         nothing  # Unsupported grid type (e.g. PointDataIndex32)

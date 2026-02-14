@@ -7,6 +7,35 @@
 # This module handles both formats.
 
 # =============================================================================
+# Half-precision value conversion
+# =============================================================================
+
+"""
+    _decode_values(::Type{T}, data, count, value_size) -> Vector{T}
+
+Decode a byte buffer into `count` values of type T.
+Handles half-precision (Float16 components) when `value_size < sizeof(T)`.
+"""
+function _decode_values(::Type{T}, data::Vector{UInt8}, count::Int, value_size::Int)::Vector{T} where T
+    if value_size == sizeof(T)
+        return collect(reinterpret(T, data))
+    end
+    # Half-precision: each scalar component stored as Float16
+    halfs = reinterpret(Float16, data)
+    if T === Float32
+        return Float32.(halfs)
+    elseif T === Float64
+        return Float64.(halfs)
+    elseif T <: NTuple
+        n = length(T.parameters)
+        ET = T.parameters[1]
+        return [ntuple(j -> ET(halfs[(i-1)*n + j]), n) for i in 1:count]
+    else
+        error("unsupported half-precision type: $T")
+    end
+end
+
+# =============================================================================
 # Leaf selection mask type (for v222+)
 # =============================================================================
 
@@ -314,7 +343,7 @@ Read Internal2 topology for pre-v222 format (readTopology pass).
 Pre-v222 readTopology: masks, then readCompressedValues (non-child values only), then recurse.
 See reference/InternalNode.h:2419 and reference/tinyvdbio.h:2221-2266.
 """
-function read_i2_topology_v220(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord)::Tuple{I2TopoDataV220{T}, Int} where T
+function read_i2_topology_v220(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord; value_size::Int=sizeof(T))::Tuple{I2TopoDataV220{T}, Int} where T
     # Read Internal2 Masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
@@ -322,8 +351,8 @@ function read_i2_topology_v220(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec:
     # Read I2 compressed values: non-child values only (no metadata byte for pre-v222)
     # tinyvdbio.h:2266 — old_version uses child_mask.countOff(), not NUM_VALUES
     i2_non_child_count = 32768 - count_on(i2_child_mask)
-    i2_all_data, pos = read_compressed_bytes(bytes, pos, codec, i2_non_child_count * sizeof(T))
-    i2_all_values = reinterpret(T, i2_all_data)
+    i2_all_data, pos = read_compressed_bytes(bytes, pos, codec, i2_non_child_count * value_size)
+    i2_all_values = _decode_values(T, i2_all_data, i2_non_child_count, value_size)
 
     # Extract active tile values: iterate non-child slots in order, match to value array
     i2_active_vals = T[]
@@ -348,8 +377,8 @@ function read_i2_topology_v220(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec:
 
         # Read I1 compressed values: non-child values only
         i1_non_child_count = 4096 - count_on(i1_child_mask)
-        i1_all_data, pos = read_compressed_bytes(bytes, pos, codec, i1_non_child_count * sizeof(T))
-        i1_all_values = reinterpret(T, i1_all_data)
+        i1_all_data, pos = read_compressed_bytes(bytes, pos, codec, i1_non_child_count * value_size)
+        i1_all_values = _decode_values(T, i1_all_data, i1_non_child_count, value_size)
 
         i1_active_vals = T[]
         val_idx = 1
@@ -381,13 +410,13 @@ end
 
 Read leaf buffers and construct an I2 subtree for pre-v222 format (readBuffers pass).
 """
-function materialize_i2_values_v220(::Type{T}, topo::I2TopoDataV220{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
+function materialize_i2_values_v220(::Type{T}, topo::I2TopoDataV220{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{InternalNode2{T}, Int} where T
     i1_nodes = Vector{InternalNode1{T}}()
 
     for (i1_origin, i1_child_mask, i1_value_mask, leaf_topos, i1_active_vals) in topo.i1_children
         leaf_nodes = Vector{LeafNode{T}}()
         for (leaf_origin, leaf_mask) in leaf_topos
-            values, pos = read_leaf_values(T, bytes, pos, codec, false, leaf_mask, background, version)
+            values, pos = read_leaf_values(T, bytes, pos, codec, false, leaf_mask, background, version; value_size)
             push!(leaf_nodes, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 
@@ -428,7 +457,7 @@ Read a complete VDB tree for pre-v222 format.
 Two-phase: readTopology reads ALL topology (masks + internal values) for ALL root children,
 then readBuffers reads ALL leaf values. See reference/RootNode.h:2384 and :2439.
 """
-function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
+function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32; value_size::Int=sizeof(T))::Tuple{Tree{T}, Int} where T
     tile_count, pos = read_u32_le(bytes, pos)
     child_count, pos = read_u32_le(bytes, pos)
 
@@ -456,13 +485,13 @@ function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec:
         z, pos = read_i32_le(bytes, pos)
         origin = coord(x, y, z)
 
-        topo, pos = read_i2_topology_v220(T, bytes, pos, codec, origin)
+        topo, pos = read_i2_topology_v220(T, bytes, pos, codec, origin; value_size)
         push!(i2_topos, topo)
     end
 
     # Phase 2: Read ALL leaf buffers for ALL root children (readBuffers)
     for topo in i2_topos
-        node, pos = materialize_i2_values_v220(T, topo, bytes, pos, codec, background, version)
+        node, pos = materialize_i2_values_v220(T, topo, bytes, pos, codec, background, version; value_size)
         table[topo.origin] = node
     end
 
@@ -484,6 +513,6 @@ function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask
     if version >= 222
         read_tree_v222(T, bytes, pos, codec, mask_compressed, background, grid_class, version; value_size)
     else
-        read_tree_interleaved(T, bytes, pos, codec, mask_compressed, background, grid_class, version)
+        read_tree_interleaved(T, bytes, pos, codec, mask_compressed, background, grid_class, version; value_size)
     end
 end
