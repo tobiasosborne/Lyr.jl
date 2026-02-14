@@ -2,7 +2,49 @@
 
 ---
 
-## Latest Session (2026-02-14) - Fix smoke.vdb + rearch (delete TinyVDB routing)
+## Latest Session (2026-02-14) - Fix v220 tree reader for bunny_cloud.vdb
+
+**Status**: 🟢 COMPLETE — 2 issues closed, 0 errors remaining
+
+### Summary
+
+Fixed the v220 (pre-v222) tree reader so bunny_cloud.vdb parses correctly. Three bugs:
+
+1. **Internal node values format**: v220 stores non-child values as a compressed block (`childMask.countOff()` values, no metadata byte), not as (value, active_byte) pairs. See tinyvdbio.h:2266.
+
+2. **Two-phase structure**: v220 `readTopology` reads ALL topology for ALL root children first, then `readBuffers` reads ALL leaf values. Our code was interleaving per-subtree. Split into `read_i2_topology_v220` + `materialize_i2_values_v220` (mirrors v222+ architecture).
+
+3. **Leaf buffer format**: v220 `readBuffers` re-emits value_mask (64 bytes) before origin+numBuffers+data, and stores ALL 512 values compressed (not just active values).
+
+### Results
+
+```
+891 pass, 0 fail, 0 errors (was 678 pass, 0 fail, 2 errors)
+```
+
+All 8 test VDB files now parse successfully through Main Lyr.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/TreeRead.jl` | Replaced `read_internal2_subtree_interleaved` with `I2TopoDataV220`, `read_i2_topology_v220`, `materialize_i2_values_v220`. Restructured `read_tree_interleaved` into two-phase. |
+| `src/Values.jl` | Fixed v220 leaf path: added 64-byte value_mask skip, changed expected_size to 512*sizeof(T) |
+
+### Issues Closed
+
+| ID | Title |
+|---|---|
+| `path-tracer-0ij` | Fix v220 tree interleaved reader for bunny_cloud.vdb |
+| `path-tracer-2ul` | Promote TinyVDB as primary parser (Phase 3 umbrella) |
+
+### Next Steps
+
+All Phase 3 work is complete. The project has zero parsing errors across all test files.
+
+---
+
+## Previous Session (2026-02-14) - Fix smoke.vdb + rearch (delete TinyVDB routing)
 
 **Status**: 🟢 COMPLETE — 2 issues closed
 
