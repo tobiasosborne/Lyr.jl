@@ -2,7 +2,43 @@
 
 ---
 
-## Latest Session (2026-02-14) - Download OpenVDB test suite + render scripts
+## Latest Session (2026-02-14) - Fix multi-grid VDB parsing
+
+**Status**: 🟢 COMPLETE — 12/12 OpenVDB test files parse, 911 tests pass
+
+### Summary
+
+Fixed 3 bugs preventing multi-grid VDB files (explosion, fire, smoke2) from parsing:
+
+1. **Grid descriptor interleaving**: Descriptors are interleaved with grid data in VDB files, not stored contiguously. `File.jl` now reads each descriptor then seeks to `end_offset` for the next.
+
+2. **`parse_value_type` false matching**: Loose `contains("Float")` matched the `_HalfFloat` suffix, misidentifying `Tree_vec3s_5_4_3_HalfFloat` as `Float32`. Now extracts value type token via regex. Also added `vec3s` support (= `Vec3f` = `NTuple{3, Float32}`).
+
+3. **Half-precision vec3 `value_size`**: Was `2` (scalar Float16) instead of `6` (3 × Float16). Threaded `value_size` through entire v220 tree reader chain and added `_decode_values` helper for Float16→T conversion.
+
+Also fixed property test NaN bug (`NaN == NaN` is `false`).
+
+### Results
+
+```
+911 pass, 0 fail, 0 errors (was 890 pass, 0 fail, 1 error)
+20/20 VDB files parse: 12 OpenVDB test suite + 8 original fixtures
+```
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/File.jl` | Merged descriptor+grid loops; seek to end_offset between grids; vec3 half-precision value_size |
+| `src/GridDescriptor.jl` | Regex-based value type parsing; vec3s support |
+| `src/TreeRead.jl` | `_decode_values` helper; threaded `value_size` through v220 functions |
+| `src/Values.jl` | Half-precision conversion in v220 leaf values path |
+| `test/test_integration.jl` | Added multi-grid tests (explosion, fire, smoke2) |
+| `test/test_properties.jl` | NaN guard in tile property test |
+
+---
+
+## Previous Session (2026-02-14) - Download OpenVDB test suite + render scripts
 
 **Status**: 🟢 COMPLETE — 12 VDB files downloaded, test/render script created
 
