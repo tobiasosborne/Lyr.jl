@@ -32,32 +32,6 @@ function Base.showerror(io::IO, e::InvalidMagicError)
     print(io, "InvalidMagicError: expected magic 0x$(string(e.expected, base=16)), got 0x$(string(e.got, base=16))")
 end
 
-"""
-    UnknownMetadataTypeError <: ParseError
-
-Thrown when an unknown metadata type name is encountered.
-"""
-struct UnknownMetadataTypeError <: ParseError
-    type_name::String
-end
-
-function Base.showerror(io::IO, e::UnknownMetadataTypeError)
-    print(io, "UnknownMetadataTypeError: unknown metadata type '$(e.type_name)'")
-end
-
-"""
-    MetadataParseError <: ParseError
-
-Thrown when metadata parsing fails.
-"""
-struct MetadataParseError <: ParseError
-    message::String
-    position::Int
-end
-
-function Base.showerror(io::IO, e::MetadataParseError)
-    print(io, "MetadataParseError at position $(e.position): $(e.message)")
-end
 
 # =============================================================================
 # Compression Errors

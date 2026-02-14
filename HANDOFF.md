@@ -2,7 +2,52 @@
 
 ---
 
-## Latest Session (2026-02-14) - Phase 3: Fix v222+ Parser + Half-Precision + Unsupported Grid Types
+## Latest Session (2026-02-14) - Phase 3 Step 3: Replace heuristic metadata parsing
+
+**Status**: 🟢 COMPLETE — 1 issue closed, 1 new bug filed
+
+### Summary
+
+Replaced ~250 lines of heuristic metadata parsing with ~95 lines of spec-driven code. Fixed two bugs:
+1. **Phantom `tree_version` field**: `read_grid_metadata` consumed 8 bytes (tree_version + count) but the format only has count (4 bytes). The "tree_version" was actually the metadata count, and the "metadata_count" was the first key's size prefix.
+2. **File-level v222+ metadata**: `skip_metadata_value_heuristic` read values without the required u32 size prefix. Replaced with `skip_file_metadata` that reads the size prefix correctly.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Metadata.jl` | Complete rewrite: removed `is_printable_ascii`, `is_metadata_entry`, `skip_metadata_value_heuristic`, `read_file_metadata_v220`, heuristic key detection, `while true` loop. New: `skip_file_metadata` + clean `read_grid_metadata` |
+| `src/File.jl` | Replaced v220/v222+ metadata branching with single `skip_file_metadata` call |
+| `src/Exceptions.jl` | Removed unused `UnknownMetadataTypeError`, `MetadataParseError` |
+| `src/Lyr.jl` | Removed unused exception exports |
+
+### Test Results
+```
+766 pass, 0 fail, 2 errors (bunny_cloud×2 — pre-existing v220 tree reader bug)
+```
+
+### Issues
+
+| ID | Title | Status |
+|---|---|---|
+| `path-tracer-9re` | Replace heuristic metadata parsing | ✅ CLOSED |
+| `path-tracer-0ij` | Fix v220 tree interleaved reader for bunny_cloud.vdb | 🔲 NEW (the real cause of bunny_cloud errors) |
+
+### Key Finding
+
+bunny_cloud.vdb errors are NOT caused by metadata parsing. The metadata heuristic happened to produce the correct pos for bunny_cloud. The actual bug is in `read_tree_interleaved` / `read_leaf_values` for v220 format — `CompressionBoundsError` at position 83933 with garbage chunk_size, indicating position drift during tree reading.
+
+### Next Steps
+
+| ID | P | Title | Status |
+|---|---|---|---|
+| `path-tracer-0ij` | P2 | Fix v220 tree interleaved reader for bunny_cloud.vdb | Ready |
+| `path-tracer-a56` | P2 | Parser equivalence tests (Main Lyr == TinyVDB) | Ready |
+| `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella) | Ready |
+
+---
+
+## Previous Session (2026-02-14) - Phase 3: Fix v222+ Parser + Half-Precision + Unsupported Grid Types
 
 **Status**: 🟢 COMPLETE — 3 issues closed, 1 bug fix, pushed
 

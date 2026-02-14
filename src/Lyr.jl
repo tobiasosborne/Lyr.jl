@@ -97,7 +97,7 @@ export Ray, LeafIntersection, intersect_bbox, intersect_leaves
 
 # Exports - Exceptions
 export LyrError, ParseError, CompressionError
-export InvalidMagicError, UnknownMetadataTypeError, MetadataParseError
+export InvalidMagicError
 export ChunkSizeMismatchError, CompressionBoundsError, DecompressionSizeError
 export ValueCountError
 

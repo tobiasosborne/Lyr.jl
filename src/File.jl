@@ -26,20 +26,8 @@ function _parse_vdb_legacy(bytes::Vector{UInt8})::VDBFile
     # Read header
     header, pos = read_header(bytes, pos)
 
-    # Read file-level metadata (has count prefix for all versions)
-    # Note: v220-221 have size-prefixed values, v222+ have inline values
-    if header.format_version >= 222
-        # Version 222+: Count prefix, inline values (no size prefix per value)
-        meta_count, pos = read_u32_le(bytes, pos)
-        for _ in 1:meta_count
-            _, pos = read_string_with_size(bytes, pos)  # key
-            type_name, pos = read_string_with_size(bytes, pos)  # type
-            pos = skip_metadata_value_heuristic(bytes, pos, type_name)  # value
-        end
-    else
-        # Version 220-221: Count prefix, size-prefixed values
-        pos = read_file_metadata_v220(bytes, pos)
-    end
+    # Read file-level metadata (same format for all versions: count + size-prefixed entries)
+    pos = skip_file_metadata(bytes, pos)
 
     # Read grid count
     grid_count, pos = read_u32_le(bytes, pos)
