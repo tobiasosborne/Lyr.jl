@@ -115,29 +115,20 @@ Read leaf node values. Dispatches to v220 (interleaved) or v222+ (ReadMaskValues
 """
 function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{NTuple{512,T}, Int} where T
     if version < 222
-        # v220/v221: Origin + numBuffers precede values (13 bytes)
+        # Pre-v222 readBuffers: value_mask (64B) + origin (12B) + numBuffers (1B) + compressed ALL 512 values.
+        # See reference/LeafNode.h:1382-1390 — value_mask is re-emitted for ALL versions.
+        # readCompressedValues for pre-v222: no metadata byte, ALL values stored.
+        pos += 64  # skip value_mask (re-emitted in readBuffers)
         pos += 12  # skip origin (3 × Int32)
         pos += 1   # skip numBuffers (Int8)
 
-        active_count = count_on(mask)
-        expected_size = active_count * sizeof(T)
-
+        expected_size = 512 * sizeof(T)
         data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
-        active_values = reinterpret(T, data)
+        all_values_raw = reinterpret(T, data)
 
         all_values = Vector{T}(undef, 512)
-        active_idx = 1
-        for i in 0:511
-            if is_on(mask, i)
-                if active_idx <= length(active_values)
-                    all_values[i+1] = active_values[active_idx]
-                    active_idx += 1
-                else
-                    all_values[i+1] = background
-                end
-            else
-                all_values[i+1] = background
-            end
+        for i in 1:512
+            all_values[i] = all_values_raw[i]
         end
         (NTuple{512, T}(all_values), pos)
     else

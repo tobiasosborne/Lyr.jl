@@ -295,25 +295,72 @@ end
 # =============================================================================
 
 """
-    read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T, version::UInt32) -> Tuple{InternalNode2{T}, Int}
+    I2TopoDataV220{T}
 
-Read a complete Internal2 subtree with interleaved topology and values (pre-v222 format).
+Internal2 topology data for pre-v222 format. Stores masks, tile values, and I1 children topology.
 """
-function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
-    # ========== Phase 1: All Topology (masks only) ==========
+struct I2TopoDataV220{T}
+    origin::Coord
+    child_mask::Internal2Mask
+    value_mask::Internal2Mask
+    active_vals::Vector{T}
+    i1_children::Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{Tuple{Coord, LeafMask}}, Vector{T}}}
+end
 
+"""
+    read_i2_topology_v220(::Type{T}, bytes, pos, codec, origin) -> Tuple{I2TopoDataV220{T}, Int}
+
+Read Internal2 topology for pre-v222 format (readTopology pass).
+Pre-v222 readTopology: masks, then readCompressedValues (non-child values only), then recurse.
+See reference/InternalNode.h:2419 and reference/tinyvdbio.h:2221-2266.
+"""
+function read_i2_topology_v220(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, origin::Coord)::Tuple{I2TopoDataV220{T}, Int} where T
     # Read Internal2 Masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
-    # Collect Internal1 topology
-    internal1_topo = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{Tuple{Coord, LeafMask}}}}()
+    # Read I2 compressed values: non-child values only (no metadata byte for pre-v222)
+    # tinyvdbio.h:2266 — old_version uses child_mask.countOff(), not NUM_VALUES
+    i2_non_child_count = 32768 - count_on(i2_child_mask)
+    i2_all_data, pos = read_compressed_bytes(bytes, pos, codec, i2_non_child_count * sizeof(T))
+    i2_all_values = reinterpret(T, i2_all_data)
+
+    # Extract active tile values: iterate non-child slots in order, match to value array
+    i2_active_vals = T[]
+    val_idx = 1
+    for idx in 0:32767
+        if !is_on(i2_child_mask, idx)
+            if is_on(i2_value_mask, idx)
+                push!(i2_active_vals, i2_all_values[val_idx])
+            end
+            val_idx += 1
+        end
+    end
+
+    # Read I1 children topology
+    i1_children = Vector{Tuple{Coord, Internal1Mask, Internal1Mask, Vector{Tuple{Coord, LeafMask}}, Vector{T}}}()
 
     for child_idx in on_indices(i2_child_mask)
         i1_origin = child_origin_internal2(origin, child_idx)
 
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
+
+        # Read I1 compressed values: non-child values only
+        i1_non_child_count = 4096 - count_on(i1_child_mask)
+        i1_all_data, pos = read_compressed_bytes(bytes, pos, codec, i1_non_child_count * sizeof(T))
+        i1_all_values = reinterpret(T, i1_all_data)
+
+        i1_active_vals = T[]
+        val_idx = 1
+        for idx in 0:4095
+            if !is_on(i1_child_mask, idx)
+                if is_on(i1_value_mask, idx)
+                    push!(i1_active_vals, i1_all_values[val_idx])
+                end
+                val_idx += 1
+            end
+        end
 
         leaves = Vector{Tuple{Coord, LeafMask}}()
         for leaf_idx in on_indices(i1_child_mask)
@@ -322,69 +369,72 @@ function read_internal2_subtree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos
             push!(leaves, (leaf_origin, leaf_mask))
         end
 
-        push!(internal1_topo, (i1_origin, i1_child_mask, i1_value_mask, leaves))
+        push!(i1_children, (i1_origin, i1_child_mask, i1_value_mask, leaves, i1_active_vals))
     end
 
-    # ========== Phase 2: All Values ==========
+    topo = I2TopoDataV220{T}(origin, i2_child_mask, i2_value_mask, i2_active_vals, i1_children)
+    (topo, pos)
+end
 
-    # Read Internal2 Tile Values
-    i2_active_vals, pos = read_internal_tiles(T, bytes, pos, i2_value_mask)
+"""
+    materialize_i2_values_v220(::Type{T}, topo, bytes, pos, codec, background, version) -> Tuple{InternalNode2{T}, Int}
 
-    # Read Internal1 Tile Values and Leaf Values
-    i1_children = Vector{InternalNode1{T}}()
+Read leaf buffers and construct an I2 subtree for pre-v222 format (readBuffers pass).
+"""
+function materialize_i2_values_v220(::Type{T}, topo::I2TopoDataV220{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32)::Tuple{InternalNode2{T}, Int} where T
+    i1_nodes = Vector{InternalNode1{T}}()
 
-    for (i1_origin, i1_child_mask, i1_value_mask, leaf_topos) in internal1_topo
-        i1_active_vals, pos = read_internal_tiles(T, bytes, pos, i1_value_mask)
-
-        leaves = Vector{LeafNode{T}}()
+    for (i1_origin, i1_child_mask, i1_value_mask, leaf_topos, i1_active_vals) in topo.i1_children
+        leaf_nodes = Vector{LeafNode{T}}()
         for (leaf_origin, leaf_mask) in leaf_topos
             values, pos = read_leaf_values(T, bytes, pos, codec, false, leaf_mask, background, version)
-            push!(leaves, LeafNode{T}(leaf_origin, leaf_mask, values))
+            push!(leaf_nodes, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 
         i1_child_count = count_on(i1_child_mask)
         i1_tile_count = count_on(i1_value_mask)
         i1_table = Vector{Union{LeafNode{T}, Tile{T}}}(undef, i1_child_count + i1_tile_count)
 
-        for (i, leaf) in enumerate(leaves)
+        for (i, leaf) in enumerate(leaf_nodes)
             i1_table[i] = leaf
         end
         for (i, val) in enumerate(i1_active_vals)
             i1_table[i1_child_count + i] = Tile{T}(val, true)
         end
 
-        push!(i1_children, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table))
+        push!(i1_nodes, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table))
     end
 
     # Construct Internal2 Node
-    i2_child_count = count_on(i2_child_mask)
-    i2_tile_count = count_on(i2_value_mask)
+    i2_child_count = count_on(topo.child_mask)
+    i2_tile_count = count_on(topo.value_mask)
     i2_table = Vector{Union{InternalNode1{T}, Tile{T}}}(undef, i2_child_count + i2_tile_count)
 
-    for (i, child) in enumerate(i1_children)
+    for (i, child) in enumerate(i1_nodes)
         i2_table[i] = child
     end
-    for (i, val) in enumerate(i2_active_vals)
+    for (i, val) in enumerate(topo.active_vals)
         i2_table[i2_child_count + i] = Tile{T}(val, true)
     end
 
-    node = InternalNode2{T}(origin, i2_child_mask, i2_value_mask, i2_table)
+    node = InternalNode2{T}(topo.origin, topo.child_mask, topo.value_mask, i2_table)
     (node, pos)
 end
 
 """
     read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32) -> Tuple{Tree{T}, Int}
 
-Read a complete VDB tree with interleaved topology and values (pre-v222 format).
+Read a complete VDB tree for pre-v222 format.
+Two-phase: readTopology reads ALL topology (masks + internal values) for ALL root children,
+then readBuffers reads ALL leaf values. See reference/RootNode.h:2384 and :2439.
 """
 function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
-    # Read counts (no background_active for pre-v222)
     tile_count, pos = read_u32_le(bytes, pos)
     child_count, pos = read_u32_le(bytes, pos)
 
     table = Dict{Coord, Union{InternalNode2{T}, Tile{T}}}()
 
-    # Read tiles
+    # Read root tiles
     for _ in 1:tile_count
         x, pos = read_i32_le(bytes, pos)
         y, pos = read_i32_le(bytes, pos)
@@ -397,15 +447,23 @@ function read_tree_interleaved(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec:
         table[origin] = Tile{T}(value, active_byte != 0)
     end
 
-    # Read children (interleaved)
+    # Phase 1: Read ALL topology for ALL root children (readTopology)
+    i2_topos = Vector{I2TopoDataV220{T}}()
+
     for _ in 1:child_count
         x, pos = read_i32_le(bytes, pos)
         y, pos = read_i32_le(bytes, pos)
         z, pos = read_i32_le(bytes, pos)
         origin = coord(x, y, z)
 
-        child, pos = read_internal2_subtree_interleaved(T, bytes, pos, codec, origin, background, version)
-        table[origin] = child
+        topo, pos = read_i2_topology_v220(T, bytes, pos, codec, origin)
+        push!(i2_topos, topo)
+    end
+
+    # Phase 2: Read ALL leaf buffers for ALL root children (readBuffers)
+    for topo in i2_topos
+        node, pos = materialize_i2_values_v220(T, topo, bytes, pos, codec, background, version)
+        table[topo.origin] = node
     end
 
     tree = RootNode{T}(background, table)
