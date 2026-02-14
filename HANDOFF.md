@@ -2,7 +2,59 @@
 
 ---
 
-## Latest Session (2026-02-14) - Phase 3 Step 3: Replace heuristic metadata parsing
+## Latest Session (2026-02-14) - Phase 3 Step 5: Parser equivalence tests
+
+**Status**: 🟢 COMPLETE — 1 issue closed, 2 new bugs filed
+
+### Summary
+
+Added `test/test_parser_equivalence.jl` that parses all 6 TinyVDB-compatible files with BOTH the legacy (Main Lyr) and TinyVDB parsers, then compares tree structure and voxel values. TinyVDB serves as permanent test oracle.
+
+### Findings
+
+| File | Structure | Values | Notes |
+|------|-----------|--------|-------|
+| cube.vdb | MATCH | BROKEN | 455/500 voxels differ |
+| icosahedron.vdb | MATCH | BROKEN | NaN diffs |
+| smoke.vdb | BROKEN | BROKEN | Legacy: 0 leaves, all tiles (31M active vs 1M) |
+| sphere.vdb | MATCH | BROKEN | Main returns NaN for active voxels |
+| torus.vdb | MATCH | BROKEN | Garbage values (1.5e9) |
+| utahteapot.vdb | MATCH | BROKEN | max_diff=0.51 |
+
+**Key insight**: The v222+ topology fix worked — structure matches for 5/6 files. But the legacy parser's value reading phase is systematically broken for all files. TinyVDB values are correct.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `test/test_parser_equivalence.jl` | **NEW** — 54 tests (46 pass, 8 broken) |
+| `test/runtests.jl` | Added include for equivalence tests |
+
+### Test Results
+```
+812 pass, 0 fail, 2 errors (bunny_cloud×2 — pre-existing), 8 broken (new equivalence markers)
+```
+
+### Issues
+
+| ID | Title | Status |
+|---|---|---|
+| `path-tracer-a56` | Parser equivalence tests | ✅ CLOSED |
+| `path-tracer-nkg` | Fix legacy parser v222+ value reading (all files) | 🔲 NEW P1 |
+| `path-tracer-d42` | Fix legacy parser smoke.vdb structural failure | 🔲 NEW P2 |
+
+### Next Steps
+
+| ID | P | Title | Status |
+|---|---|---|---|
+| `path-tracer-nkg` | P1 | Fix legacy parser v222+ value reading | Ready |
+| `path-tracer-d42` | P2 | Fix legacy parser smoke.vdb structural failure | Ready |
+| `path-tracer-0ij` | P2 | Fix v220 tree interleaved reader for bunny_cloud.vdb | Ready |
+| `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella) | In Progress |
+
+---
+
+## Previous Session (2026-02-14) - Phase 3 Step 3: Replace heuristic metadata parsing
 
 **Status**: 🟢 COMPLETE — 1 issue closed, 1 new bug filed
 
