@@ -2,9 +2,9 @@
 
 ---
 
-## Latest Session (2026-02-14) - Code review + fix 7 bugs
+## Latest Session (2026-02-14) - Code review + fix 10 bugs + 1 hygiene
 
-**Status**: 🟢 COMPLETE — comprehensive code review, 77 issues created, 7 bugs fixed
+**Status**: 🟢 COMPLETE — comprehensive code review, 77 issues created, 11 issues closed
 
 ### What Was Done
 
@@ -29,6 +29,9 @@
 | 5 | `339` | P1 HIGH | v220 header compression — use actually-read byte instead of hardcoding ZIP |
 | 6 | `avn` | P1 HIGH | `read_mask` — throw BoundsError on truncated data instead of zero-padding |
 | 7 | `ykk` | P1 HIGH | `read_active_values` — removed try/catch that swallowed BoundsError with `zero(T)` |
+| 8 | `3ej` | P1 HIGH | Transforms.jl — replaced wrong 23-byte skip AffineMap fallback with clear error |
+| 9 | `3di` | P1 HIGH | `read_bytes` — replaced `unsafe_wrap` aliased memory with safe byte slice copy |
+| 10 | `2j4` | P1 TASK | Project.toml — moved Debugger/Infiltrator to extras, replaced placeholder UUID |
 
 4. **Updated .gitignore** (`oq8`) — Manifest.toml, renders, debug scripts, IDE dirs (unblocks 5 hygiene issues)
 
@@ -47,16 +50,19 @@
 | `src/TinyVDB/Compression.jl` | Split empty chunk (==0) from uncompressed (<0) in read_compressed_data |
 | `src/Masks.jl` | read_mask throws BoundsError on truncated data |
 | `src/Header.jl` | v220 compression from actual byte, not hardcoded ZIP |
+| `src/Transforms.jl` | Replaced wrong AffineMap fallback with clear ArgumentError |
+| `src/Binary.jl` | Safe byte slice copy instead of unsafe_wrap |
+| `Project.toml` | Debugger/Infiltrator to extras, proper UUID |
 | `test/test_values.jl` | Tests for Int32/Int64/Bool read_tile_value + unsupported type error |
 | `.gitignore` | Comprehensive patterns for Manifest.toml, renders, scripts, IDE |
 
 ### Next Priority (from `bd ready`)
 
-1. `3ej` — Transforms.jl general affine 23-byte skip
-2. `3di` — read_bytes unsafe_wrap aliasing
-3. `2j4` — Fix Project.toml (extras, UUID)
-4. `50y1` — Prefix-sum popcount (O(1) count_on_before)
-5. `90su` — Unit tests for read_dense_values (all 7 metadata flags)
+1. `46r` — TinyVDB read_grid_compression returns COMPRESS_NONE for v220
+2. `50y1` — Prefix-sum popcount (O(1) count_on_before)
+3. `90su` — Unit tests for read_dense_values (all 7 metadata flags)
+4. `i4u4` — Unit tests for TreeRead.jl
+5. `60i` — TinyVDB read_compressed_data lacks abs(chunk_size) validation
 
 ---
 
