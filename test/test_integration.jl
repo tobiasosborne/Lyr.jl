@@ -182,6 +182,25 @@
         @test active_voxel_count(grid.tree) == 1119158
     end
 
+    @testset "Legacy parser half-precision (cube.vdb)" begin
+        # cube.vdb has grid type Tree_float_5_4_3_HalfFloat — values stored as Float16.
+        # Legacy parser must detect _HalfFloat suffix and use value_size=2.
+        filepath = joinpath(SAMPLE_DIR, "cube.vdb")
+        if !isfile(filepath)
+            @test_skip "cube.vdb not available"
+            return
+        end
+
+        bytes = read(filepath)
+        vdb = Lyr._parse_vdb_legacy(bytes)
+
+        grid = vdb.grids[1]
+        @test grid.name == "ls_cube"
+        @test length(grid.tree.table) == 8
+        @test leaf_count(grid.tree) == 6812
+        @test active_voxel_count(grid.tree) == 1452218
+    end
+
     @testset "Reference values" begin
         # Test against known reference values from sample files
         REF_FILE = joinpath(@__DIR__, "fixtures", "reference_values.json")

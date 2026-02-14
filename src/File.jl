@@ -83,8 +83,10 @@ function _parse_vdb_legacy(bytes::Vector{UInt8})::VDBFile
             (header.compression, header.active_mask_compression)
         end
 
-        # Determine value type
+        # Determine value type and half-precision flag
         T = parse_value_type(desc.grid_type)
+        half_precision = endswith(desc.grid_type, "_HalfFloat")
+        value_size = half_precision ? 2 : sizeof(T)
 
         # Read per-grid metadata (includes "class" entry)
         grid_metadata, pos = read_grid_metadata(bytes, pos)
@@ -95,13 +97,13 @@ function _parse_vdb_legacy(bytes::Vector{UInt8})::VDBFile
 
         # Parse the grid
         if T == Float32
-            grid, pos = read_grid(Float32, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version)
+            grid, pos = read_grid(Float32, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version; value_size)
             push!(grids_temp, grid)
         elseif T == Float64
-            grid, pos = read_grid(Float64, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version)
+            grid, pos = read_grid(Float64, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version; value_size)
             push!(grids_temp, grid)
         elseif T == NTuple{3, Float32}
-            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version)
+            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version; value_size)
             push!(grids_temp, grid)
         end
     end

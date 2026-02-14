@@ -1,39 +1,38 @@
 # Values.jl - Parse node values
 
 """
-    read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T) -> Tuple{Vector{T}, Int}
+    read_dense_values(::Type{T}, bytes, pos, codec, mask_compressed, mask, background; value_size) -> Tuple{Vector{T}, Int}
 
-Read node values from bytes using VDB's internal compression schemes. Returns a dense vector of size N.
+Read node values from bytes using VDB's ReadMaskValues algorithm. Returns a dense vector of size N.
 Used for both LeafNodes and InternalNodes.
 
-The `mask_compressed` flag (COMPRESS_ACTIVE_MASK) determines whether only active values are stored:
-- If mask_compressed AND metadata != 6: read active_count values
-- Otherwise: read all N values
+`value_size` is the on-disk element size (2 for half-precision Float16, otherwise sizeof(T)).
 """
-function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T)::Tuple{Vector{T}, Int} where {T,N,W}
+function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T; value_size::Int=sizeof(T))::Tuple{Vector{T}, Int} where {T,N,W}
+    is_half = (value_size == 2 && sizeof(T) == 4)
+
     # 1. Read metadata byte
     metadata, pos = read_u8(bytes, pos)
 
-    # Inactive values based on metadata
+    # 2. Inactive values based on metadata
     inactive_val1 = background
     inactive_val2 = background
 
     if metadata == 0 # NO_MASK_OR_INACTIVE_VALS
         inactive_val1 = background
     elseif metadata == 1 # NO_MASK_AND_MINUS_BG
-        # For floats, this is -background.
         inactive_val1 = -background
     elseif metadata == 2 # NO_MASK_AND_ONE_INACTIVE_VAL
-        inactive_val1, pos = read_tile_value(T, bytes, pos)
+        inactive_val1, pos = _read_value(T, bytes, pos, is_half)
     elseif metadata == 3 # MASK_AND_NO_INACTIVE_VALS
         inactive_val1 = background
         inactive_val2 = -background
     elseif metadata == 4 # MASK_AND_ONE_INACTIVE_VAL
         inactive_val1 = background
-        inactive_val2, pos = read_tile_value(T, bytes, pos)
+        inactive_val2, pos = _read_value(T, bytes, pos, is_half)
     elseif metadata == 5 # MASK_AND_TWO_INACTIVE_VALS
-        inactive_val1, pos = read_tile_value(T, bytes, pos)
-        inactive_val2, pos = read_tile_value(T, bytes, pos)
+        inactive_val1, pos = _read_value(T, bytes, pos, is_half)
+        inactive_val2, pos = _read_value(T, bytes, pos, is_half)
     end
 
     # 3. Read selection mask if metadata is 3, 4, or 5
@@ -43,39 +42,37 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
     end
 
     # 4. Determine how many values to read
-    # If COMPRESS_ACTIVE_MASK is set AND metadata != 6: only active values are stored
-    # Otherwise: all values are stored
     active_count = count_on(mask)
     use_sparse = mask_compressed && metadata != 6
 
     expected_size = if use_sparse
-        active_count * sizeof(T)
+        active_count * value_size
     else
-        N * sizeof(T)
+        N * value_size
     end
 
-    # Always call read_compressed_bytes to handle stream structure (e.g. size prefix)
+    # Read compressed data
     data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
-    stored_values = reinterpret(T, data)
+    stored_values = if is_half
+        T.(reinterpret(Float16, data))
+    else
+        reinterpret(T, data)
+    end
 
     # 5. Assemble final values array
     all_values = Vector{T}(undef, N)
 
     if use_sparse
-        # Sparse storage: only active values are stored
         active_idx = 1
         for i in 0:(N-1)
             if is_on(mask, i)
-                # Safely access active values
                 if active_idx <= length(stored_values)
                     all_values[i+1] = stored_values[active_idx]
                     active_idx += 1
                 else
-                    # Fallback if active values are missing (e.g. chunk_size=0)
                     all_values[i+1] = inactive_val1
                 end
             else
-                # Inactive value reconstruction
                 if selection_mask !== nothing
                     all_values[i+1] = is_on(selection_mask, i) ? inactive_val2 : inactive_val1
                 else
@@ -84,7 +81,6 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
             end
         end
     else
-        # Dense storage: all values stored, use directly
         for i in 1:N
             if i <= length(stored_values)
                 all_values[i] = stored_values[i]
@@ -98,28 +94,37 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
 end
 
 """
-    read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32) -> Tuple{NTuple{512,T}, Int}
+    _read_value(::Type{T}, bytes, pos, is_half) -> Tuple{T, Int}
 
-Wrapper for read_dense_values for LeafNodes.
+Read a single value, handling half-precision (Float16 → T widening).
 """
-function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32)::Tuple{NTuple{512,T}, Int} where T
+function _read_value(::Type{T}, bytes::Vector{UInt8}, pos::Int, is_half::Bool)::Tuple{T, Int} where T
+    if is_half
+        @boundscheck checkbounds(bytes, pos:pos+1)
+        @inbounds val = T(reinterpret(Float16, bytes[pos:pos+1])[1])
+        (val, pos + 2)
+    else
+        read_tile_value(T, bytes, pos)
+    end
+end
+
+"""
+    read_leaf_values(::Type{T}, bytes, pos, codec, mask_compressed, mask, background, version; value_size) -> Tuple{NTuple{512,T}, Int}
+
+Read leaf node values. Dispatches to v220 (interleaved) or v222+ (ReadMaskValues) format.
+"""
+function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{NTuple{512,T}, Int} where T
     if version < 222
         # v220/v221: Origin + numBuffers precede values (13 bytes)
-        # Skip origin (3 × Int32 = 12 bytes) - already have it from topology
-        pos += 12
-        # Skip numBuffers (Int8 = 1 byte) - always 1 in practice
-        pos += 1
+        pos += 12  # skip origin (3 × Int32)
+        pos += 1   # skip numBuffers (Int8)
 
-        # Read active values (may be compressed depending on codec)
         active_count = count_on(mask)
         expected_size = active_count * sizeof(T)
 
-        # Use read_compressed_bytes which handles both compressed and uncompressed
-        # For NoCompression it reads raw bytes, for others it reads chunk_size + data
         data, pos = read_compressed_bytes(bytes, pos, codec, expected_size)
         active_values = reinterpret(T, data)
 
-        # Scatter active values to full 512-element array
         all_values = Vector{T}(undef, 512)
         active_idx = 1
         for i in 0:511
@@ -136,7 +141,7 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
         end
         (NTuple{512, T}(all_values), pos)
     else
-        values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, mask, background)
+        values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, mask, background; value_size)
         (NTuple{512, T}(values), pos)
     end
 end

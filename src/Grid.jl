@@ -38,11 +38,12 @@ struct Grid{T}
 end
 
 """
-    read_grid(::Type{T}, bytes, pos, codec, mask_compressed, name, grid_class, version) -> Tuple{Grid{T}, Int}
+    read_grid(::Type{T}, bytes, pos, codec, mask_compressed, name, grid_class, version; value_size) -> Tuple{Grid{T}, Int}
 
 Parse a complete grid from bytes. Sequential reading — no seeking to offsets.
+`value_size` is the on-disk element size (2 for half-precision Float16, otherwise sizeof(T)).
 """
-function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, name::String, grid_class::GridClass, version::UInt32)::Tuple{Grid{T}, Int} where T
+function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, name::String, grid_class::GridClass, version::UInt32; value_size::Int=sizeof(T))::Tuple{Grid{T}, Int} where T
     # Read transform
     transform, pos = read_transform(bytes, pos)
 
@@ -50,7 +51,7 @@ function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask
     background, pos = read_tile_value(T, bytes, pos)
 
     # Read tree
-    tree, pos = read_tree(T, bytes, pos, codec, mask_compressed, background, grid_class, version)
+    tree, pos = read_tree(T, bytes, pos, codec, mask_compressed, background, grid_class, version; value_size)
 
     grid = Grid{T}(name, grid_class, transform, tree)
     (grid, pos)
