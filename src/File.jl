@@ -85,6 +85,15 @@ function _parse_vdb_legacy(bytes::Vector{UInt8})::VDBFile
 
         # Determine value type and half-precision flag
         T = parse_value_type(desc.grid_type)
+
+        # Skip unsupported grid types (e.g. PointDataIndex32)
+        if T === nothing
+            if header.has_grid_offsets && desc.end_offset > 0
+                pos = Int(desc.end_offset) + 1
+            end
+            continue
+        end
+
         half_precision = endswith(desc.grid_type, "_HalfFloat")
         value_size = half_precision ? 2 : sizeof(T)
 

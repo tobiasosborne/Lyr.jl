@@ -57,7 +57,7 @@ end
 
 Parse the value type from a grid type string.
 """
-function parse_value_type(grid_type::String)::DataType
+function parse_value_type(grid_type::String)::Union{DataType, Nothing}
     if Base.contains(grid_type, "float") || Base.contains(grid_type, "Float")
         Float32
     elseif Base.contains(grid_type, "double") || Base.contains(grid_type, "Double")
@@ -73,6 +73,6 @@ function parse_value_type(grid_type::String)::DataType
     elseif Base.contains(grid_type, "bool") || Base.contains(grid_type, "Bool")
         Bool
     else
-        Float32  # Default to Float32
+        nothing  # Unsupported grid type (e.g. PointDataIndex32)
     end
 end

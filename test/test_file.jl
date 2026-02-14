@@ -82,7 +82,7 @@
         @test parse_value_type("Tree_vec3d_5_4_3") == NTuple{3, Float64}
         @test parse_value_type("Tree_int32_5_4_3") == Int32
         @test parse_value_type("Tree_bool_5_4_3") == Bool
-        @test parse_value_type("unknown") == Float32  # Default
+        @test parse_value_type("unknown") === nothing  # Unsupported type
     end
 
     @testset "VDBFile structure" begin
