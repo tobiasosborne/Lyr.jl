@@ -82,15 +82,20 @@ end
 # =============================================================================
 
 """
-    read_i2_topology_v222(bytes::Vector{UInt8}, pos::Int, origin::Coord) -> Tuple{I2TopoData, Int}
+    read_i2_topology_v222(::Type{T}, bytes, pos, origin, codec, mask_compressed, background, version) -> Tuple{I2TopoData, Int}
 
-Read Internal2 topology for v222+ format (masks only, no values).
-Also reads selection masks for all leaves.
+Read Internal2 topology for v222+ format.
+
+In v222+, internal node values (ReadMaskValues format) are embedded in the topology
+section after each node's masks. We must skip these to keep pos aligned.
 """
-function read_i2_topology_v222(bytes::Vector{UInt8}, pos::Int, origin::Coord)::Tuple{I2TopoData, Int}
+function read_i2_topology_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin::Coord, codec::Codec, mask_compressed::Bool, background::T, version::UInt32)::Tuple{I2TopoData, Int} where T
     # Read Internal2 masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
+
+    # Skip I2 embedded values (ReadMaskValues format)
+    _, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, i2_value_mask, background)
 
     # Read Internal1 children
     i1_children = Vector{I1TopoData}()
@@ -102,12 +107,14 @@ function read_i2_topology_v222(bytes::Vector{UInt8}, pos::Int, origin::Coord)::T
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
+        # Skip I1 embedded values (ReadMaskValues format)
+        _, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, i1_value_mask, background)
+
         # Read leaf value masks
         leaves = Vector{LeafTopoWithSelection}()
         for leaf_idx in on_indices(i1_child_mask)
             leaf_origin = child_origin_internal1(i1_origin, leaf_idx)
             leaf_mask, pos = read_mask(LeafMask, bytes, pos)
-            # Selection mask will be read later
             push!(leaves, LeafTopoWithSelection(leaf_origin, leaf_mask, nothing))
         end
 
@@ -235,21 +242,12 @@ function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vecto
 end
 
 """
-    is_valid_i2_origin(x::Int32, y::Int32, z::Int32) -> Bool
-
-Check if coordinates form a valid Internal2 node origin (4096-aligned, reasonable range).
-"""
-function is_valid_i2_origin(x::Int32, y::Int32, z::Int32)::Bool
-    x % 4096 == 0 && y % 4096 == 0 && z % 4096 == 0 &&
-    abs(x) <= 100000 && abs(y) <= 100000 && abs(z) <= 100000
-end
-
-"""
-    read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int) -> Tuple{Tree{T}, Int}
+    read_tree_v222(::Type{T}, bytes, pos, codec, mask_compressed, background, grid_class, version) -> Tuple{Tree{T}, Int}
 
 Read a complete VDB tree for v222+ format where topology and values are separate.
+Sequential reading: topology pass skips internal node values, then values pass reads leaves.
 """
-function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int)::Tuple{Tree{T}, Int} where T
+function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
     # Read background_active (only for fog volumes)
     background_active = false
     if grid_class == GRID_FOG_VOLUME || grid_class == GRID_UNKNOWN
@@ -264,13 +262,11 @@ function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec,
     table = Dict{Coord, Union{InternalNode2{T}, Tile{T}}}()
 
     # Read root tiles (origin + value + active for each)
-    root_tile_origins = Coord[]
     for _ in 1:tile_count
         x, pos = read_i32_le(bytes, pos)
         y, pos = read_i32_le(bytes, pos)
         z, pos = read_i32_le(bytes, pos)
         origin = coord(x, y, z)
-        push!(root_tile_origins, origin)
 
         value, pos = read_tile_value(T, bytes, pos)
         active_byte, pos = read_u8(bytes, pos)
@@ -278,62 +274,22 @@ function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec,
         table[origin] = Tile{T}(value, active_byte != 0)
     end
 
-    # Phase 1: Read ALL root children topology (masks + selection masks)
+    # Phase 1: Read ALL root children topology
     i2_topos = Vector{I2TopoData}()
     i2_origins = Coord[]
 
-    for i in 1:child_count
-        # Stop if we've reached the values section
-        if pos >= values_start
-            break
-        end
-
-        # Read origin
+    for _ in 1:child_count
         x, pos = read_i32_le(bytes, pos)
         y, pos = read_i32_le(bytes, pos)
         z, pos = read_i32_le(bytes, pos)
-
-        # Check if this is a valid I2 origin (non-zero for actual children)
-        # In v222+, some files declare more children than actually exist
-        # The actual children have valid 4096-aligned origins
-        if !is_valid_i2_origin(x, y, z)
-            break
-        end
-
-        # Additional check: origin (0,0,0) is valid but may indicate padding
-        # If all coordinates are zero and we're in later children, likely padding
-        if x == 0 && y == 0 && z == 0 && i > 1
-            # Peek ahead to see if this looks like real data or padding
-            # Real I2 child_mask would have sparse set bits, padding is all zeros
-            if pos + 4096 <= length(bytes)
-                # Check if first 128 bytes of would-be mask are all zeros
-                all_zeros = true
-                for j in 0:127
-                    if bytes[pos + j] != 0
-                        all_zeros = false
-                        break
-                    end
-                end
-                if all_zeros
-                    # Likely padding, not a real child - stop here
-                    break
-                end
-            end
-        end
-
         origin = coord(x, y, z)
         push!(i2_origins, origin)
 
-        # Read I2 topology (masks only, no selection masks)
-        i2_topo, pos = read_i2_topology_v222(bytes, pos, origin)
-
+        i2_topo, pos = read_i2_topology_v222(T, bytes, pos, origin, codec, mask_compressed, background, version)
         push!(i2_topos, i2_topo)
     end
 
-    # Phase 2: Seek to values section and read selection masks + values
-    # Format is interleaved: [mask][values][mask][values] per leaf
-    pos = values_start
-
+    # Phase 2: Read leaf values (pos flows sequentially from topology)
     for (origin, i2_topo) in zip(i2_origins, i2_topos)
         # materialize_i2_values_v222 reads values per-leaf with proper format handling
         node, pos = materialize_i2_values_v222(T, i2_topo, bytes, pos, codec, mask_compressed, background, version)
@@ -471,14 +427,14 @@ end
 # =============================================================================
 
 """
-    read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int) -> Tuple{Tree{T}, Int}
+    read_tree(::Type{T}, bytes, pos, codec, mask_compressed, background, grid_class, version) -> Tuple{Tree{T}, Int}
 
 Read a complete VDB tree structure.
 Dispatches to v222+ or pre-v222 format based on version.
 """
-function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32, values_start::Int)::Tuple{Tree{T}, Int} where T
+function read_tree(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32)::Tuple{Tree{T}, Int} where T
     if version >= 222
-        read_tree_v222(T, bytes, pos, codec, mask_compressed, background, grid_class, version, values_start)
+        read_tree_v222(T, bytes, pos, codec, mask_compressed, background, grid_class, version)
     else
         read_tree_interleaved(T, bytes, pos, codec, mask_compressed, background, grid_class, version)
     end

@@ -162,6 +162,26 @@
         end
     end
 
+    @testset "Legacy parser v222+ topology (torus.vdb)" begin
+        # Regression test: _parse_vdb_legacy must correctly skip internal node
+        # values embedded in v222+ topology. Without skip_internal_mask_values,
+        # pos drifts after I2/I1 masks and only 1 of 8 root children is found.
+        filepath = joinpath(SAMPLE_DIR, "torus.vdb")
+        if !isfile(filepath)
+            @test_skip "torus.vdb not available"
+            return
+        end
+
+        bytes = read(filepath)
+        vdb = Lyr._parse_vdb_legacy(bytes)
+
+        grid = vdb.grids[1]
+        @test grid.name == "ls_torus"
+        @test length(grid.tree.table) == 8  # 8 root children (one per octant)
+        @test leaf_count(grid.tree) == 6044
+        @test active_voxel_count(grid.tree) == 1119158
+    end
+
     @testset "Reference values" begin
         # Test against known reference values from sample files
         REF_FILE = joinpath(@__DIR__, "fixtures", "reference_values.json")

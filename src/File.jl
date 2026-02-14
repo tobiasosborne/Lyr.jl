@@ -93,22 +93,15 @@ function _parse_vdb_legacy(bytes::Vector{UInt8})::VDBFile
         grid_class_str = get(grid_metadata, "class", "unknown")
         grid_class = parse_grid_class(grid_class_str)
 
-        # Grid start position (1-indexed) for calculating values section
-        grid_start_pos = if header.has_grid_offsets && desc.byte_offset > 0
-            Int(desc.byte_offset) + 1
-        else
-            pos  # Use current position if no offsets
-        end
-
         # Parse the grid
         if T == Float32
-            grid, pos = read_grid(Float32, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(Float32, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version)
             push!(grids_temp, grid)
         elseif T == Float64
-            grid, pos = read_grid(Float64, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(Float64, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version)
             push!(grids_temp, grid)
         elseif T == NTuple{3, Float32}
-            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version, grid_start_pos, desc.block_offset)
+            grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version)
             push!(grids_temp, grid)
         end
     end
