@@ -2,7 +2,90 @@
 
 ---
 
-## Latest Session (2026-02-14) - Fix multi-grid VDB parsing
+## Latest Session (2026-02-14) - Fix multi-grid + render all VDBs
+
+**Status**: 🟡 PARTIAL — multi-grid parsing fixed (12/12 VDBs), renders generated but level set renderer has artifacts
+
+### What Was Done
+
+1. **Fixed multi-grid VDB parsing** (3 bugs):
+   - Grid descriptors interleaved with data → merged descriptor+grid loop with end_offset seeking
+   - `parse_value_type` false-matched `_HalfFloat` suffix → regex-based token extraction + `vec3s` support
+   - Half-precision `value_size` for vec3 was 2 instead of 6 → threaded `value_size` through v220 reader
+
+2. **Fixed NaN property test** — added `isnan` guard (NaN == NaN is false in IEEE 754)
+
+3. **Rendered all 20 VDB files** to PNG at 512x512 → `renders/` directory
+
+### Results
+
+```
+911 pass, 0 fail, 0 errors
+20/20 VDB files parse, 18/20 rendered to PNG
+```
+
+### Next Task: Fix Level Set Rendering Artifacts
+
+**Problem**: Level set renders (sphere, armadillo, bunny, ISS, etc.) show grid-like scaffolding, missing pixels, and dark lines at node boundaries. The sphere is worst — clearly shows internal 8³/16³/32³ block structure. Fog volumes (explosion, fire, smoke, bunny_cloud) render fine.
+
+**Root Cause Analysis** (investigation done, fix NOT implemented):
+
+The sphere tracer in `src/Render.jl` has these issues:
+
+1. **Trilinear interpolation corrupts SDF at narrow-band edges** (`Interpolation.jl:18-41`):
+   When `sample_trilinear` straddles a node boundary, some of the 8 corners return the background value (typically 3.0) while others return actual SDF values. The interpolated result is a meaningless number between the true SDF and background. This causes the tracer to take wrong-sized steps and either overshoot or miss the surface.
+
+2. **Background step is too aggressive** (`Render.jl:125-128`):
+   When `abs(dist - background) < 1e-6`, the tracer steps by the full background value (~3.0 voxels). This overshoots thin features and surface details near node edges.
+
+3. **No distinction between "outside narrow band" and "near band edge"**:
+   A trilinear sample near a band boundary might return 2.5 (just below background=3.0) — this looks like a valid SDF distance but is actually garbage from interpolating with background values.
+
+**Suggested Fix Strategy**:
+
+1. **Use nearest-neighbor for sphere trace stepping** — `sample_world(grid, point; method=:nearest)` avoids trilinear artifacts at band edges. Only matters for the step distance, not final shading.
+
+2. **Clamp max step size** — `step = min(abs(dist), narrow_band_width * 0.8)` prevents overshooting. The narrow band width is typically `background` (3 voxels × voxel_size).
+
+3. **Conservative fallback stepping** — when the sample returns background or near-background, use a fixed small step (e.g., `vs * 1.0`) to walk through the gap rather than jumping by `background`.
+
+4. **Use trilinear only for normals** — once a hit is found (we're guaranteed to be well within the band), trilinear gives smooth normals.
+
+**Key files**:
+- `src/Render.jl:76-136` — `sphere_trace` function (the main thing to fix)
+- `src/Render.jl:168-181` — `_safe_sample` (wraps `sample_world`)
+- `src/Render.jl:188-197` — `_estimate_normal_safe` (normal estimation)
+- `src/Interpolation.jl:18-41` — `sample_trilinear` (the 8-corner trilinear sampler)
+- `src/Accessors.jl:14-66` — `get_value` (returns background when coordinate not in tree)
+
+**Quick test**: render just the sphere to iterate fast:
+```julia
+julia --project -e '
+using Lyr
+vdb = parse_vdb("test/fixtures/samples/sphere.vdb")
+grid = vdb.grids[1]
+cam = Camera((3.0, 2.0, 3.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 40.0)
+pixels = render_image(grid, cam, 256, 256; max_steps=500)
+write_ppm("sphere_test.ppm", pixels)
+'
+convert sphere_test.ppm sphere_test.png
+```
+
+### Files Modified This Session
+
+| File | Change |
+|------|--------|
+| `src/File.jl` | Merged descriptor+grid loops; seek to end_offset; vec3 half-precision value_size |
+| `src/GridDescriptor.jl` | Regex-based value type parsing; vec3s support |
+| `src/TreeRead.jl` | `_decode_values` helper; threaded `value_size` through v220 |
+| `src/Values.jl` | Half-precision conversion in v220 leaf values path |
+| `test/test_integration.jl` | Added multi-grid tests (explosion, fire, smoke2) |
+| `test/test_properties.jl` | NaN guard in tile property test |
+| `renders/*.png` | 18 rendered images (not committed — in .gitignore) |
+
+---
+
+## Previous Session (2026-02-14) - Fix multi-grid VDB parsing
 
 **Status**: 🟢 COMPLETE — 12/12 OpenVDB test files parse, 911 tests pass
 
