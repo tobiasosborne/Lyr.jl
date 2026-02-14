@@ -63,27 +63,31 @@ struct LeafTopoWithSelection
 end
 
 """
-    I1TopoData
+    I1TopoData{T}
 
 Internal1 topology data collected during Phase 1.
+`node_values` stores all 4096 values from ReadMaskValues (used for tile construction).
 """
-struct I1TopoData
+struct I1TopoData{T}
     origin::Coord
     child_mask::Internal1Mask
     value_mask::Internal1Mask
     leaves::Vector{LeafTopoWithSelection}
+    node_values::Vector{T}
 end
 
 """
-    I2TopoData
+    I2TopoData{T}
 
 Internal2 topology data collected during Phase 1.
+`node_values` stores all 32768 values from ReadMaskValues (used for tile construction).
 """
-struct I2TopoData
+struct I2TopoData{T}
     origin::Coord
     child_mask::Internal2Mask
     value_mask::Internal2Mask
-    children::Vector{I1TopoData}
+    children::Vector{I1TopoData{T}}
+    node_values::Vector{T}
 end
 
 # =============================================================================
@@ -118,16 +122,16 @@ Read Internal2 topology for v222+ format.
 In v222+, internal node values (ReadMaskValues format) are embedded in the topology
 section after each node's masks. We must skip these to keep pos aligned.
 """
-function read_i2_topology_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin::Coord, codec::Codec, mask_compressed::Bool, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{I2TopoData, Int} where T
+function read_i2_topology_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin::Coord, codec::Codec, mask_compressed::Bool, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{I2TopoData{T}, Int} where T
     # Read Internal2 masks
     i2_child_mask, pos = read_mask(Internal2Mask, bytes, pos)
     i2_value_mask, pos = read_mask(Internal2Mask, bytes, pos)
 
-    # Skip I2 embedded values (ReadMaskValues format)
-    _, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, i2_value_mask, background; value_size)
+    # Read I2 embedded values (ReadMaskValues format) — needed for tile construction
+    i2_node_values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, i2_value_mask, background; value_size)
 
     # Read Internal1 children
-    i1_children = Vector{I1TopoData}()
+    i1_children = Vector{I1TopoData{T}}()
 
     for child_idx in on_indices(i2_child_mask)
         i1_origin = child_origin_internal2(origin, child_idx)
@@ -136,8 +140,8 @@ function read_i2_topology_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin
         i1_child_mask, pos = read_mask(Internal1Mask, bytes, pos)
         i1_value_mask, pos = read_mask(Internal1Mask, bytes, pos)
 
-        # Skip I1 embedded values (ReadMaskValues format)
-        _, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, i1_value_mask, background; value_size)
+        # Read I1 embedded values (ReadMaskValues format) — needed for tile construction
+        i1_node_values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, i1_value_mask, background; value_size)
 
         # Read leaf value masks
         leaves = Vector{LeafTopoWithSelection}()
@@ -147,10 +151,10 @@ function read_i2_topology_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin
             push!(leaves, LeafTopoWithSelection(leaf_origin, leaf_mask, nothing))
         end
 
-        push!(i1_children, I1TopoData(i1_origin, i1_child_mask, i1_value_mask, leaves))
+        push!(i1_children, I1TopoData{T}(i1_origin, i1_child_mask, i1_value_mask, leaves, i1_node_values))
     end
 
-    (I2TopoData(origin, i2_child_mask, i2_value_mask, i1_children), pos)
+    (I2TopoData{T}(origin, i2_child_mask, i2_value_mask, i1_children, i2_node_values), pos)
 end
 
 """
@@ -159,9 +163,9 @@ end
 Read selection masks for all leaves in an I2 subtree (v222+ format).
 Mutates the I2TopoData in place to add selection masks.
 """
-function read_selection_masks_v222!(i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int)::Tuple{I2TopoData, Int}
+function read_selection_masks_v222!(i2_topo::I2TopoData{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{I2TopoData{T}, Int} where T
     # Create new I1 children with selection masks filled in
-    new_i1_children = Vector{I1TopoData}()
+    new_i1_children = Vector{I1TopoData{T}}()
 
     for i1_topo in i2_topo.children
         new_leaves = Vector{LeafTopoWithSelection}()
@@ -169,10 +173,10 @@ function read_selection_masks_v222!(i2_topo::I2TopoData, bytes::Vector{UInt8}, p
             selection_mask, pos = read_mask(LeafMask, bytes, pos)
             push!(new_leaves, LeafTopoWithSelection(leaf.origin, leaf.value_mask, selection_mask))
         end
-        push!(new_i1_children, I1TopoData(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, new_leaves))
+        push!(new_i1_children, I1TopoData{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, new_leaves, i1_topo.node_values))
     end
 
-    new_i2_topo = I2TopoData(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, new_i1_children)
+    new_i2_topo = I2TopoData{T}(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, new_i1_children, i2_topo.node_values)
     (new_i2_topo, pos)
 end
 
@@ -223,7 +227,7 @@ V222+ value format per-leaf:
    - If mask_compressed: only active values (value_mask.countOn())
    - Otherwise: all 512 values
 """
-function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{InternalNode2{T}, Int} where T
+function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{InternalNode2{T}, Int} where T
     # V222+ format: each leaf has [metadata][optional inactive vals][optional selection mask][compressed values]
     i1_nodes = Vector{InternalNode1{T}}()
 
@@ -235,7 +239,7 @@ function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vecto
             push!(leaf_nodes, LeafNode{T}(leaf_topo.origin, leaf_topo.value_mask, values))
         end
 
-        # Construct I1 node - tiles use background value for level sets
+        # Construct I1 node — extract tile values from stored node_values
         i1_child_count = count_on(i1_topo.child_mask)
         i1_tile_count = count_on(i1_topo.value_mask)
         i1_table = Vector{Union{LeafNode{T}, Tile{T}}}(undef, i1_child_count + i1_tile_count)
@@ -243,15 +247,16 @@ function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vecto
         for (i, leaf) in enumerate(leaf_nodes)
             i1_table[i] = leaf
         end
-        for i in 1:i1_tile_count
-            # I1 tiles default to background for level sets
-            i1_table[i1_child_count + i] = Tile{T}(background, true)
+        tile_idx = 0
+        for bit_idx in on_indices(i1_topo.value_mask)
+            tile_idx += 1
+            i1_table[i1_child_count + tile_idx] = Tile{T}(i1_topo.node_values[bit_idx + 1], true)
         end
 
         push!(i1_nodes, InternalNode1{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, i1_table))
     end
 
-    # Construct I2 node
+    # Construct I2 node — extract tile values from stored node_values
     i2_child_count = count_on(i2_topo.child_mask)
     i2_tile_count = count_on(i2_topo.value_mask)
     i2_table = Vector{Union{InternalNode1{T}, Tile{T}}}(undef, i2_child_count + i2_tile_count)
@@ -259,9 +264,10 @@ function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vecto
     for (i, child) in enumerate(i1_nodes)
         i2_table[i] = child
     end
-    for i in 1:i2_tile_count
-        # I2 tiles default to background for level sets
-        i2_table[i2_child_count + i] = Tile{T}(background, true)
+    tile_idx = 0
+    for bit_idx in on_indices(i2_topo.value_mask)
+        tile_idx += 1
+        i2_table[i2_child_count + tile_idx] = Tile{T}(i2_topo.node_values[bit_idx + 1], true)
     end
 
     node = InternalNode2{T}(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, i2_table)
@@ -295,7 +301,7 @@ function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec,
     end
 
     # Phase 1: Read ALL root children topology
-    i2_topos = Vector{I2TopoData}()
+    i2_topos = Vector{I2TopoData{T}}()
     i2_origins = Coord[]
 
     for _ in 1:child_count

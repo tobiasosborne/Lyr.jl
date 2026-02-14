@@ -37,6 +37,35 @@
         @test pos == 25
     end
 
+    @testset "read_tile_value Int32" begin
+        bytes = collect(reinterpret(UInt8, Int32[42]))
+        val, pos = read_tile_value(Int32, bytes, 1)
+        @test val == Int32(42)
+        @test pos == 5
+    end
+
+    @testset "read_tile_value Int64" begin
+        bytes = collect(reinterpret(UInt8, Int64[-1]))
+        val, pos = read_tile_value(Int64, bytes, 1)
+        @test val == Int64(-1)
+        @test pos == 9
+    end
+
+    @testset "read_tile_value Bool" begin
+        bytes = UInt8[0x01, 0x00]
+        val, pos = read_tile_value(Bool, bytes, 1)
+        @test val === true
+        @test pos == 2
+        val, pos = read_tile_value(Bool, bytes, 2)
+        @test val === false
+        @test pos == 3
+    end
+
+    @testset "read_tile_value unsupported type errors" begin
+        bytes = zeros(UInt8, 16)
+        @test_throws ArgumentError read_tile_value(UInt16, bytes, 1)
+    end
+
     @testset "Value types" begin
         # Float32
         values32 = ntuple(_ -> 0.0f0, 512)

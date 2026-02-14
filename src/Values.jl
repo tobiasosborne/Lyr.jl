@@ -74,7 +74,7 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
                 end
             else
                 if selection_mask !== nothing
-                    all_values[i+1] = is_on(selection_mask, i) ? inactive_val2 : inactive_val1
+                    all_values[i+1] = is_on(selection_mask, i) ? inactive_val1 : inactive_val2
                 else
                     all_values[i+1] = inactive_val1
                 end
@@ -151,24 +151,37 @@ end
 """
     read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int) -> Tuple{T, Int}
 
-Read a single tile value using direct pointer load (zero-copy).
+Read a single tile value. Specializations exist for all supported VDB value types
+(Float32, Float64, Int32, Int64, Bool, NTuple{3,Float32}, NTuple{3,Float64}).
+
+The generic fallback errors to prevent silent corruption from `ltoh`/`bswap` on
+unsupported types (e.g. NTuple, custom structs).
 """
 function read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{T, Int} where T
-    n = sizeof(T)
-    @boundscheck checkbounds(bytes, pos:pos+n-1)
-    GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{T}(pointer(bytes, pos)))
-    end
-    (ltoh(val), pos + n)
+    throw(ArgumentError("read_tile_value: no specialization for type $T — add one to Values.jl"))
 end
 
-# Specializations for common types
+# Specializations for all supported VDB value types
 function read_tile_value(::Type{Float32}, bytes::Vector{UInt8}, pos::Int)::Tuple{Float32, Int}
     read_f32_le(bytes, pos)
 end
 
 function read_tile_value(::Type{Float64}, bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
     read_f64_le(bytes, pos)
+end
+
+function read_tile_value(::Type{Int32}, bytes::Vector{UInt8}, pos::Int)::Tuple{Int32, Int}
+    read_i32_le(bytes, pos)
+end
+
+function read_tile_value(::Type{Int64}, bytes::Vector{UInt8}, pos::Int)::Tuple{Int64, Int}
+    read_i64_le(bytes, pos)
+end
+
+function read_tile_value(::Type{Bool}, bytes::Vector{UInt8}, pos::Int)::Tuple{Bool, Int}
+    @boundscheck checkbounds(bytes, pos)
+    @inbounds val = bytes[pos] != 0x00
+    (val, pos + 1)
 end
 
 """

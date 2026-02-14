@@ -89,10 +89,14 @@ function read_compressed_data(bytes::Vector{UInt8}, pos::Int, count::Int, elemen
         # Read the size of compressed data
         num_zipped_bytes, pos = read_i64(bytes, pos)
 
-        if num_zipped_bytes <= 0
-            # Data is uncompressed despite ZIP flag
-            data = bytes[pos:pos+total_bytes-1]
-            return (data, pos + total_bytes)
+        if num_zipped_bytes == 0
+            # Empty chunk — return zeros, don't advance
+            return (zeros(UInt8, total_bytes), pos)
+        elseif num_zipped_bytes < 0
+            # Uncompressed data, abs(num_zipped_bytes) is the byte count
+            raw_bytes = Int(-num_zipped_bytes)
+            data = bytes[pos:pos+raw_bytes-1]
+            return (data, pos + raw_bytes)
         else
             # Read compressed data
             compressed = bytes[pos:pos+Int(num_zipped_bytes)-1]
