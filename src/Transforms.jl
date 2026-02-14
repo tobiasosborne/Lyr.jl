@@ -212,24 +212,6 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{AbstractTransform
         return (LinearTransform(mat, (0.0, 0.0, 0.0)), pos)
 
     else
-        # General affine transform (AffineMap, etc.)
-        # Read 4x4 matrix (row-major), extract 3x3 and translation
-        mat_vals = Vector{Float64}(undef, 16)
-        for i in 1:16
-            mat_vals[i], pos = read_f64_le(bytes, pos)
-        end
-
-        # Skip extras (6 Float64s for voxel sizes) + 23 bytes
-        for _ in 1:6
-            _, pos = read_f64_le(bytes, pos)
-        end
-        pos += 23
-
-        mat = (mat_vals[1], mat_vals[2], mat_vals[3],
-               mat_vals[5], mat_vals[6], mat_vals[7],
-               mat_vals[9], mat_vals[10], mat_vals[11])
-        trans = (mat_vals[4], mat_vals[8], mat_vals[12])
-
-        return (LinearTransform(mat, trans), pos)
+        throw(ArgumentError("read_transform: unsupported map type '$type_str' — only UniformScaleMap, UniformScaleTranslateMap, ScaleTranslateMap, and ScaleMap are supported"))
     end
 end

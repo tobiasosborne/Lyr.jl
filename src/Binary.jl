@@ -100,16 +100,11 @@ end
     read_bytes(bytes::Vector{UInt8}, pos::Int, n::Int) -> Tuple{Vector{UInt8}, Int}
 
 Read `n` bytes starting at position `pos`.
-Uses unsafe_wrap to avoid copying data - the returned vector shares memory with `bytes`.
-SAFETY: The returned vector is only valid while `bytes` is not garbage collected.
-Callers that need an independent copy should use `copy(result)`.
+Returns a copy of the byte range (safe, no aliasing with input buffer).
 """
 function read_bytes(bytes::Vector{UInt8}, pos::Int, n::Int)::Tuple{Vector{UInt8}, Int}
     @boundscheck checkbounds(bytes, pos:pos+n-1)
-    GC.@preserve bytes begin
-        val = unsafe_wrap(Vector{UInt8}, pointer(bytes, pos), n)
-    end
-    (val, pos + n)
+    (bytes[pos:pos+n-1], pos + n)
 end
 
 """

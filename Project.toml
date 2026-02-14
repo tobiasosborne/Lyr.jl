@@ -1,5 +1,5 @@
 name = "Lyr"
-uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+uuid = "0b2600c4-321d-43a2-820d-87792fe74482"
 version = "0.1.0"
 authors = ["Lyr.jl Contributors"]
 
@@ -12,6 +12,8 @@ BenchmarkTools = "1.6"
 Blosc = "0.7"
 CodecZlib = "0.7"
 Cthulhu = "2"
+Debugger = "0.7.16"
+Infiltrator = "1.9.7"
 JET = "0.11"
 PropCheck = "0.10"
 julia = "1.9"
@@ -19,6 +21,8 @@ julia = "1.9"
 [extras]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Cthulhu = "f68482b8-f384-11e8-15f7-abe071a5a75f"
+Debugger = "31a5f54b-26ea-5ae9-a837-f05ce5417438"
+Infiltrator = "5903a43b-9cc3-4c30-8d17-598619ec4e9b"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 PropCheck = "ca382230-33be-11e9-0059-d981d03070e4"
@@ -26,4 +30,4 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "PropCheck", "Random", "InteractiveUtils", "JET", "Cthulhu"]
+test = ["Test", "PropCheck", "Random", "InteractiveUtils", "JET", "Cthulhu", "Debugger", "Infiltrator"]
