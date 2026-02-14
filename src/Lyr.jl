@@ -31,9 +31,8 @@ include("Interpolation.jl")
 include("Ray.jl")
 include("Render.jl")
 
-# TinyVDB parser and bridge
+# TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
 include("TinyVDB/TinyVDB.jl")
-include("TinyVDBBridge.jl")
 
 # Exports - Binary
 export read_u8, read_u32_le, read_u64_le
@@ -105,8 +104,5 @@ export ValueCountError
 export Camera, camera_ray
 export sphere_trace, shade
 export render_image, write_ppm
-
-# Exports - TinyVDB Bridge
-export convert_tinyvdb_grid, convert_tinyvdb_file, is_tinyvdb_compatible
 
 end # module

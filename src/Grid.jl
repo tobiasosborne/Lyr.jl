@@ -47,6 +47,9 @@ function read_grid(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask
     # Read transform
     transform, pos = read_transform(bytes, pos)
 
+    # Read buffer count (TreeBase header — always 1 for standard trees)
+    _, pos = read_u32_le(bytes, pos)
+
     # Read background value
     background, pos = read_tile_value(T, bytes, pos)
 

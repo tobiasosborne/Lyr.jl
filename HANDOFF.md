@@ -2,7 +2,69 @@
 
 ---
 
-## Latest Session (2026-02-14) - Fix v222+ value reading + equivalence tests
+## Latest Session (2026-02-14) - Fix smoke.vdb + rearch (delete TinyVDB routing)
+
+**Status**: 🟢 COMPLETE — 2 issues closed
+
+### Summary
+
+1. **smoke.vdb fix (d42)**: Root cause was three bugs in Main Lyr's transform/tree reading:
+   - `Transforms.jl`: Bogus `pos += 4` after UniformScaleMap (coincidentally consumed `buffer_count` field) and `pos += 23` after UniformScaleTranslateMap (ate 19 bytes of root topology). Removed both.
+   - `Grid.jl`: Missing `buffer_count` read between transform and background. Added it.
+   - `TreeRead.jl`: Spurious `background_active` byte read for fog volumes that doesn't exist in the VDB format. Removed it.
+
+2. **Rearch / TinyVDB demotion (ac4)**: Main Lyr is now the sole production parser. TinyVDB is test-only.
+   - `File.jl`: Removed TinyVDB routing (`is_tinyvdb_compatible` + try/catch). Renamed `_parse_vdb_legacy` back to `parse_vdb`.
+   - `Lyr.jl`: Removed `include("TinyVDBBridge.jl")` and bridge exports. TinyVDB submodule remains (test oracle).
+   - `test/test_parser_equivalence.jl`: Self-includes bridge file for conversion. No longer depends on Lyr exporting bridge functions.
+   - `test/runtests.jl`: Removed bridge test suite (142 tests — they tested conversion, not parsing).
+
+### Results After Fix
+
+| File | Structure | Values |
+|------|-----------|--------|
+| cube.vdb | MATCH | MATCH |
+| icosahedron.vdb | MATCH | MATCH |
+| smoke.vdb | MATCH | MATCH |
+| sphere.vdb | MATCH | MATCH |
+| torus.vdb | MATCH | MATCH |
+| utahteapot.vdb | MATCH | MATCH |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Transforms.jl` | Removed bogus padding (+4 UniformScaleMap, +23 UniformScaleTranslateMap, +23 ScaleMap) |
+| `src/Grid.jl` | Added `buffer_count` read after transform |
+| `src/TreeRead.jl` | Removed spurious `background_active` byte read |
+| `src/File.jl` | Removed TinyVDB routing, renamed `_parse_vdb_legacy` → `parse_vdb` |
+| `src/Lyr.jl` | Removed bridge include and exports |
+| `test/test_parser_equivalence.jl` | Self-includes bridge, uses `Lyr.parse_vdb` |
+| `test/test_integration.jl` | Updated `_parse_vdb_legacy` → `parse_vdb` refs |
+| `test/runtests.jl` | Removed bridge test include |
+
+### Test Results
+```
+678 pass, 0 fail, 2 errors (bunny_cloud×2 — pre-existing v220 bug)
+```
+
+### Issues
+
+| ID | Title | Status |
+|---|---|---|
+| `path-tracer-d42` | Fix legacy parser smoke.vdb structural failure | ✅ CLOSED |
+| `path-tracer-ac4` | Delete TinyVDBBridge, demote TinyVDB to test-only | ✅ CLOSED |
+
+### Next Steps
+
+| ID | P | Title | Status |
+|---|---|---|---|
+| `path-tracer-0ij` | P2 | Fix v220 tree interleaved reader for bunny_cloud.vdb | In Progress |
+| `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella — close when all sub-issues done) | In Progress |
+
+---
+
+## Previous Session (2026-02-14) - Fix v222+ value reading + equivalence tests
 
 **Status**: 🟢 COMPLETE — 2 issues closed, 1 remaining (smoke.vdb topology)
 

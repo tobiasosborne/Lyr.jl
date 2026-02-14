@@ -246,13 +246,6 @@ Read a complete VDB tree for v222+ format where topology and values are separate
 Sequential reading: topology pass skips internal node values, then values pass reads leaves.
 """
 function read_tree_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, grid_class::GridClass, version::UInt32; value_size::Int=sizeof(T))::Tuple{Tree{T}, Int} where T
-    # Read background_active (only for fog volumes)
-    background_active = false
-    if grid_class == GRID_FOG_VOLUME || grid_class == GRID_UNKNOWN
-        bg_byte, pos = read_u8(bytes, pos)
-        background_active = bg_byte != 0
-    end
-
     # Read counts
     tile_count, pos = read_u32_le(bytes, pos)
     child_count, pos = read_u32_le(bytes, pos)

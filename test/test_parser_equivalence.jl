@@ -1,11 +1,10 @@
+# Bridge for converting TinyVDB output to Lyr types (test-only)
+const TinyVDB = Lyr.TinyVDB
+include(joinpath(@__DIR__, "..", "src", "TinyVDBBridge.jl"))
+
 @testset "Parser Equivalence" begin
-    # Both Main Lyr (legacy, offset-seeking) and TinyVDB (sequential) parsers
-    # must produce identical trees for all compatible files. This makes TinyVDB
-    # a permanent test oracle for the production parser.
-    #
-    # Current status:
-    #   - Topology + values: MATCH for 5/6 files
-    #   - smoke.vdb: BROKEN topology (0 leaves, all tiles) — separate bug path-tracer-d42
+    # Both Main Lyr and TinyVDB (sequential) parsers must produce identical trees
+    # for all compatible files. TinyVDB serves as a permanent test oracle.
 
     SAMPLE_DIR = joinpath(@__DIR__, "fixtures", "samples")
 
@@ -30,12 +29,12 @@
 
             bytes = read(filepath)
 
-            # Parse with Main Lyr (legacy offset-seeking parser)
-            main_vdb = Lyr._parse_vdb_legacy(bytes)
+            # Parse with Main Lyr
+            main_vdb = Lyr.parse_vdb(bytes)
 
             # Parse with TinyVDB (sequential parser) + bridge conversion
             tiny_raw = Lyr.TinyVDB.parse_tinyvdb(bytes)
-            tiny_vdb = Lyr.convert_tinyvdb_file(tiny_raw)
+            tiny_vdb = convert_tinyvdb_file(tiny_raw)
 
             # Grid counts must match
             @test length(main_vdb.grids) == length(tiny_vdb.grids)
@@ -56,15 +55,9 @@
                     # Root child origins
                     @test Set(keys(mg.tree.table)) == Set(keys(tg.tree.table))
 
-                    # Tree structure — topology fix verified these match for most files.
-                    # smoke.vdb still broken: legacy parser gets 0 leaves + all tiles.
-                    if filename == "smoke.vdb"
-                        @test_broken leaf_count(mg.tree) == leaf_count(tg.tree)
-                        @test_broken active_voxel_count(mg.tree) == active_voxel_count(tg.tree)
-                    else
-                        @test leaf_count(mg.tree) == leaf_count(tg.tree)
-                        @test active_voxel_count(mg.tree) == active_voxel_count(tg.tree)
-                    end
+                    # Tree structure
+                    @test leaf_count(mg.tree) == leaf_count(tg.tree)
+                    @test active_voxel_count(mg.tree) == active_voxel_count(tg.tree)
 
                     # Value equivalence: iterate TinyVDB active voxels, look up in Main Lyr.
                     local n_checked = 0
@@ -81,11 +74,7 @@
                         n_checked >= 200 && break
                     end
                     @test n_checked > 0
-                    if filename == "smoke.vdb"
-                        @test_broken max_diff == 0.0f0  # topology broken → values wrong
-                    else
-                        @test max_diff == 0.0f0
-                    end
+                    @test max_diff == 0.0f0
                 end
             end
         end

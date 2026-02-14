@@ -169,9 +169,6 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{AbstractTransform
             _, pos = read_f64_le(bytes, pos)
         end
 
-        # Skip 4 bytes of flags (not 23 like ScaleTranslateMap)
-        pos += 4
-
         return (UniformScaleTransform(scale_x), pos)
 
     elseif type_str == "UniformScaleTranslateMap" || type_str == "ScaleTranslateMap"
@@ -198,23 +195,18 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{AbstractTransform
             _, pos = read_f64_le(bytes, pos)
         end
 
-        # Skip 23 bytes of padding/flags
-        pos += 23
-
         mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
         return (LinearTransform(mat, (tx, ty, tz)), pos)
 
     elseif type_str == "ScaleMap"
-        # ScaleMap: 3 scale values + extras
+        # ScaleMap: 5 Vec3d = 15 doubles = 120 bytes (same as UniformScaleMap)
         sx, pos = read_f64_le(bytes, pos)
         sy, pos = read_f64_le(bytes, pos)
         sz, pos = read_f64_le(bytes, pos)
 
-        # Skip 9 more Float64s + 23 bytes
-        for _ in 1:9
+        for _ in 1:12
             _, pos = read_f64_le(bytes, pos)
         end
-        pos += 23
 
         mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
         return (LinearTransform(mat, (0.0, 0.0, 0.0)), pos)

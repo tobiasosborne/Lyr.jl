@@ -173,7 +173,7 @@
         end
 
         bytes = read(filepath)
-        vdb = Lyr._parse_vdb_legacy(bytes)
+        vdb = Lyr.parse_vdb(bytes)
 
         grid = vdb.grids[1]
         @test grid.name == "ls_torus"
@@ -192,7 +192,7 @@
         end
 
         bytes = read(filepath)
-        vdb = Lyr._parse_vdb_legacy(bytes)
+        vdb = Lyr.parse_vdb(bytes)
 
         grid = vdb.grids[1]
         @test grid.name == "ls_cube"
