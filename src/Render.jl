@@ -99,40 +99,55 @@ function sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int;
     vs = voxel_size(grid.transform)[1]  # Get scalar voxel size
     background = Float64(grid.tree.background)
 
-    # Surface threshold - within half a voxel
+    # Surface threshold — within half a voxel (SDF values are in world units)
     threshold = vs * 0.5
 
     for _ in 1:max_steps
-        if t > t_exit + background  # Beyond bounding box plus narrow band width
+        if t > t_exit + background
             return nothing
         end
 
-        # Current point along ray
         point = _ray_at(ray, t)
-
-        # Sample the SDF (with bounds check)
         dist = _safe_sample(grid, point, background)
 
         # Check if we hit the surface
         if abs(dist) < threshold
-            # Estimate normal
-            normal = _estimate_normal_safe(grid, point, vs, background)
+            normal = _estimate_normal(grid, point, vs)
             return (point, normal)
         end
 
-        # Step by the distance (sphere tracing)
-        # For narrow-band level sets, background value indicates we're outside the band
-        if abs(dist - background) < 1e-6 || abs(dist + background) < 1e-6
-            # Outside narrow band - take larger steps
-            step = background
-        else
-            # Inside narrow band - step by SDF distance
-            step = max(abs(dist), vs * 0.1)
-        end
+        # Sphere tracing: step by SDF distance, clamped conservatively
+        # Never step more than 1 voxel when near or at background
+        # (trilinear can corrupt values at node boundaries → wrong large distances)
+        step = min(abs(dist), vs * 2.0)
+        step = max(step, vs * 0.1)
         t += step
     end
 
     nothing
+end
+
+"""
+    _bisect_surface(ray, grid, t_pos, t_neg, vs, bg) -> NTuple{3,Float64}
+
+Binary search between t_pos (SDF > 0) and t_neg (SDF < 0) to find the zero crossing.
+Returns the world-space point closest to the surface.
+"""
+function _bisect_surface(ray::Ray, grid::Grid{T}, t_pos::Float64, t_neg::Float64,
+                         vs::Float64, bg::Float64)::NTuple{3,Float64} where T
+    lo = t_pos
+    hi = t_neg
+    for _ in 1:8  # 8 iterations → ~1/256 voxel precision
+        mid = (lo + hi) * 0.5
+        p = _ray_at(ray, mid)
+        d = _safe_sample_nearest(grid, p, bg)
+        if d > 0.0
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    _ray_at(ray, (lo + hi) * 0.5)
 end
 
 """
@@ -161,6 +176,24 @@ function _intersect_float_bbox(ray::Ray, bmin::NTuple{3,Float64}, bmax::NTuple{3
 end
 
 """
+    _safe_sample_nearest(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64) -> Float64
+
+Sample grid at point using nearest-neighbor, returning fallback if outside bounds.
+Nearest-neighbor avoids trilinear corruption at narrow-band edges where some corners
+return background while others return real SDF values.
+"""
+function _safe_sample_nearest(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64)::Float64 where T
+    if !all(isfinite, point)
+        return fallback
+    end
+    max_coord = 1e9
+    if any(abs(p) > max_coord for p in point)
+        return fallback
+    end
+    Float64(sample_world(grid, point; method=:nearest))
+end
+
+"""
     _safe_sample(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64) -> Float64
 
 Sample grid at point, returning fallback if point is outside bounds or invalid.
@@ -186,14 +219,34 @@ end
 Estimate normal with safe sampling.
 """
 function _estimate_normal_safe(grid::Grid{T}, point::NTuple{3,Float64}, h::Float64, bg::Float64)::NTuple{3,Float64} where T
-    dx = _safe_sample(grid, (point[1] + h, point[2], point[3]), bg) -
-         _safe_sample(grid, (point[1] - h, point[2], point[3]), bg)
-    dy = _safe_sample(grid, (point[1], point[2] + h, point[3]), bg) -
-         _safe_sample(grid, (point[1], point[2] - h, point[3]), bg)
-    dz = _safe_sample(grid, (point[1], point[2], point[3] + h), bg) -
-         _safe_sample(grid, (point[1], point[2], point[3] - h), bg)
+    # Compute gradient in index space using ±1 voxel offsets for stability.
+    # This avoids world-space rounding artifacts at node boundaries.
+    ijk = world_to_index_float(grid.transform, point)
+    c = Coord(round(Int32, ijk[1]), round(Int32, ijk[2]), round(Int32, ijk[3]))
+    cv = Float64(get_value(grid.tree, c))
+    bg_f = Float64(bg)
 
+    dx = _gradient_axis_safe(grid.tree, c, Int32(1), Int32(0), Int32(0), cv, bg_f)
+    dy = _gradient_axis_safe(grid.tree, c, Int32(0), Int32(1), Int32(0), cv, bg_f)
+    dz = _gradient_axis_safe(grid.tree, c, Int32(0), Int32(0), Int32(1), cv, bg_f)
     _normalize((dx, dy, dz))
+end
+
+function _gradient_axis_safe(tree::Tree{T}, c::Coord, di::Int32, dj::Int32, dk::Int32,
+                              center::Float64, bg::Float64)::Float64 where T
+    vp = Float64(get_value(tree, Coord(c.x + di, c.y + dj, c.z + dk)))
+    vm = Float64(get_value(tree, Coord(c.x - di, c.y - dj, c.z - dk)))
+    p_ok = abs(vp) < bg - 1e-6
+    m_ok = abs(vm) < bg - 1e-6
+    if p_ok && m_ok
+        (vp - vm) * 0.5
+    elseif p_ok
+        vp - center
+    elseif m_ok
+        center - vm
+    else
+        0.0
+    end
 end
 
 """

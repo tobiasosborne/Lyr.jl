@@ -2,7 +2,60 @@
 
 ---
 
-## Latest Session (2026-02-14) - Fix multi-grid + render all VDBs
+## Latest Session (2026-02-14) - Fix level set rendering artifacts
+
+**Status**: 🟡 PARTIAL — sphere tracer improved (step clamping, utility helpers added) but node boundary artifacts remain
+
+### What Was Done
+
+1. **Diagnosed the root cause thoroughly**: The level set renderer's artifacts come from trilinear interpolation corrupting SDF values at VDB tree node boundaries (8³ leaf, 16³ I1, 32³ I2). When `sample_trilinear` straddles a node boundary, some of the 8 corners return the background value (~0.15 for sphere.vdb) while others return real SDF values. The blended result is wrong, causing the tracer to take wrong-sized steps.
+
+2. **Key finding: SDF values are in WORLD units** (not voxel units). For sphere.vdb: background=0.15, voxel_size=0.05, so narrow band is 3 voxels wide. The step distance `abs(dist)` is already in world units — no conversion needed.
+
+3. **Added step clamping** to `sphere_trace`: `step = min(abs(dist), vs * 2.0)` prevents overshooting. The original code had no clamp and jumped by full `background` (0.15 = 3 voxels) when outside the band.
+
+4. **Added utility functions** for future use:
+   - `_safe_sample_nearest` — NN sampling (immune to trilinear boundary corruption)
+   - `_bisect_surface` — binary search between two t values to find exact zero-crossing
+   - `_estimate_normal_safe` — index-space gradient with one-sided difference fallback
+   - `_gradient_axis_safe` — per-axis gradient that handles band-edge samples
+
+5. **Explored multiple approaches** (documented in detail below for next session)
+
+### Approaches Tried (for next session's reference)
+
+| Approach | Result | Issue |
+|----------|--------|-------|
+| NN stepping + threshold | 0 bg, scattered holes | NN quantization: some rays step past threshold |
+| NN + sign-change detection + bisection | 0 bg, correct shape | False crossings at node boundaries (SDF jumps +band to -background) |
+| NN sign-change + false-crossing rejection | 884 bg, most rejected | Too aggressive filter, misses real crossings too |
+| Hybrid (trilinear step + NN sign-change backup) | 0 bg | Grid artifacts remain from trilinear normal corruption |
+| Trilinear + step clamp (committed) | 0 bg, reduced artifacts | Thin dark lines at node boundaries remain |
+
+### Remaining Problem: Node Boundary Artifacts
+
+**The fundamental issue**: Trilinear interpolation is structurally broken at node boundaries because `get_value` returns `tree.background` for coordinates outside the tree. When trilinear's 8-corner samples straddle a boundary between a populated leaf and empty space, the result is garbage.
+
+**What would fix this properly** (future work):
+1. **DDA tree traversal** — walk the ray through the tree structure leaf-by-leaf (like OpenVDB's `VolumeRayIntersector`), only sampling within populated nodes. This is the correct approach used by production renderers.
+2. **Boundary-aware interpolation** — modify `sample_trilinear` to detect when any of the 8 corners returns background and fall back to nearest-neighbor for that sample.
+3. **Active-voxel-aware gradient** — for normals, only use neighbors that are active voxels in the tree (not background fill).
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Render.jl` | Step clamping in `sphere_trace`; added `_safe_sample_nearest`, `_bisect_surface`, `_estimate_normal_safe`, `_gradient_axis_safe` utilities |
+
+### Test Results
+
+```
+911 pass, 0 fail, 0 errors (unchanged)
+```
+
+---
+
+## Previous Session (2026-02-14) - Fix multi-grid + render all VDBs
 
 **Status**: 🟡 PARTIAL — multi-grid parsing fixed (12/12 VDBs), renders generated but level set renderer has artifacts
 
