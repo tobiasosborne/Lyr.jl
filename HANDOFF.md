@@ -2,7 +2,51 @@
 
 ---
 
-## Latest Session (2026-02-13) - Parser Unification Analysis + Phase 3 Plan
+## Latest Session (2026-02-14) - Phase 3 Steps 1+2: Fix v222+ Topology Pass
+
+**Status**: 🟢 COMPLETE — 2 issues closed, pushed
+
+### Summary
+
+Implemented the core fix for Main Lyr's v222+ parser: added `read_dense_values` calls after I2/I1 mask reads in `read_i2_topology_v222` to skip embedded internal node values (ReadMaskValues format). Then removed all compensating heuristics (seek to block_offset, origin validation, padding detection, early exit guard) and the `values_start`/`block_offset` parameters.
+
+### Result
+
+torus.vdb legacy parser: **1 → 8 root children**, 3152 → 6044 leaves, 1,565,265 → 1,119,158 active voxels. All correct.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/TreeRead.jl` | +2 `read_dense_values` skip calls, removed `is_valid_i2_origin`, padding detection, seek, guards (~40 lines deleted) |
+| `src/Grid.jl` | Removed `block_offset` param from `read_grid` |
+| `src/File.jl` | Removed `grid_start_pos`/`block_offset` from call sites |
+| `test/test_integration.jl` | Added "Legacy parser v222+ topology" test (4 assertions) |
+
+### Test Results
+```
+760 pass, 0 fail, 3 errors (pre-existing: bunny_cloud×2, sphere_points×1)
+```
+
+### Issues Closed
+
+| ID | Title |
+|---|---|
+| `path-tracer-utb` | Add skip_internal_values to v222+ topology pass ✅ |
+| `path-tracer-y63` | Remove block_offset seek and heuristic guards ✅ |
+
+### Next Steps (Phase 3 remaining)
+
+| ID | P | Title | Status |
+|---|---|---|---|
+| `path-tracer-9re` | P2 | Replace heuristic metadata parsing | Ready |
+| `path-tracer-5ld` | P2 | Add half-precision (Float16) support to Main Lyr | Ready |
+| `path-tracer-a56` | P2 | Parser equivalence tests (Main Lyr == TinyVDB) | Ready (deps resolved) |
+| `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella) | Ready |
+
+---
+
+## Previous Session (2026-02-13) - Parser Unification Analysis + Phase 3 Plan
 
 **Status**: 🟡 ANALYSIS COMPLETE — Implementation not started
 
