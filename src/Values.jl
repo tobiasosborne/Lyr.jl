@@ -192,16 +192,7 @@ Read `count` values of type T sequentially. Resilient to EOF.
 function read_active_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, count::Int)::Tuple{Vector{T}, Int} where T
     vals = Vector{T}(undef, count)
     for i in 1:count
-        try
-            vals[i], pos = read_tile_value(T, bytes, pos)
-        catch e
-            if isa(e, BoundsError)
-                # Handle EOF gracefully by padding with zero
-                vals[i] = zero(T)
-            else
-                rethrow(e)
-            end
-        end
+        vals[i], pos = read_tile_value(T, bytes, pos)
     end
     (vals, pos)
 end

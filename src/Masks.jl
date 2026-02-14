@@ -249,27 +249,12 @@ end
 Parse a mask from bytes. Masks are stored as consecutive 64-bit words in little-endian.
 """
 function read_mask(::Type{Mask{N,W}}, bytes::Vector{UInt8}, pos::Int)::Tuple{Mask{N,W}, Int} where {N,W}
+    # A mask requires exactly W * 8 bytes; truncated data means a corrupt file
+    @boundscheck checkbounds(bytes, pos:pos + W * 8 - 1)
     words = Vector{UInt64}(undef, W)
 
     for i in 1:W
-        if pos + 7 <= length(bytes)
-            words[i], pos = read_u64_le(bytes, pos)
-        else
-            # Handle truncation/EOF gracefully
-            # Read remaining bytes and pad with zeros
-            remaining = length(bytes) - pos + 1
-            if remaining > 0
-                # Construct UInt64 from remaining bytes
-                val = UInt64(0)
-                for b_idx in 0:(remaining-1)
-                    val |= (UInt64(bytes[pos + b_idx]) << (b_idx * 8))
-                end
-                words[i] = val
-                pos += remaining
-            else
-                words[i] = UInt64(0)
-            end
-        end
+        words[i], pos = read_u64_le(bytes, pos)
     end
 
     (Mask{N,W}(NTuple{W, UInt64}(words)), pos)

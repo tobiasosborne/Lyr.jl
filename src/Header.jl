@@ -65,10 +65,12 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
         has_grid_offsets = offsets_byte != 0
     end
 
-    # Version 220-221 has a half_float flag (1 byte) before UUID
-    # This was removed in version 222+ (moved to per-grid metadata)
+    # Version 220-221 has a global compression flag (1 byte) before UUID
+    # See tinyvdbio.h:2896 — is_compressed: nonzero=ZIP, zero=NONE
+    # This was removed in version 222+ (compression moved to per-grid metadata)
+    is_compressed_byte = UInt8(0)
     if format_version >= 220 && format_version < 222
-        _, pos = read_u8(bytes, pos)  # half_float flag (skip)
+        is_compressed_byte, pos = read_u8(bytes, pos)
     end
 
     # Read UUID (36 bytes ASCII string)
@@ -76,13 +78,14 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     uuid = String(uuid_bytes)
 
     # Compression handling differs by version:
-    # - v220-221: Global compression flag in header (already skipped above as "half_float")
+    # - v220-221: Global compression flag in header (read above)
     # - v222+: Compression is per-grid, NOT in header. Read at start of each grid.
-    #
-    # For v220-221, we default to ZIP + ACTIVE_MASK (standard OpenVDB behavior)
-    # For v222+, we use placeholder values; actual compression read per-grid in File.jl
     compression_flags = if format_version < 222
-        UInt32(0x3)  # ZIP + ACTIVE_MASK default for pre-222
+        flags = UInt32(0x2)  # ACTIVE_MASK always set for v220-221
+        if is_compressed_byte != 0
+            flags |= UInt32(0x1)  # ZIP flag
+        end
+        flags
     else
         UInt32(0x0)  # Placeholder for v222+; overridden per-grid
     end
