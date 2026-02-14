@@ -2,37 +2,38 @@
 
 ---
 
-## Latest Session (2026-02-14) - Phase 3 Step 5: Parser equivalence tests
+## Latest Session (2026-02-14) - Fix v222+ value reading + equivalence tests
 
-**Status**: 🟢 COMPLETE — 1 issue closed, 2 new bugs filed
+**Status**: 🟢 COMPLETE — 2 issues closed, 1 remaining (smoke.vdb topology)
 
 ### Summary
 
-Added `test/test_parser_equivalence.jl` that parses all 6 TinyVDB-compatible files with BOTH the legacy (Main Lyr) and TinyVDB parsers, then compares tree structure and voxel values. TinyVDB serves as permanent test oracle.
+1. **Equivalence tests**: Added `test/test_parser_equivalence.jl` that parses all 6 TinyVDB-compatible files with BOTH parsers, comparing structure and values. TinyVDB serves as permanent test oracle.
 
-### Findings
+2. **Value reading fix**: In v222+ format, the buffer (values) pass re-emits each leaf's value_mask (64 bytes) before ReadMaskValues data. Main Lyr was interpreting the first mask byte as the metadata byte, cascading corruption through every leaf. Fix: `pos += 64` in `read_leaf_values`.
 
-| File | Structure | Values | Notes |
-|------|-----------|--------|-------|
-| cube.vdb | MATCH | BROKEN | 455/500 voxels differ |
-| icosahedron.vdb | MATCH | BROKEN | NaN diffs |
-| smoke.vdb | BROKEN | BROKEN | Legacy: 0 leaves, all tiles (31M active vs 1M) |
-| sphere.vdb | MATCH | BROKEN | Main returns NaN for active voxels |
-| torus.vdb | MATCH | BROKEN | Garbage values (1.5e9) |
-| utahteapot.vdb | MATCH | BROKEN | max_diff=0.51 |
+### Results After Fix
 
-**Key insight**: The v222+ topology fix worked — structure matches for 5/6 files. But the legacy parser's value reading phase is systematically broken for all files. TinyVDB values are correct.
+| File | Structure | Values |
+|------|-----------|--------|
+| cube.vdb | MATCH | MATCH |
+| icosahedron.vdb | MATCH | MATCH |
+| smoke.vdb | BROKEN | BROKEN |
+| sphere.vdb | MATCH | MATCH |
+| torus.vdb | MATCH | MATCH |
+| utahteapot.vdb | MATCH | MATCH |
 
 ### Files Modified
 
 | File | Change |
 |------|--------|
-| `test/test_parser_equivalence.jl` | **NEW** — 54 tests (46 pass, 8 broken) |
+| `src/Values.jl` | +2 lines: skip 64-byte value_mask in v222+ leaf buffer pass |
+| `test/test_parser_equivalence.jl` | **NEW** — 54 tests (51 pass, 3 broken for smoke.vdb) |
 | `test/runtests.jl` | Added include for equivalence tests |
 
 ### Test Results
 ```
-812 pass, 0 fail, 2 errors (bunny_cloud×2 — pre-existing), 8 broken (new equivalence markers)
+817 pass, 0 fail, 2 errors (bunny_cloud×2 — pre-existing), 3 broken (smoke.vdb only)
 ```
 
 ### Issues
@@ -40,14 +41,13 @@ Added `test/test_parser_equivalence.jl` that parses all 6 TinyVDB-compatible fil
 | ID | Title | Status |
 |---|---|---|
 | `path-tracer-a56` | Parser equivalence tests | ✅ CLOSED |
-| `path-tracer-nkg` | Fix legacy parser v222+ value reading (all files) | 🔲 NEW P1 |
-| `path-tracer-d42` | Fix legacy parser smoke.vdb structural failure | 🔲 NEW P2 |
+| `path-tracer-nkg` | Fix legacy parser v222+ value reading | ✅ CLOSED |
+| `path-tracer-d42` | Fix legacy parser smoke.vdb structural failure | 🔲 OPEN P2 |
 
 ### Next Steps
 
 | ID | P | Title | Status |
 |---|---|---|---|
-| `path-tracer-nkg` | P1 | Fix legacy parser v222+ value reading | Ready |
 | `path-tracer-d42` | P2 | Fix legacy parser smoke.vdb structural failure | Ready |
 | `path-tracer-0ij` | P2 | Fix v220 tree interleaved reader for bunny_cloud.vdb | Ready |
 | `path-tracer-2ul` | P2 | Promote TinyVDB as primary parser (umbrella) | In Progress |

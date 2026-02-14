@@ -4,9 +4,8 @@
     # a permanent test oracle for the production parser.
     #
     # Current status:
-    #   - Topology (structure): MATCHES for 5/6 files (smoke.vdb fails)
-    #   - Values: BROKEN in legacy parser for all files
-    # Value tests are @test_broken until legacy value reading is fixed.
+    #   - Topology + values: MATCH for 5/6 files
+    #   - smoke.vdb: BROKEN topology (0 leaves, all tiles) — separate bug path-tracer-d42
 
     SAMPLE_DIR = joinpath(@__DIR__, "fixtures", "samples")
 
@@ -67,8 +66,7 @@
                         @test active_voxel_count(mg.tree) == active_voxel_count(tg.tree)
                     end
 
-                    # Value equivalence — legacy parser values are systematically wrong.
-                    # Iterate TinyVDB active voxels, look up same coord in Main Lyr.
+                    # Value equivalence: iterate TinyVDB active voxels, look up in Main Lyr.
                     local n_checked = 0
                     local max_diff = 0.0f0
                     for (coord, val_tiny) in active_voxels(tg.tree)
@@ -83,7 +81,11 @@
                         n_checked >= 200 && break
                     end
                     @test n_checked > 0
-                    @test_broken max_diff == 0.0f0  # TODO: fix legacy value reading
+                    if filename == "smoke.vdb"
+                        @test_broken max_diff == 0.0f0  # topology broken → values wrong
+                    else
+                        @test max_diff == 0.0f0
+                    end
                 end
             end
         end

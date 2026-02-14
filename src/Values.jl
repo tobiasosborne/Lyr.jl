@@ -141,6 +141,9 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
         end
         (NTuple{512, T}(all_values), pos)
     else
+        # v222+ buffer pass: each leaf re-emits its value_mask (64 bytes) before ReadMaskValues data.
+        # Skip it — already read during topology pass.
+        pos += 64
         values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, mask, background; value_size)
         (NTuple{512, T}(values), pos)
     end
