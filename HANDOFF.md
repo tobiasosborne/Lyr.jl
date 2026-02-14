@@ -2,7 +2,65 @@
 
 ---
 
-## Latest Session (2026-02-14) - Fix level set rendering artifacts
+## Latest Session (2026-02-14) - Code review + fix 7 bugs
+
+**Status**: 🟢 COMPLETE — comprehensive code review, 77 issues created, 7 bugs fixed
+
+### What Was Done
+
+1. **Comprehensive 6-specialist code review** spawned in parallel:
+   - Hygiene inspector (138 junk files found)
+   - Julia idiomaticity expert (grade B overall, type instability issues, ~315 LOC duplication)
+   - Test coverage reviewer (critical gap: Values.jl/TreeRead.jl have zero unit tests)
+   - Line-by-line bug hunter (2 CRITICAL, 8 HIGH, 7 MEDIUM, 13 LOW bugs found)
+   - Architecture reviewer (clean deps, over-exported API, path to 1.0)
+   - Knuth algorithm analyst (count_on_before is O(512) should be O(1), ValueAccessor needed)
+
+2. **Created 77 beads issues** with 23 dependency edges across 6 categories
+
+3. **Fixed 7 bugs** (top of the priority queue):
+
+| # | ID | Priority | Fix |
+|---|-----|----------|-----|
+| 1 | `yx7` | P0 CRITICAL | `read_tile_value` — added Int32/Int64/Bool specializations; generic now errors instead of calling `ltoh` on unsupported types |
+| 2 | `k0a` | P0 CRITICAL | TinyVDB `read_compressed_data` — split `==0` (empty chunk, return zeros) from `<0` (uncompressed, read abs bytes) |
+| 3 | `8mu` | P1 HIGH | Selection mask ternary inverted vs C++ — swapped to match `isOn→inactiveVal1` |
+| 4 | `vgu` | P1 HIGH | v222+ tile values discarded — made I1TopoData/I2TopoData parametric on T, store `node_values` from topology pass |
+| 5 | `339` | P1 HIGH | v220 header compression — use actually-read byte instead of hardcoding ZIP |
+| 6 | `avn` | P1 HIGH | `read_mask` — throw BoundsError on truncated data instead of zero-padding |
+| 7 | `ykk` | P1 HIGH | `read_active_values` — removed try/catch that swallowed BoundsError with `zero(T)` |
+
+4. **Updated .gitignore** (`oq8`) — Manifest.toml, renders, debug scripts, IDE dirs (unblocks 5 hygiene issues)
+
+### Test Results
+
+```
+920 pass, 0 fail, 0 errors (was 911)
+```
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Values.jl` | Int32/Int64/Bool read_tile_value specializations; generic errors; selection mask ternary fix; removed BoundsError swallowing |
+| `src/TreeRead.jl` | I1TopoData{T}/I2TopoData{T} parametric with node_values; tile construction uses actual values |
+| `src/TinyVDB/Compression.jl` | Split empty chunk (==0) from uncompressed (<0) in read_compressed_data |
+| `src/Masks.jl` | read_mask throws BoundsError on truncated data |
+| `src/Header.jl` | v220 compression from actual byte, not hardcoded ZIP |
+| `test/test_values.jl` | Tests for Int32/Int64/Bool read_tile_value + unsupported type error |
+| `.gitignore` | Comprehensive patterns for Manifest.toml, renders, scripts, IDE |
+
+### Next Priority (from `bd ready`)
+
+1. `3ej` — Transforms.jl general affine 23-byte skip
+2. `3di` — read_bytes unsafe_wrap aliasing
+3. `2j4` — Fix Project.toml (extras, UUID)
+4. `50y1` — Prefix-sum popcount (O(1) count_on_before)
+5. `90su` — Unit tests for read_dense_values (all 7 metadata flags)
+
+---
+
+## Previous Session (2026-02-14) - Fix level set rendering artifacts
 
 **Status**: 🟡 PARTIAL — sphere tracer improved (step clamping, utility helpers added) but node boundary artifacts remain
 
