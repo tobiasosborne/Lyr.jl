@@ -78,6 +78,38 @@
         @test sample_world(grid, (2.0, 0.0, 0.0); method=:nearest) == 2.0f0
     end
 
+    @testset "sample_trilinear boundary fallback" begin
+        # When a corner is at ±background, trilinear should fall back to nearest.
+        # Build a tree where background = 3.0 and one voxel has value 1.0.
+        # Sampling between that voxel and an empty neighbor should return nearest, not interpolated.
+        values = ntuple(_ -> Float32(0), 512)
+        values = Base.setindex(values, 1.0f0, 1)  # (0,0,0) = 1.0
+
+        mask_words = (UInt64(1), ntuple(_ -> UInt64(0), 7)...)  # bit 0 on
+        mask = LeafMask(mask_words)
+        leaf = LeafNode{Float32}(coord(0, 0, 0), mask, values)
+
+        i1_child_mask = Internal1Mask((UInt64(1), ntuple(_ -> UInt64(0), 63)...))
+        i1_value_mask = Internal1Mask()
+        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, [leaf])
+
+        i2_child_mask = Internal2Mask((UInt64(1), ntuple(_ -> UInt64(0), 511)...))
+        i2_value_mask = Internal2Mask()
+        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, [internal1])
+
+        table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}(coord(0, 0, 0) => internal2)
+        tree = RootNode{Float32}(3.0f0, table)  # background = 3.0
+
+        # At (0,0,0): v000=1.0, but neighbor (1,0,0)=0.0 which is not ±bg.
+        # At (0.5,0,0): v000=1.0, v100=0.0 — neither is ±bg → normal interpolation
+        @test sample_trilinear(tree, (0.5, 0.0, 0.0)) ≈ 0.5f0
+
+        # At (0.5, 0.0, 7.5): samples reach outside leaf into background (3.0).
+        # v001 at z=8 is outside leaf → returns background 3.0 → fallback to nearest
+        val = sample_trilinear(tree, (0.0, 0.0, 7.5))
+        @test val == sample_nearest(tree, (0.0, 0.0, 7.5))
+    end
+
     @testset "gradient" begin
         tree = make_test_tree()
 

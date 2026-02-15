@@ -36,9 +36,24 @@ function sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64})::T where T
     v011 = get_value(tree, coord(i0, j0 + 1, k0 + 1))
     v111 = get_value(tree, coord(i0 + 1, j0 + 1, k0 + 1))
 
+    # Boundary check: if any corner is at ±background, fall back to nearest-neighbor.
+    # For level sets, background values indicate outside the narrow band — interpolating
+    # these with interior values produces artifacts.
+    bg = tree.background
+    if _is_background(v000, bg) || _is_background(v100, bg) ||
+       _is_background(v010, bg) || _is_background(v110, bg) ||
+       _is_background(v001, bg) || _is_background(v101, bg) ||
+       _is_background(v011, bg) || _is_background(v111, bg)
+        return sample_nearest(tree, ijk)
+    end
+
     # Trilinear interpolation
     _lerp3(v000, v100, v010, v110, v001, v101, v011, v111, T(u), T(v), T(w))
 end
+
+# Check if a value equals ±background (for boundary detection)
+_is_background(val::T, bg::T) where {T <: AbstractFloat} = (val == bg) || (val == -bg)
+_is_background(val::NTuple{N,T}, bg::NTuple{N,T}) where {N, T <: AbstractFloat} = (val == bg)
 
 # Scalar lerp
 function _lerp3(v000::T, v100::T, v010::T, v110::T, v001::T, v101::T, v011::T, v111::T, u::T, v::T, w::T)::T where T <: AbstractFloat
