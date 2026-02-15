@@ -2,7 +2,63 @@
 
 ---
 
-## Latest Session (2026-02-14) - Code review + fix 10 bugs + 1 hygiene
+## Latest Session (2026-02-15) - Fix 9 issues: perf + bugs
+
+**Status**: 🟢 COMPLETE — 9 issues closed, 920 tests pass
+
+### What Was Done
+
+Worked through `bd ready` queue top-to-bottom, fixing bugs and implementing perf features.
+
+| # | ID | Priority | Type | Fix |
+|---|-----|----------|------|-----|
+| 1 | `46r` | P1 | bug | TinyVDB `read_grid_compression` — propagate `header.is_compressed` for v220 files (was returning COMPRESS_NONE) |
+| 2 | `50y1` | P1 | perf | `Mask{N,W}` prefix-sum — added `NTuple{W,UInt32}` for O(1) `count_on_before` (was O(W) loop over 512 words for I2) |
+| 3 | `clws` | P1 | perf | `ValueAccessor{T}` — mutable cache for leaf/I1/I2 nodes; 5-8x speedup for trilinear (7/8 lookups hit same leaf) |
+| 4 | `60i` | P2 | bug | TinyVDB `read_compressed_data` — added `abs(chunk_size)` cross-validation against `total_bytes` |
+| 5 | `u1k` | P2 | bug | TinyVDB `read_metadata` — size prefixes from `read_i32` → `read_u32` (VDB spec uses unsigned) |
+| 6 | `b93` | P2 | bug | `Binary.jl` — replaced `unsafe_load(Ptr{T}(...))` with `memcpy`-based `_unaligned_load` for ARM portability |
+| 7 | `ql1` | P2 | bug | `volume(BBox)` — return `Int128` instead of `Int64` to avoid overflow for large bounding boxes |
+| 8 | `fls` | P2 | bug | `File.jl` — `@warn` for unsupported grid value types instead of silent skip |
+| 9 | `d9i` | P2 | bug | TinyVDB `read_transform` — accept `ScaleMap` and `ScaleTranslateMap` (same binary layout as Uniform variants) |
+| 10 | `1xd` | P2 | bug | `sample_trilinear` — use `Int64` arithmetic to avoid `Int32` overflow on `coord+1` near typemax |
+
+### Learnings
+
+- **Mask prefix-sum**: Adding a `prefix::NTuple{W,UInt32}` field to the existing `Mask{N,W}` struct required updating all constructors. The inner constructor trick (`Mask{N,W}(words::NTuple{W,UInt64})`) that auto-computes prefix sums keeps call sites unchanged. One test used `(0b10110001,)` (Tuple{UInt8}) which the old implicit struct constructor auto-promoted but the new explicit constructor rejects — needed `UInt64(...)` cast.
+
+- **`_unaligned_load` pattern**: Julia's `unsafe_load(Ptr{T}(...))` requires alignment on ARM. The portable fix is `ccall(:memcpy, ...)` into a `Ref{T}`. This is zero-cost on x86 (compiler elides the memcpy) and correct everywhere.
+
+- **`ValueAccessor` design**: Mutable struct with `const tree` field (Julia 1.8+). Cache check is just `leaf_origin(c) == acc.leaf_origin` — a single `Coord` equality (3 Int32 compares). Falls through I1/I2 cache levels before full root traversal.
+
+- **Beads sync prefix conflict**: `bd sync` fails with "prefix mismatch" when JSONL contains issues from multiple projects. Workaround: commit `.beads/` separately with `git add .beads/ && git commit`.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Masks.jl` | Added `prefix::NTuple{W,UInt32}` field, `_compute_prefix`, O(1) `count_on`/`count_on_before` |
+| `src/Accessors.jl` | Added `ValueAccessor{T}` with `_get_from_root`/`_get_from_i2`/`_get_from_i1` |
+| `src/Binary.jl` | `_unaligned_load` helper; all read functions use it |
+| `src/Coordinates.jl` | `volume(BBox)` → `Int128` |
+| `src/File.jl` | `@warn` for unsupported grid types |
+| `src/Interpolation.jl` | `Int64` arithmetic in `sample_trilinear` |
+| `src/Lyr.jl` | Export `ValueAccessor` |
+| `src/TinyVDB/Compression.jl` | `is_compressed` kwarg for v220; chunk size validation |
+| `src/TinyVDB/Parser.jl` | `read_grid` takes `header`; `read_u32` for metadata; ScaleMap support |
+| `test/test_masks.jl` | `UInt64(...)` cast for test literal |
+
+### Next Priority (from `bd ready`)
+
+1. `90su` — Unit tests for `read_dense_values` (all 7 metadata flags)
+2. `i4u4` — Unit tests for `TreeRead.jl` (518 LOC, zero tests)
+3. `2zo` — Boundary-aware trilinear interpolation
+4. `py5` — Delete ~65MB untracked image artifacts
+5. `al6m` — Precompute matrix inverse in LinearTransform
+
+---
+
+## Previous Session (2026-02-14) - Code review + fix 10 bugs + 1 hygiene
 
 **Status**: 🟢 COMPLETE — comprehensive code review, 77 issues created, 11 issues closed
 
