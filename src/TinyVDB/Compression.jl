@@ -34,21 +34,25 @@ const FILE_VERSION_NODE_MASK_COMPRESSION = UInt32(222)
 # =============================================================================
 
 """
-    read_grid_compression(bytes::Vector{UInt8}, pos::Int, file_version::UInt32) -> Tuple{UInt32, Int}
+    read_grid_compression(bytes::Vector{UInt8}, pos::Int, file_version::UInt32;
+                          is_compressed::Bool=false) -> Tuple{UInt32, Int}
 
 Read per-grid compression flags from bytes.
 
 For file version >= 222, reads a u32 containing compression flags.
-For older versions, returns COMPRESS_NONE and doesn't advance position.
+For older versions (v220-221), compression is file-level: uses `is_compressed`
+from the header to return COMPRESS_ZIP or COMPRESS_NONE (no bytes consumed).
 
 Returns (compression_flags, new_pos).
 """
-function read_grid_compression(bytes::Vector{UInt8}, pos::Int, file_version::UInt32)::Tuple{UInt32, Int}
+function read_grid_compression(bytes::Vector{UInt8}, pos::Int, file_version::UInt32;
+                                is_compressed::Bool=false)::Tuple{UInt32, Int}
     if file_version >= FILE_VERSION_NODE_MASK_COMPRESSION
         flags, pos = read_u32(bytes, pos)
         return (flags, pos)
     else
-        return (COMPRESS_NONE, pos)
+        # v220-221: compression determined by file-level header flag
+        return (is_compressed ? COMPRESS_ZIP : COMPRESS_NONE, pos)
     end
 end
 
@@ -95,6 +99,9 @@ function read_compressed_data(bytes::Vector{UInt8}, pos::Int, count::Int, elemen
         elseif num_zipped_bytes < 0
             # Uncompressed data, abs(num_zipped_bytes) is the byte count
             raw_bytes = Int(-num_zipped_bytes)
+            if raw_bytes != total_bytes
+                error("Uncompressed chunk size mismatch: abs(chunk_size)=$raw_bytes, expected=$total_bytes")
+            end
             data = bytes[pos:pos+raw_bytes-1]
             return (data, pos + raw_bytes)
         else

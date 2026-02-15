@@ -204,13 +204,14 @@ function Base.union(a::BBox, b::BBox)::BBox
 end
 
 """
-    volume(bb::BBox) -> Int64
+    volume(bb::BBox) -> Int128
 
-Compute the volume of the bounding box.
+Compute the volume of the bounding box. Returns Int128 to avoid overflow
+for large bounding boxes (each axis > 2^21 would overflow Int64).
 """
-function volume(bb::BBox)::Int64
-    dx = Int64(bb.max.x) - Int64(bb.min.x) + 1
-    dy = Int64(bb.max.y) - Int64(bb.min.y) + 1
-    dz = Int64(bb.max.z) - Int64(bb.min.z) + 1
+function volume(bb::BBox)::Int128
+    dx = Int128(bb.max.x) - Int128(bb.min.x) + 1
+    dy = Int128(bb.max.y) - Int128(bb.min.y) + 1
+    dz = Int128(bb.max.z) - Int128(bb.min.z) + 1
     dx * dy * dz
 end

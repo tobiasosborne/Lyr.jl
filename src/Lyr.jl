@@ -84,6 +84,7 @@ export parse_value_type
 export read_header, read_grid_descriptor, parse_vdb
 
 # Exports - Accessors
+export ValueAccessor
 export get_value, is_active, active_voxel_count, leaf_count, active_bounding_box
 export active_voxels, leaves
 

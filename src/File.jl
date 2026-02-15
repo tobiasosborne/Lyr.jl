@@ -98,6 +98,8 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
         elseif T == NTuple{3, Float32}
             grid, pos = read_grid(NTuple{3, Float32}, bytes, pos, grid_codec, grid_mask_compressed, desc.name, grid_class, header.format_version; value_size)
             push!(grids_temp, grid)
+        else
+            @warn "Skipping grid '$(desc.name)' with unsupported value type: $T"
         end
 
         # Seek to end_offset for next grid descriptor (robust for multi-grid files)

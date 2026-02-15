@@ -3,8 +3,20 @@
 # All functions have signature: (bytes::Vector{UInt8}, pos::Int) -> (result, new_pos::Int)
 # Positions are 1-indexed (Julia convention)
 # All multi-byte types are little-endian
+#
+# Uses alignment=1 for all pointer loads to support unaligned access (ARM portability).
 
 using Base: ltoh
+
+"""Load a value of type T from an unaligned pointer position."""
+@inline function _unaligned_load(::Type{T}, ptr::Ptr{UInt8}) where T
+    ref = Ref{T}()
+    GC.@preserve ref begin
+        dst = Base.unsafe_convert(Ptr{T}, ref)
+        ccall(:memcpy, Ptr{Cvoid}, (Ptr{T}, Ptr{UInt8}, Csize_t), dst, ptr, sizeof(T))
+    end
+    return ref[]
+end
 
 """
     read_u8(bytes::Vector{UInt8}, pos::Int) -> Tuple{UInt8, Int}
@@ -26,7 +38,7 @@ Read a 32-bit unsigned integer in little-endian format.
 function read_u32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt32, Int}
     @boundscheck checkbounds(bytes, pos:pos+3)
     GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{UInt32}(pointer(bytes, pos)))
+        @inbounds val = _unaligned_load(UInt32, pointer(bytes, pos))
     end
     (ltoh(val), pos + 4)
 end
@@ -39,7 +51,7 @@ Read a 64-bit unsigned integer in little-endian format.
 function read_u64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{UInt64, Int}
     @boundscheck checkbounds(bytes, pos:pos+7)
     GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{UInt64}(pointer(bytes, pos)))
+        @inbounds val = _unaligned_load(UInt64, pointer(bytes, pos))
     end
     (ltoh(val), pos + 8)
 end
@@ -52,7 +64,7 @@ Read a 32-bit signed integer in little-endian format.
 function read_i32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int32, Int}
     @boundscheck checkbounds(bytes, pos:pos+3)
     GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{Int32}(pointer(bytes, pos)))
+        @inbounds val = _unaligned_load(Int32, pointer(bytes, pos))
     end
     (ltoh(val), pos + 4)
 end
@@ -65,7 +77,7 @@ Read a 64-bit signed integer in little-endian format.
 function read_i64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int64, Int}
     @boundscheck checkbounds(bytes, pos:pos+7)
     GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{Int64}(pointer(bytes, pos)))
+        @inbounds val = _unaligned_load(Int64, pointer(bytes, pos))
     end
     (ltoh(val), pos + 8)
 end
@@ -78,7 +90,7 @@ Read a 32-bit float in little-endian format.
 function read_f32_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float32, Int}
     @boundscheck checkbounds(bytes, pos:pos+3)
     GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{Float32}(pointer(bytes, pos)))
+        @inbounds val = _unaligned_load(Float32, pointer(bytes, pos))
     end
     (ltoh(val), pos + 4)
 end
@@ -91,7 +103,7 @@ Read a 64-bit float in little-endian format.
 function read_f64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
     @boundscheck checkbounds(bytes, pos:pos+7)
     GC.@preserve bytes begin
-        @inbounds val = unsafe_load(Ptr{Float64}(pointer(bytes, pos)))
+        @inbounds val = _unaligned_load(Float64, pointer(bytes, pos))
     end
     (ltoh(val), pos + 8)
 end

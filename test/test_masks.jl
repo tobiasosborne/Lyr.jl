@@ -176,7 +176,7 @@
         @test count_on_before(m, 127) == 3  # Bits 0, 63, 64 before 127
 
         # Verify consistency: count_on_before(m, i) + 1 == position in on_indices for bit i
-        words = (0b10110001,)  # bits 0, 4, 5, 7
+        words = (UInt64(0b10110001),)  # bits 0, 4, 5, 7
         m = Mask{64,1}(words)
         indices = collect(on_indices(m))
         for (pos, idx) in enumerate(indices)

@@ -72,34 +72,34 @@ function read_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,String
             value, pos = read_string(bytes, pos)
             metadata[name] = value
         elseif type_name == "bool"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix (u32 per VDB spec)
             _, pos = read_u8(bytes, pos)
         elseif type_name == "float"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix
             _, pos = read_f32(bytes, pos)
         elseif type_name == "double"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix
             _, pos = read_f64(bytes, pos)
         elseif type_name == "int32"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix
             _, pos = read_i32(bytes, pos)
         elseif type_name == "int64"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix
             _, pos = read_i64(bytes, pos)
         elseif type_name == "vec3i"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix
             _, pos = read_i32(bytes, pos)
             _, pos = read_i32(bytes, pos)
             _, pos = read_i32(bytes, pos)
         elseif type_name == "vec3d"
-            _, pos = read_i32(bytes, pos)  # size prefix
+            _, pos = read_u32(bytes, pos)  # size prefix
             _, pos = read_f64(bytes, pos)
             _, pos = read_f64(bytes, pos)
             _, pos = read_f64(bytes, pos)
         else
             # Unknown type - read size and skip
-            size, pos = read_i32(bytes, pos)
-            pos += size
+            size, pos = read_u32(bytes, pos)
+            pos += Int(size)
         end
     end
 
@@ -159,21 +159,24 @@ end
 # =============================================================================
 
 """
-    read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt32) -> TinyGrid
+    read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, header::VDBHeader) -> TinyGrid
 
-Read a single grid from bytes using its descriptor.
+Read a single grid from bytes using its descriptor and file header.
 
 Seeks to grid_pos, reads compression, metadata, transform, topology, and values.
 """
-function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, file_version::UInt32)::TinyGrid
+function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, header::VDBHeader)::TinyGrid
+    file_version = header.file_version
+
     # Start at grid_pos (1-indexed for Julia)
     pos = Int(gd.grid_pos) + 1
 
     # Determine value element size: 2 for half precision, 4 for full
     value_size = gd.half_precision ? 2 : 4
 
-    # Read per-grid compression (v222+)
-    compression_flags, pos = read_grid_compression(bytes, pos, file_version)
+    # Read per-grid compression (v222+ reads from stream; v220 uses header flag)
+    compression_flags, pos = read_grid_compression(bytes, pos, file_version;
+                                                    is_compressed=header.is_compressed)
 
     # Read metadata and extract grid class
     metadata, pos = read_metadata(bytes, pos)
@@ -250,7 +253,7 @@ function parse_tinyvdb(filepath::String)::TinyVDBFile
             continue
         end
 
-        grid = read_grid(bytes, gd, header.file_version)
+        grid = read_grid(bytes, gd, header)
         grids[name] = grid
     end
 
@@ -286,7 +289,7 @@ function parse_tinyvdb(bytes::Vector{UInt8})::TinyVDBFile
             continue
         end
 
-        grid = read_grid(bytes, gd, header.file_version)
+        grid = read_grid(bytes, gd, header)
         grids[name] = grid
     end
 
