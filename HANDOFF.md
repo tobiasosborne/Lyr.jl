@@ -2,7 +2,85 @@
 
 ---
 
-## Latest Session (2026-02-15) - Fix 9 issues: perf + bugs
+## Latest Session (2026-02-15) — Tests, hygiene, features, Phase 1 roadmap
+
+**Status**: 🟢 COMPLETE — 8 issues closed, 996 tests pass, Phase 1 roadmap created (21 issues)
+
+### What Was Done
+
+**Part 1: Close top-of-queue issues (8 closed)**
+
+| # | ID | P | Type | What |
+|---|-----|---|------|------|
+| 1 | `90su` | P1 | test | 10 unit tests for `read_dense_values` — all 7 metadata flags + half-precision + edge cases |
+| 2 | `i4u4` | P1 | test | 40 unit tests for `TreeRead.jl` — `_decode_values`, `align_to_16`, `read_internal_tiles`, minimal tree integration |
+| 3 | `3ox` | P2 | hygiene | Removed `Manifest.toml` from git tracking (already in .gitignore) |
+| 4 | `py5` | P2 | hygiene | Deleted ~65MB image artifacts (40 PNG/PPM) from project root |
+| 5 | `tla` | P2 | hygiene | Deleted `renders/` directory (~46MB, 36 files) |
+| 6 | `nzn` | P2 | hygiene | Deleted 45 debug scripts (kept `render_vdb.jl`, `test_and_render_all.jl`) |
+| 7 | `2zo` | P2 | feature | Boundary-aware trilinear interpolation — falls back to nearest at ±background |
+| 8 | `al6m` | P2 | perf | Precomputed matrix inverse in `LinearTransform` (inv_mat field, ~2x for world_to_index) |
+
+**Part 2: Phase 1 roadmap — pivot from parser polish to rendering pipeline**
+
+Decision: parser is done (996 tests, all files parse). Remaining 51 old issues are diminishing-returns polish. Downgraded all old P1/P2 to P3. Created 21 new P1 issues across three phases:
+
+**Phase 1.1: StaticArrays Foundation (5 issues, chain)**
+```
+ovkr  Add StaticArrays.jl + type aliases (SVec3d, SMat3d)  ← ENTRY POINT
+  → e0v8  Refactor LinearTransform to SMatrix/SVector
+    → 0yey  Refactor world_to_index/index_to_world
+      → 717b  Refactor Interpolation.jl to SVec3d
+        → uapd  StaticArrays foundation tests
+```
+
+**Phase 1.2: DDA Ray Traversal (8 issues, chain)**
+```
+ovkr  (shared root)
+  → avxb  New Ray type with SVector origin/direction/inv_dir
+    → bcba  AABB-ray slab intersection
+      → lmzm  3D-DDA stepper (Amanatides-Woo)
+        → p7md  Node-level DDA (per internal node)
+          → gduf  Hierarchical DDA (Root→I2→I1→Leaf)
+            → 9ysk  VolumeRayIntersector iterator
+              → tzw5  Level set surface finding (DDA + bisection)
+                → ay5g  Replace sphere_trace
+```
+
+**Phase 1.3: NanoVDB Flat Layout (8 issues, chain)**
+```
+i70d  Design NanoVDB layout  ← ENTRY POINT (parallel with 1.1)
+  → g4eh  NanoLeaf flat view
+    → jy23  NanoI1/NanoI2 flat views
+      → 61ij  NanoRoot sorted table
+        → icfa  NanoGrid build from Tree
+          → 9og6  Value accessor on NanoGrid
+            → tzd5  DDA on NanoGrid (also depends on 9ysk)
+              → 61fz  Equivalence tests
+```
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `test/test_values.jl` | +10 read_dense_values unit tests (flags 0-6, half-prec, position) |
+| `test/test_tree_read.jl` | **NEW** — 40 tests for TreeRead.jl utility + integration |
+| `test/runtests.jl` | Include test_tree_read.jl |
+| `src/Interpolation.jl` | Boundary-aware trilinear: `_is_background` check, nearest fallback |
+| `test/test_interpolation.jl` | +2 boundary fallback tests |
+| `src/Transforms.jl` | `inv_mat` field + `_invert_3x3`; simplified `world_to_index_float` |
+| `Manifest.toml` | Removed from tracking |
+| `teapot.png` | Removed from tracking |
+| `scripts/` | 28 tracked debug scripts removed (kept render_vdb.jl, test_and_render_all.jl) |
+
+### Next Priority
+
+1. **`ovkr`** — Add StaticArrays.jl (gates Phase 1.1 + 1.2)
+2. **`i70d`** — Design NanoVDB layout (gates Phase 1.3, parallelizable with 1.1)
+
+---
+
+## Previous Session (2026-02-15) - Fix 9 issues: perf + bugs
 
 **Status**: 🟢 COMPLETE — 9 issues closed, 920 tests pass
 
@@ -32,21 +110,6 @@ Worked through `bd ready` queue top-to-bottom, fixing bugs and implementing perf
 - **`ValueAccessor` design**: Mutable struct with `const tree` field (Julia 1.8+). Cache check is just `leaf_origin(c) == acc.leaf_origin` — a single `Coord` equality (3 Int32 compares). Falls through I1/I2 cache levels before full root traversal.
 
 - **Beads sync prefix conflict**: `bd sync` fails with "prefix mismatch" when JSONL contains issues from multiple projects. Workaround: commit `.beads/` separately with `git add .beads/ && git commit`.
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `src/Masks.jl` | Added `prefix::NTuple{W,UInt32}` field, `_compute_prefix`, O(1) `count_on`/`count_on_before` |
-| `src/Accessors.jl` | Added `ValueAccessor{T}` with `_get_from_root`/`_get_from_i2`/`_get_from_i1` |
-| `src/Binary.jl` | `_unaligned_load` helper; all read functions use it |
-| `src/Coordinates.jl` | `volume(BBox)` → `Int128` |
-| `src/File.jl` | `@warn` for unsupported grid types |
-| `src/Interpolation.jl` | `Int64` arithmetic in `sample_trilinear` |
-| `src/Lyr.jl` | Export `ValueAccessor` |
-| `src/TinyVDB/Compression.jl` | `is_compressed` kwarg for v220; chunk size validation |
-| `src/TinyVDB/Parser.jl` | `read_grid` takes `header`; `read_u32` for metadata; ScaleMap support |
-| `test/test_masks.jl` | `UInt64(...)` cast for test literal |
 
 ### Next Priority (from `bd ready`)
 
