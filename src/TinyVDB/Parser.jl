@@ -129,7 +129,7 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, NTuple{3
     # Read transform type string
     transform_type, pos = read_string(bytes, pos)
 
-    if transform_type == "UniformScaleMap"
+    if transform_type in ("UniformScaleMap", "ScaleMap")
         # 5 Vec3d = 15 doubles = 120 bytes
         # First double is scale_x (= voxel size for uniform scale)
         scale_x, pos = read_f64(bytes, pos)
@@ -137,7 +137,7 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, NTuple{3
             _, pos = read_f64(bytes, pos)
         end
         return (scale_x, (0.0, 0.0, 0.0), pos)
-    elseif transform_type == "UniformScaleTranslateMap"
+    elseif transform_type in ("UniformScaleTranslateMap", "ScaleTranslateMap")
         # Translation Vec3d (3 doubles = 24 bytes) THEN 5 Vec3d (15 doubles = 120 bytes)
         # Total: 18 doubles = 144 bytes
         # OpenVDB ScaleTranslateMap::write() emits translation first, then ScaleMap data
@@ -150,7 +150,7 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, NTuple{3
         end
         return (scale_x, (tx, ty, tz), pos)
     else
-        error("Unsupported transform type: $transform_type (only UniformScaleMap and UniformScaleTranslateMap supported)")
+        error("Unsupported transform type: $transform_type")
     end
 end
 

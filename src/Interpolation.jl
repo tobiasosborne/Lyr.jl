@@ -16,25 +16,25 @@ end
 Sample the tree using trilinear interpolation.
 """
 function sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64})::T where T
-    # Get the base integer coordinates
-    i0 = floor(Int32, ijk[1])
-    j0 = floor(Int32, ijk[2])
-    k0 = floor(Int32, ijk[3])
+    # Get the base integer coordinates (Int64 to avoid overflow on +1)
+    i0 = floor(Int64, ijk[1])
+    j0 = floor(Int64, ijk[2])
+    k0 = floor(Int64, ijk[3])
 
     # Fractional parts
     u = ijk[1] - Float64(i0)
     v = ijk[2] - Float64(j0)
     w = ijk[3] - Float64(k0)
 
-    # Sample all 8 corners
-    v000 = get_value(tree, Coord(i0, j0, k0))
-    v100 = get_value(tree, Coord(i0 + Int32(1), j0, k0))
-    v010 = get_value(tree, Coord(i0, j0 + Int32(1), k0))
-    v110 = get_value(tree, Coord(i0 + Int32(1), j0 + Int32(1), k0))
-    v001 = get_value(tree, Coord(i0, j0, k0 + Int32(1)))
-    v101 = get_value(tree, Coord(i0 + Int32(1), j0, k0 + Int32(1)))
-    v011 = get_value(tree, Coord(i0, j0 + Int32(1), k0 + Int32(1)))
-    v111 = get_value(tree, Coord(i0 + Int32(1), j0 + Int32(1), k0 + Int32(1)))
+    # Sample all 8 corners (coord() safely truncates to Int32)
+    v000 = get_value(tree, coord(i0, j0, k0))
+    v100 = get_value(tree, coord(i0 + 1, j0, k0))
+    v010 = get_value(tree, coord(i0, j0 + 1, k0))
+    v110 = get_value(tree, coord(i0 + 1, j0 + 1, k0))
+    v001 = get_value(tree, coord(i0, j0, k0 + 1))
+    v101 = get_value(tree, coord(i0 + 1, j0, k0 + 1))
+    v011 = get_value(tree, coord(i0, j0 + 1, k0 + 1))
+    v111 = get_value(tree, coord(i0 + 1, j0 + 1, k0 + 1))
 
     # Trilinear interpolation
     _lerp3(v000, v100, v010, v110, v001, v101, v011, v111, T(u), T(v), T(w))
