@@ -17,8 +17,33 @@ A general linear transform with rotation/scale and translation.
 - `trans::NTuple{3, Float64}` - Translation vector
 """
 struct LinearTransform <: AbstractTransform
-    mat::NTuple{9, Float64}    # 3x3 rotation/scale matrix (row-major)
-    trans::NTuple{3, Float64}  # translation
+    mat::NTuple{9, Float64}      # 3x3 rotation/scale matrix (row-major)
+    trans::NTuple{3, Float64}    # translation
+    inv_mat::NTuple{9, Float64}  # precomputed 3x3 inverse matrix (row-major)
+
+    function LinearTransform(mat::NTuple{9, Float64}, trans::NTuple{3, Float64})
+        inv_mat = _invert_3x3(mat)
+        new(mat, trans, inv_mat)
+    end
+end
+
+"""Compute the inverse of a 3x3 row-major matrix using Cramer's rule."""
+function _invert_3x3(m::NTuple{9, Float64})::NTuple{9, Float64}
+    det = m[1] * (m[5] * m[9] - m[6] * m[8]) -
+          m[2] * (m[4] * m[9] - m[6] * m[7]) +
+          m[3] * (m[4] * m[8] - m[5] * m[7])
+    inv_det = 1.0 / det
+    (
+        (m[5] * m[9] - m[6] * m[8]) * inv_det,
+        (m[3] * m[8] - m[2] * m[9]) * inv_det,
+        (m[2] * m[6] - m[3] * m[5]) * inv_det,
+        (m[6] * m[7] - m[4] * m[9]) * inv_det,
+        (m[1] * m[9] - m[3] * m[7]) * inv_det,
+        (m[3] * m[4] - m[1] * m[6]) * inv_det,
+        (m[4] * m[8] - m[5] * m[7]) * inv_det,
+        (m[2] * m[7] - m[1] * m[8]) * inv_det,
+        (m[1] * m[5] - m[2] * m[4]) * inv_det,
+    )
 end
 
 """
@@ -63,33 +88,14 @@ end
 Transform world coordinates to floating-point index coordinates.
 """
 function world_to_index_float(t::LinearTransform, xyz::NTuple{3, Float64})::NTuple{3, Float64}
-    # Subtract translation
     x = xyz[1] - t.trans[1]
     y = xyz[2] - t.trans[2]
     z = xyz[3] - t.trans[3]
 
-    # Compute inverse transform (assuming orthogonal matrix for now)
-    # For a general matrix, we'd need the actual inverse
-    det = t.mat[1] * (t.mat[5] * t.mat[9] - t.mat[6] * t.mat[8]) -
-          t.mat[2] * (t.mat[4] * t.mat[9] - t.mat[6] * t.mat[7]) +
-          t.mat[3] * (t.mat[4] * t.mat[8] - t.mat[5] * t.mat[7])
-
-    inv_det = 1.0 / det
-
-    # Adjugate matrix elements
-    a11 = (t.mat[5] * t.mat[9] - t.mat[6] * t.mat[8]) * inv_det
-    a12 = (t.mat[3] * t.mat[8] - t.mat[2] * t.mat[9]) * inv_det
-    a13 = (t.mat[2] * t.mat[6] - t.mat[3] * t.mat[5]) * inv_det
-    a21 = (t.mat[6] * t.mat[7] - t.mat[4] * t.mat[9]) * inv_det
-    a22 = (t.mat[1] * t.mat[9] - t.mat[3] * t.mat[7]) * inv_det
-    a23 = (t.mat[3] * t.mat[4] - t.mat[1] * t.mat[6]) * inv_det
-    a31 = (t.mat[4] * t.mat[8] - t.mat[5] * t.mat[7]) * inv_det
-    a32 = (t.mat[2] * t.mat[7] - t.mat[1] * t.mat[8]) * inv_det
-    a33 = (t.mat[1] * t.mat[5] - t.mat[2] * t.mat[4]) * inv_det
-
-    i = a11 * x + a12 * y + a13 * z
-    j = a21 * x + a22 * y + a23 * z
-    k = a31 * x + a32 * y + a33 * z
+    m = t.inv_mat
+    i = m[1] * x + m[2] * y + m[3] * z
+    j = m[4] * x + m[5] * y + m[6] * z
+    k = m[7] * x + m[8] * y + m[9] * z
 
     (i, j, k)
 end
