@@ -14,6 +14,7 @@ using Cthulhu
     include("test_values.jl")
     include("test_tree_read.jl")
     include("test_transforms.jl")
+    include("test_staticarrays.jl")
     include("test_grid.jl")
     include("test_file.jl")
     include("test_accessors.jl")
