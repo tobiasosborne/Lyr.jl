@@ -43,54 +43,70 @@ struct UniformScaleTransform <: AbstractTransform
     scale::Float64
 end
 
+# --- SVec3d primary methods (zero-copy, no tuple conversion) ---
+
 """
-    index_to_world(t::LinearTransform, ijk::Coord) -> NTuple{3, Float64}
+    index_to_world(t::LinearTransform, v::SVec3d) -> SVec3d
 
 Transform index coordinates to world coordinates.
 """
-function index_to_world(t::LinearTransform, ijk::Coord)::NTuple{3, Float64}
-    v = SVec3d(Float64(ijk.x), Float64(ijk.y), Float64(ijk.z))
-    w = t.mat * v + t.trans
-    (w[1], w[2], w[3])
-end
+index_to_world(t::LinearTransform, v::SVec3d)::SVec3d = t.mat * v + t.trans
 
 """
-    index_to_world(t::UniformScaleTransform, ijk::Coord) -> NTuple{3, Float64}
+    index_to_world(t::UniformScaleTransform, v::SVec3d) -> SVec3d
 
 Transform index coordinates to world coordinates using uniform scale.
 """
-function index_to_world(t::UniformScaleTransform, ijk::Coord)::NTuple{3, Float64}
-    (Float64(ijk.x) * t.scale, Float64(ijk.y) * t.scale, Float64(ijk.z) * t.scale)
-end
+index_to_world(t::UniformScaleTransform, v::SVec3d)::SVec3d = v * t.scale
 
 """
-    world_to_index_float(t::LinearTransform, xyz::NTuple{3, Float64}) -> NTuple{3, Float64}
+    world_to_index_float(t::LinearTransform, xyz::SVec3d) -> SVec3d
 
 Transform world coordinates to floating-point index coordinates.
 """
-function world_to_index_float(t::LinearTransform, xyz::NTuple{3, Float64})::NTuple{3, Float64}
-    v = t.inv_mat * (SVec3d(xyz...) - t.trans)
-    (v[1], v[2], v[3])
-end
+world_to_index_float(t::LinearTransform, xyz::SVec3d)::SVec3d = t.inv_mat * (xyz - t.trans)
 
 """
-    world_to_index_float(t::UniformScaleTransform, xyz::NTuple{3, Float64}) -> NTuple{3, Float64}
+    world_to_index_float(t::UniformScaleTransform, xyz::SVec3d) -> SVec3d
 
 Transform world coordinates to floating-point index coordinates using uniform scale.
 """
-function world_to_index_float(t::UniformScaleTransform, xyz::NTuple{3, Float64})::NTuple{3, Float64}
-    inv_scale = 1.0 / t.scale
-    (xyz[1] * inv_scale, xyz[2] * inv_scale, xyz[3] * inv_scale)
-end
+world_to_index_float(t::UniformScaleTransform, xyz::SVec3d)::SVec3d = xyz * (1.0 / t.scale)
 
 """
-    world_to_index(t::AbstractTransform, xyz::NTuple{3, Float64}) -> Coord
+    world_to_index(t::AbstractTransform, xyz::SVec3d) -> Coord
 
 Transform world coordinates to integer index coordinates (rounded).
 """
+function world_to_index(t::AbstractTransform, xyz::SVec3d)::Coord
+    v = world_to_index_float(t, xyz)
+    coord(round(Int32, v[1]), round(Int32, v[2]), round(Int32, v[3]))
+end
+
+# --- NTuple/Coord wrappers for backward compatibility ---
+
+function index_to_world(t::LinearTransform, ijk::Coord)::NTuple{3, Float64}
+    w = index_to_world(t, SVec3d(Float64(ijk.x), Float64(ijk.y), Float64(ijk.z)))
+    (w[1], w[2], w[3])
+end
+
+function index_to_world(t::UniformScaleTransform, ijk::Coord)::NTuple{3, Float64}
+    w = index_to_world(t, SVec3d(Float64(ijk.x), Float64(ijk.y), Float64(ijk.z)))
+    (w[1], w[2], w[3])
+end
+
+function world_to_index_float(t::LinearTransform, xyz::NTuple{3, Float64})::NTuple{3, Float64}
+    v = world_to_index_float(t, SVec3d(xyz...))
+    (v[1], v[2], v[3])
+end
+
+function world_to_index_float(t::UniformScaleTransform, xyz::NTuple{3, Float64})::NTuple{3, Float64}
+    v = world_to_index_float(t, SVec3d(xyz...))
+    (v[1], v[2], v[3])
+end
+
 function world_to_index(t::AbstractTransform, xyz::NTuple{3, Float64})::Coord
-    ijk_float = world_to_index_float(t, xyz)
-    coord(round(Int32, ijk_float[1]), round(Int32, ijk_float[2]), round(Int32, ijk_float[3]))
+    world_to_index(t, SVec3d(xyz...))
 end
 
 """
