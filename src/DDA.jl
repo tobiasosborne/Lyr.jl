@@ -29,8 +29,9 @@ boundary per axis), and tdelta (ray parameter delta between voxel boundaries).
 function dda_init(ray::Ray, tmin::Float64, voxel_size::Float64=1.0)::DDAState
     inv_vs = 1.0 / voxel_size
 
-    # Entry point in world space
-    p = ray.origin + tmin * ray.direction
+    # Nudge tmin slightly inward to avoid landing exactly on a voxel boundary,
+    # which causes floor() to place us in the wrong cell for negative directions.
+    p = ray.origin + (tmin + 1e-9) * ray.direction
 
     # Current voxel (floor to grid)
     ijk = Coord(
@@ -181,4 +182,99 @@ Return the index-space origin of the current child voxel.
 function node_dda_voxel_origin(ndda::NodeDDA)::Coord
     cs = ndda.child_size
     Coord(ndda.state.ijk[1] * cs, ndda.state.ijk[2] * cs, ndda.state.ijk[3] * cs)
+end
+
+# --- Hierarchical DDA ---
+
+"""
+    intersect_leaves_dda(ray::Ray, tree::Tree{T}) -> Vector{LeafIntersection{T}}
+
+Hierarchical DDA traversal of a VDB tree. Returns leaf intersections in
+front-to-back order. Uses DDA at each tree level to skip non-intersected nodes.
+
+This replaces the brute-force `intersect_leaves` which tests every leaf.
+"""
+function intersect_leaves_dda(ray::Ray, tree::Tree{T}) where T
+    results = LeafIntersection{T}[]
+
+    for (root_key, entry) in tree.table
+        if entry isa InternalNode2{T}
+            _dda_internal2!(results, ray, entry)
+        end
+    end
+
+    sort!(results, by=x -> x.t_enter)
+    results
+end
+
+function _dda_internal2!(results::Vector{LeafIntersection{T}}, ray::Ray,
+                         node::InternalNode2{T}) where T
+    # AABB for this I2 node: origin to origin + 4096
+    o = node.origin
+    aabb = AABB(
+        SVec3d(Float64(o[1]), Float64(o[2]), Float64(o[3])),
+        SVec3d(Float64(o[1]) + 4096.0, Float64(o[2]) + 4096.0, Float64(o[3]) + 4096.0)
+    )
+
+    hit = intersect_bbox(ray, aabb)
+    hit === nothing && return
+
+    tmin, tmax = hit
+
+    # DDA through 32³ child grid at stride 128
+    ndda = node_dda_init(ray, tmin, o, Int32(32), Int32(128))
+
+    while node_dda_inside(ndda)
+        child_idx = node_dda_child_index(ndda)
+
+        if is_on(node.child_mask, child_idx)
+            table_idx = count_on_before(node.child_mask, child_idx) + 1
+            child = node.table[table_idx]::InternalNode1{T}
+            _dda_internal1!(results, ray, child)
+        end
+
+        dda_step!(ndda.state)
+    end
+end
+
+function _dda_internal1!(results::Vector{LeafIntersection{T}}, ray::Ray,
+                         node::InternalNode1{T}) where T
+    o = node.origin
+    aabb = AABB(
+        SVec3d(Float64(o[1]), Float64(o[2]), Float64(o[3])),
+        SVec3d(Float64(o[1]) + 128.0, Float64(o[2]) + 128.0, Float64(o[3]) + 128.0)
+    )
+
+    hit = intersect_bbox(ray, aabb)
+    hit === nothing && return
+
+    tmin, tmax = hit
+
+    # DDA through 16³ child grid at stride 8
+    ndda = node_dda_init(ray, tmin, o, Int32(16), Int32(8))
+
+    while node_dda_inside(ndda)
+        child_idx = node_dda_child_index(ndda)
+
+        if is_on(node.child_mask, child_idx)
+            table_idx = count_on_before(node.child_mask, child_idx) + 1
+            leaf = node.table[table_idx]::LeafNode{T}
+            _dda_leaf!(results, ray, leaf)
+        end
+
+        dda_step!(ndda.state)
+    end
+end
+
+function _dda_leaf!(results::Vector{LeafIntersection{T}}, ray::Ray,
+                    leaf::LeafNode{T}) where T
+    o = leaf.origin
+    s = Int32(8)
+    bbox = BBox(o, Coord(o[1] + s - Int32(1), o[2] + s - Int32(1), o[3] + s - Int32(1)))
+
+    hit = intersect_bbox(ray, bbox)
+    if hit !== nothing
+        t_enter, t_exit = hit
+        push!(results, LeafIntersection{T}(t_enter, t_exit, leaf))
+    end
 end

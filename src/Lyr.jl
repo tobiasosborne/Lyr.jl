@@ -106,6 +106,7 @@ export AABB, Ray, LeafIntersection, intersect_bbox, intersect_leaves
 # Exports - DDA
 export DDAState, dda_init, dda_step!
 export NodeDDA, node_dda_init, node_dda_child_index, node_dda_inside, node_dda_voxel_origin
+export intersect_leaves_dda
 
 # Exports - Exceptions
 export LyrError, ParseError, CompressionError
