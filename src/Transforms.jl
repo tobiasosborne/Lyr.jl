@@ -13,38 +13,23 @@ abstract type AbstractTransform end
 A general linear transform with rotation/scale and translation.
 
 # Fields
-- `mat::NTuple{9, Float64}` - 3x3 matrix in row-major order
-- `trans::NTuple{3, Float64}` - Translation vector
+- `mat::SMat3d` - 3x3 matrix (column-major, standard Julia convention)
+- `trans::SVec3d` - Translation vector
+- `inv_mat::SMat3d` - Precomputed inverse of `mat`
 """
 struct LinearTransform <: AbstractTransform
-    mat::NTuple{9, Float64}      # 3x3 rotation/scale matrix (row-major)
-    trans::NTuple{3, Float64}    # translation
-    inv_mat::NTuple{9, Float64}  # precomputed 3x3 inverse matrix (row-major)
+    mat::SMat3d       # 3x3 rotation/scale matrix
+    trans::SVec3d     # translation
+    inv_mat::SMat3d   # precomputed inverse
 
-    function LinearTransform(mat::NTuple{9, Float64}, trans::NTuple{3, Float64})
-        inv_mat = _invert_3x3(mat)
-        new(mat, trans, inv_mat)
+    function LinearTransform(mat::SMat3d, trans::SVec3d)
+        new(mat, trans, inv(mat))
     end
 end
 
-"""Compute the inverse of a 3x3 row-major matrix using Cramer's rule."""
-function _invert_3x3(m::NTuple{9, Float64})::NTuple{9, Float64}
-    det = m[1] * (m[5] * m[9] - m[6] * m[8]) -
-          m[2] * (m[4] * m[9] - m[6] * m[7]) +
-          m[3] * (m[4] * m[8] - m[5] * m[7])
-    inv_det = 1.0 / det
-    (
-        (m[5] * m[9] - m[6] * m[8]) * inv_det,
-        (m[3] * m[8] - m[2] * m[9]) * inv_det,
-        (m[2] * m[6] - m[3] * m[5]) * inv_det,
-        (m[6] * m[7] - m[4] * m[9]) * inv_det,
-        (m[1] * m[9] - m[3] * m[7]) * inv_det,
-        (m[3] * m[4] - m[1] * m[6]) * inv_det,
-        (m[4] * m[8] - m[5] * m[7]) * inv_det,
-        (m[2] * m[7] - m[1] * m[8]) * inv_det,
-        (m[1] * m[5] - m[2] * m[4]) * inv_det,
-    )
-end
+# Convenience: construct from NTuples (column-major element order, matching SMatrix)
+LinearTransform(mat::NTuple{9,Float64}, trans::NTuple{3,Float64}) =
+    LinearTransform(SMat3d(mat...), SVec3d(trans...))
 
 """
     UniformScaleTransform <: AbstractTransform
@@ -64,13 +49,9 @@ end
 Transform index coordinates to world coordinates.
 """
 function index_to_world(t::LinearTransform, ijk::Coord)::NTuple{3, Float64}
-    i, j, k = Float64(ijk.x), Float64(ijk.y), Float64(ijk.z)
-
-    x = t.mat[1] * i + t.mat[2] * j + t.mat[3] * k + t.trans[1]
-    y = t.mat[4] * i + t.mat[5] * j + t.mat[6] * k + t.trans[2]
-    z = t.mat[7] * i + t.mat[8] * j + t.mat[9] * k + t.trans[3]
-
-    (x, y, z)
+    v = SVec3d(Float64(ijk.x), Float64(ijk.y), Float64(ijk.z))
+    w = t.mat * v + t.trans
+    (w[1], w[2], w[3])
 end
 
 """
@@ -88,16 +69,8 @@ end
 Transform world coordinates to floating-point index coordinates.
 """
 function world_to_index_float(t::LinearTransform, xyz::NTuple{3, Float64})::NTuple{3, Float64}
-    x = xyz[1] - t.trans[1]
-    y = xyz[2] - t.trans[2]
-    z = xyz[3] - t.trans[3]
-
-    m = t.inv_mat
-    i = m[1] * x + m[2] * y + m[3] * z
-    j = m[4] * x + m[5] * y + m[6] * z
-    k = m[7] * x + m[8] * y + m[9] * z
-
-    (i, j, k)
+    v = t.inv_mat * (SVec3d(xyz...) - t.trans)
+    (v[1], v[2], v[3])
 end
 
 """
@@ -123,13 +96,13 @@ end
 """
     voxel_size(t::LinearTransform) -> NTuple{3, Float64}
 
-Get the voxel size (diagonal of the transform matrix).
+Get the voxel size (column norms of the transform matrix).
 """
 function voxel_size(t::LinearTransform)::NTuple{3, Float64}
-    # Voxel size is the length of each column of the matrix
-    sx = sqrt(t.mat[1]^2 + t.mat[4]^2 + t.mat[7]^2)
-    sy = sqrt(t.mat[2]^2 + t.mat[5]^2 + t.mat[8]^2)
-    sz = sqrt(t.mat[3]^2 + t.mat[6]^2 + t.mat[9]^2)
+    m = t.mat
+    sx = sqrt(m[1,1]^2 + m[2,1]^2 + m[3,1]^2)
+    sy = sqrt(m[1,2]^2 + m[2,2]^2 + m[3,2]^2)
+    sz = sqrt(m[1,3]^2 + m[2,3]^2 + m[3,3]^2)
     (sx, sy, sz)
 end
 
@@ -201,8 +174,8 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{AbstractTransform
             _, pos = read_f64_le(bytes, pos)
         end
 
-        mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
-        return (LinearTransform(mat, (tx, ty, tz)), pos)
+        mat = SMat3d(sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
+        return (LinearTransform(mat, SVec3d(tx, ty, tz)), pos)
 
     elseif type_str == "ScaleMap"
         # ScaleMap: 5 Vec3d = 15 doubles = 120 bytes (same as UniformScaleMap)
@@ -214,8 +187,8 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{AbstractTransform
             _, pos = read_f64_le(bytes, pos)
         end
 
-        mat = (sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
-        return (LinearTransform(mat, (0.0, 0.0, 0.0)), pos)
+        mat = SMat3d(sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz)
+        return (LinearTransform(mat, SVec3d(0.0, 0.0, 0.0)), pos)
 
     else
         throw(ArgumentError("read_transform: unsupported map type '$type_str' — only UniformScaleMap, UniformScaleTranslateMap, ScaleTranslateMap, and ScaleMap are supported"))
