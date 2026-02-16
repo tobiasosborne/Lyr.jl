@@ -2,7 +2,38 @@
 
 ---
 
-## Latest Session (2026-02-15) — Tests, hygiene, features, Phase 1 roadmap
+## Latest Session (2026-02-16) — DDA ray traversal (Phase 1.2)
+
+**Status**: 🟢 COMPLETE — 3 issues closed, 1246 tests pass
+
+### What Was Done
+
+| # | ID | P | Type | What |
+|---|-----|---|------|------|
+| 1 | `bcba` | P1 | task | AABB struct (SVec3d min/max), refactored `intersect_bbox` to AABB primary + BBox overload. 12 new tests. |
+| 2 | `lmzm` | P1 | feature | Amanatides-Woo 3D-DDA in `src/DDA.jl`: `DDAState`, `dda_init`, `dda_step!`. 112 new tests. |
+| 3 | `p7md` | P1 | feature | Node-level DDA: `NodeDDA`, `node_dda_init`, `node_dda_child_index`, `node_dda_inside`, `node_dda_voxel_origin`. 57 new tests. |
+
+### Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `src/Ray.jl` | Added `AABB` struct + `BBox` converter; refactored `intersect_bbox` to use AABB |
+| `src/DDA.jl` | **NEW** — DDA stepper + NodeDDA (node-level traversal) |
+| `src/Lyr.jl` | Include DDA.jl; export AABB + DDA symbols |
+| `test/test_ray.jl` | +12 AABB tests |
+| `test/test_dda.jl` | **NEW** — 112 DDA tests |
+| `test/test_node_dda.jl` | **NEW** — 57 NodeDDA tests |
+| `test/runtests.jl` | Include test_dda.jl, test_node_dda.jl |
+
+### Next Priority
+
+1. **`gduf`** — Hierarchical DDA: compose Root → I2 → I1 → Leaf traversal (next in Phase 1.2 chain)
+2. **`i70d`** — Design NanoVDB flat layout (Phase 1.3 entry point, parallelizable)
+
+---
+
+## Previous Session (2026-02-15) — Tests, hygiene, features, Phase 1 roadmap
 
 **Status**: 🟢 COMPLETE — 8 issues closed, 996 tests pass, Phase 1 roadmap created (21 issues)
 

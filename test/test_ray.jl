@@ -103,6 +103,123 @@
         @test isempty(intersections)
     end
 
+    @testset "AABB construction" begin
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+        @test aabb.min == SVec3d(0.0, 0.0, 0.0)
+        @test aabb.max == SVec3d(1.0, 1.0, 1.0)
+    end
+
+    @testset "AABB from BBox" begin
+        bbox = BBox(coord(-3, 0, 7), coord(10, 20, 30))
+        aabb = AABB(bbox)
+        @test aabb.min == SVec3d(-3.0, 0.0, 7.0)
+        @test aabb.max == SVec3d(10.0, 20.0, 30.0)
+    end
+
+    @testset "AABB hit through center" begin
+        ray = Ray((-5.0, 0.5, 0.5), (1.0, 0.0, 0.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        result = intersect_bbox(ray, aabb)
+        @test result !== nothing
+        t_enter, t_exit = result
+        @test t_enter ≈ 5.0
+        @test t_exit ≈ 6.0
+    end
+
+    @testset "AABB miss" begin
+        ray = Ray((0.0, 10.0, 0.0), (1.0, 0.0, 0.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        @test intersect_bbox(ray, aabb) === nothing
+    end
+
+    @testset "AABB ray inside box" begin
+        ray = Ray((0.5, 0.5, 0.5), (1.0, 0.0, 0.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        result = intersect_bbox(ray, aabb)
+        @test result !== nothing
+        t_enter, t_exit = result
+        @test t_enter ≈ 0.0
+        @test t_exit ≈ 0.5
+    end
+
+    @testset "AABB ray parallel to face" begin
+        # Parallel to YZ plane, passing through box
+        ray = Ray((0.5, -5.0, 0.5), (0.0, 1.0, 0.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        result = intersect_bbox(ray, aabb)
+        @test result !== nothing
+        t_enter, t_exit = result
+        @test t_enter ≈ 5.0
+        @test t_exit ≈ 6.0
+
+        # Parallel to YZ plane, missing box
+        ray = Ray((1.5, -5.0, 0.5), (0.0, 1.0, 0.0))
+        @test intersect_bbox(ray, aabb) === nothing
+    end
+
+    @testset "AABB diagonal ray" begin
+        # Diagonal ray through unit cube from corner
+        ray = Ray((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        result = intersect_bbox(ray, aabb)
+        @test result !== nothing
+        t_enter, t_exit = result
+        # Distance from (-1,-1,-1) to (0,0,0) along (1,1,1)/sqrt(3) is sqrt(3)
+        @test t_enter ≈ sqrt(3.0)
+        # Distance to (1,1,1) is 2*sqrt(3)
+        @test t_exit ≈ 2.0 * sqrt(3.0)
+    end
+
+    @testset "AABB negative direction" begin
+        ray = Ray((5.0, 0.5, 0.5), (-1.0, 0.0, 0.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        result = intersect_bbox(ray, aabb)
+        @test result !== nothing
+        t_enter, t_exit = result
+        @test t_enter ≈ 4.0
+        @test t_exit ≈ 5.0
+    end
+
+    @testset "AABB fractional bounds" begin
+        # Non-integer box bounds (the whole point of AABB vs BBox)
+        ray = Ray((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+        aabb = AABB(SVec3d(0.25, -0.5, -0.5), SVec3d(0.75, 0.5, 0.5))
+
+        result = intersect_bbox(ray, aabb)
+        @test result !== nothing
+        t_enter, t_exit = result
+        @test t_enter ≈ 0.25
+        @test t_exit ≈ 0.75
+    end
+
+    @testset "AABB ray behind box" begin
+        # Ray starts past the box and points away from it
+        ray = Ray((5.0, 0.5, 0.5), (1.0, 0.0, 0.0))
+        aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
+
+        @test intersect_bbox(ray, aabb) === nothing
+    end
+
+    @testset "AABB and BBox give same results" begin
+        ray = Ray((-3.0, 2.5, 1.5), (1.0, 0.0, 0.0))
+        bbox = BBox(coord(0, 0, 0), coord(5, 5, 5))
+        aabb = AABB(bbox)
+
+        result_bbox = intersect_bbox(ray, bbox)
+        result_aabb = intersect_bbox(ray, aabb)
+
+        @test result_bbox !== nothing
+        @test result_aabb !== nothing
+        @test result_bbox[1] ≈ result_aabb[1]
+        @test result_bbox[2] ≈ result_aabb[2]
+    end
+
     @testset "LeafIntersection" begin
         leaf = LeafNode{Float32}(
             coord(0, 0, 0),

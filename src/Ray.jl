@@ -1,6 +1,30 @@
 # Ray.jl - Ray utilities for volume rendering
 
 """
+    AABB
+
+A floating-point axis-aligned bounding box for ray intersection tests.
+
+# Fields
+- `min::SVec3d` - Minimum corner
+- `max::SVec3d` - Maximum corner
+"""
+struct AABB
+    min::SVec3d
+    max::SVec3d
+end
+
+"""
+    AABB(bbox::BBox) -> AABB
+
+Convert an integer `BBox` to a floating-point `AABB`.
+"""
+AABB(bbox::BBox) = AABB(
+    SVec3d(Float64(bbox.min[1]), Float64(bbox.min[2]), Float64(bbox.min[3])),
+    SVec3d(Float64(bbox.max[1]), Float64(bbox.max[2]), Float64(bbox.max[3]))
+)
+
+"""
     Ray
 
 A ray defined by origin and direction.
@@ -45,17 +69,14 @@ Ray(origin::NTuple{3, Float64}, direction::NTuple{3, Float64}) =
     Ray(SVec3d(origin...), SVec3d(direction...))
 
 """
-    intersect_bbox(ray::Ray, bbox::BBox) -> Union{Tuple{Float64, Float64}, Nothing}
+    intersect_bbox(ray::Ray, aabb::AABB) -> Union{Tuple{Float64, Float64}, Nothing}
 
 Compute ray-box intersection using the slab method.
 Returns (t_enter, t_exit) or `nothing` if no intersection.
 """
-function intersect_bbox(ray::Ray, bbox::BBox)::Union{Tuple{Float64, Float64}, Nothing}
-    bmin = SVec3d(Float64(bbox.min[1]), Float64(bbox.min[2]), Float64(bbox.min[3]))
-    bmax = SVec3d(Float64(bbox.max[1]), Float64(bbox.max[2]), Float64(bbox.max[3]))
-
-    t1 = (bmin - ray.origin) .* ray.inv_dir
-    t2 = (bmax - ray.origin) .* ray.inv_dir
+function intersect_bbox(ray::Ray, aabb::AABB)::Union{Tuple{Float64, Float64}, Nothing}
+    t1 = (aabb.min - ray.origin) .* ray.inv_dir
+    t2 = (aabb.max - ray.origin) .* ray.inv_dir
 
     tmin_v = min.(t1, t2)
     tmax_v = max.(t1, t2)
@@ -69,6 +90,13 @@ function intersect_bbox(ray::Ray, bbox::BBox)::Union{Tuple{Float64, Float64}, No
 
     nothing
 end
+
+"""
+    intersect_bbox(ray::Ray, bbox::BBox) -> Union{Tuple{Float64, Float64}, Nothing}
+
+Convenience overload that converts integer `BBox` to `AABB`.
+"""
+intersect_bbox(ray::Ray, bbox::BBox) = intersect_bbox(ray, AABB(bbox))
 
 """
     LeafIntersection{T}

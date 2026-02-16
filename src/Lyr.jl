@@ -36,6 +36,7 @@ include("File.jl")
 include("Accessors.jl")
 include("Interpolation.jl")
 include("Ray.jl")
+include("DDA.jl")
 include("Render.jl")
 
 # TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
@@ -100,7 +101,11 @@ export sample_nearest, sample_trilinear, sample_world
 export gradient
 
 # Exports - Ray
-export Ray, LeafIntersection, intersect_bbox, intersect_leaves
+export AABB, Ray, LeafIntersection, intersect_bbox, intersect_leaves
+
+# Exports - DDA
+export DDAState, dda_init, dda_step!
+export NodeDDA, node_dda_init, node_dda_child_index, node_dda_inside, node_dda_voxel_origin
 
 # Exports - Exceptions
 export LyrError, ParseError, CompressionError

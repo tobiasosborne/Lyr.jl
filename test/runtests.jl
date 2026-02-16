@@ -20,6 +20,8 @@ using Cthulhu
     include("test_accessors.jl")
     include("test_interpolation.jl")
     include("test_ray.jl")
+    include("test_dda.jl")
+    include("test_node_dda.jl")
     include("test_render.jl")
     include("test_integration.jl")
     include("test_parser_equivalence.jl")
