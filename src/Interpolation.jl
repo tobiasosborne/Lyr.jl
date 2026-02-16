@@ -1,21 +1,23 @@
 # Interpolation.jl - Sampling and gradient computation
 
+# --- SVec3d primary methods ---
+
 """
-    sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64}) -> T
+    sample_nearest(tree::Tree{T}, ijk::SVec3d) -> T
 
 Sample the tree using nearest-neighbor interpolation.
 """
-function sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64})::T where T
+function sample_nearest(tree::Tree{T}, ijk::SVec3d)::T where T
     c = coord(round(Int32, ijk[1]), round(Int32, ijk[2]), round(Int32, ijk[3]))
     get_value(tree, c)
 end
 
 """
-    sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64}) -> T
+    sample_trilinear(tree::Tree{T}, ijk::SVec3d) -> T
 
 Sample the tree using trilinear interpolation.
 """
-function sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64})::T where T
+function sample_trilinear(tree::Tree{T}, ijk::SVec3d)::T where T
     # Get the base integer coordinates (Int64 to avoid overflow on +1)
     i0 = floor(Int64, ijk[1])
     j0 = floor(Int64, ijk[2])
@@ -51,6 +53,39 @@ function sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64})::T where T
     _lerp3(v000, v100, v010, v110, v001, v101, v011, v111, T(u), T(v), T(w))
 end
 
+"""
+    sample_world(grid::Grid{T}, xyz::SVec3d; method::Symbol=:trilinear) -> T
+
+Sample the grid at world coordinates.
+
+# Arguments
+- `grid::Grid{T}` - The grid to sample
+- `xyz::SVec3d` - World coordinates
+- `method::Symbol` - Interpolation method (:nearest or :trilinear)
+"""
+function sample_world(grid::Grid{T}, xyz::SVec3d; method::Symbol=:trilinear)::T where T
+    ijk = world_to_index_float(grid.transform, xyz)
+
+    if method == :nearest
+        sample_nearest(grid.tree, ijk)
+    else
+        sample_trilinear(grid.tree, ijk)
+    end
+end
+
+# --- NTuple wrappers for backward compatibility ---
+
+sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
+    sample_nearest(tree, SVec3d(ijk...))
+
+sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
+    sample_trilinear(tree, SVec3d(ijk...))
+
+sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}; method::Symbol=:trilinear) where T =
+    sample_world(grid, SVec3d(xyz...); method=method)
+
+# --- Internal helpers (unchanged) ---
+
 # Check if a value equals ±background (for boundary detection)
 _is_background(val::T, bg::T) where {T <: AbstractFloat} = (val == bg) || (val == -bg)
 _is_background(val::NTuple{N,T}, bg::NTuple{N,T}) where {N, T <: AbstractFloat} = (val == bg)
@@ -73,26 +108,6 @@ function _lerp3(v000::NTuple{N, T}, v100::NTuple{N, T}, v010::NTuple{N, T}, v110
                 v001::NTuple{N, T}, v101::NTuple{N, T}, v011::NTuple{N, T}, v111::NTuple{N, T},
                 u::T, v::T, w::T)::NTuple{N, T} where {N, T <: AbstractFloat}
     ntuple(i -> _lerp3(v000[i], v100[i], v010[i], v110[i], v001[i], v101[i], v011[i], v111[i], u, v, w), Val(N))
-end
-
-"""
-    sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}; method::Symbol=:trilinear) -> T
-
-Sample the grid at world coordinates.
-
-# Arguments
-- `grid::Grid{T}` - The grid to sample
-- `xyz::NTuple{3, Float64}` - World coordinates
-- `method::Symbol` - Interpolation method (:nearest or :trilinear)
-"""
-function sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}; method::Symbol=:trilinear)::T where T
-    ijk = world_to_index_float(grid.transform, xyz)
-
-    if method == :nearest
-        sample_nearest(grid.tree, ijk)
-    else
-        sample_trilinear(grid.tree, ijk)
-    end
 end
 
 """
