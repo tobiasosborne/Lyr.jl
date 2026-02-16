@@ -55,7 +55,7 @@ using Lyr
 
             # Center ray should point along forward direction
             center_ray = camera_ray(cam, 0.5, 0.5, 1.0)
-            @test center_ray.origin == cam.position
+            @test center_ray.origin == SVec3d(cam.position...)
 
             # Center ray should be parallel to forward
             cross_x = center_ray.direction[2]*cam.forward[3] - center_ray.direction[3]*cam.forward[2]

@@ -5,8 +5,8 @@
 
         ray = Ray(origin, direction)
 
-        @test ray.origin == origin
-        @test ray.direction == direction
+        @test ray.origin == SVec3d(origin...)
+        @test ray.direction == SVec3d(direction...)
         @test ray.inv_dir[1] == 1.0
         @test isinf(ray.inv_dir[2])
         @test isinf(ray.inv_dir[3])
@@ -18,7 +18,7 @@
 
         ray = Ray(origin, direction)
 
-        @test ray.direction == (1.0, 0.0, 0.0)
+        @test ray.direction == SVec3d(1.0, 0.0, 0.0)
     end
 
     @testset "intersect_bbox hit through center" begin

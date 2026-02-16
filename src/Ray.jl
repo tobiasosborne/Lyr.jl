@@ -6,35 +6,43 @@
 A ray defined by origin and direction.
 
 # Fields
-- `origin::NTuple{3, Float64}` - Ray origin
-- `direction::NTuple{3, Float64}` - Ray direction (normalized)
-- `inv_dir::NTuple{3, Float64}` - Precomputed inverse direction
+- `origin::SVec3d` - Ray origin
+- `direction::SVec3d` - Ray direction (normalized)
+- `inv_dir::SVec3d` - Precomputed inverse direction
 """
 struct Ray
-    origin::NTuple{3, Float64}
-    direction::NTuple{3, Float64}
-    inv_dir::NTuple{3, Float64}
+    origin::SVec3d
+    direction::SVec3d
+    inv_dir::SVec3d
 end
 
 """
-    Ray(origin::NTuple{3, Float64}, direction::NTuple{3, Float64}) -> Ray
+    _safe_inv_dir(dir::SVec3d) -> SVec3d
 
-Construct a ray from origin and direction. Direction is normalized.
+Compute inverse direction with copysign(Inf) for zero components.
 """
-function Ray(origin::NTuple{3, Float64}, direction::NTuple{3, Float64})
-    # Normalize direction
-    len = sqrt(direction[1]^2 + direction[2]^2 + direction[3]^2)
-    dir = (direction[1] / len, direction[2] / len, direction[3] / len)
-
-    # Compute inverse direction (handle zeros carefully)
-    inv_dir = (
+function _safe_inv_dir(dir::SVec3d)::SVec3d
+    SVec3d(
         dir[1] == 0.0 ? copysign(Inf, dir[1]) : 1.0 / dir[1],
         dir[2] == 0.0 ? copysign(Inf, dir[2]) : 1.0 / dir[2],
         dir[3] == 0.0 ? copysign(Inf, dir[3]) : 1.0 / dir[3]
     )
-
-    Ray(origin, dir, inv_dir)
 end
+
+"""
+    Ray(origin::SVec3d, direction::SVec3d) -> Ray
+
+Construct a ray from origin and direction. Direction is normalized.
+"""
+function Ray(origin::SVec3d, direction::SVec3d)
+    len = sqrt(direction[1]^2 + direction[2]^2 + direction[3]^2)
+    dir = direction / len
+    Ray(origin, dir, _safe_inv_dir(dir))
+end
+
+# Convenience: construct from NTuples
+Ray(origin::NTuple{3, Float64}, direction::NTuple{3, Float64}) =
+    Ray(SVec3d(origin...), SVec3d(direction...))
 
 """
     intersect_bbox(ray::Ray, bbox::BBox) -> Union{Tuple{Float64, Float64}, Nothing}
@@ -43,27 +51,18 @@ Compute ray-box intersection using the slab method.
 Returns (t_enter, t_exit) or `nothing` if no intersection.
 """
 function intersect_bbox(ray::Ray, bbox::BBox)::Union{Tuple{Float64, Float64}, Nothing}
-    # Convert bbox coords to Float64
-    bmin = (Float64(bbox.min[1]), Float64(bbox.min[2]), Float64(bbox.min[3]))
-    bmax = (Float64(bbox.max[1]), Float64(bbox.max[2]), Float64(bbox.max[3]))
+    bmin = SVec3d(Float64(bbox.min[1]), Float64(bbox.min[2]), Float64(bbox.min[3]))
+    bmax = SVec3d(Float64(bbox.max[1]), Float64(bbox.max[2]), Float64(bbox.max[3]))
 
-    # Compute intersections with each slab
-    t1 = (bmin[1] - ray.origin[1]) * ray.inv_dir[1]
-    t2 = (bmax[1] - ray.origin[1]) * ray.inv_dir[1]
-    tmin = min(t1, t2)
-    tmax = max(t1, t2)
+    t1 = (bmin - ray.origin) .* ray.inv_dir
+    t2 = (bmax - ray.origin) .* ray.inv_dir
 
-    t1 = (bmin[2] - ray.origin[2]) * ray.inv_dir[2]
-    t2 = (bmax[2] - ray.origin[2]) * ray.inv_dir[2]
-    tmin = max(tmin, min(t1, t2))
-    tmax = min(tmax, max(t1, t2))
+    tmin_v = min.(t1, t2)
+    tmax_v = max.(t1, t2)
 
-    t1 = (bmin[3] - ray.origin[3]) * ray.inv_dir[3]
-    t2 = (bmax[3] - ray.origin[3]) * ray.inv_dir[3]
-    tmin = max(tmin, min(t1, t2))
-    tmax = min(tmax, max(t1, t2))
+    tmin = maximum(tmin_v)
+    tmax = minimum(tmax_v)
 
-    # Check if valid intersection
     if tmax >= max(tmin, 0.0)
         return (max(tmin, 0.0), tmax)
     end
