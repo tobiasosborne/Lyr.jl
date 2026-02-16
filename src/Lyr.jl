@@ -1,5 +1,12 @@
 module Lyr
 
+using StaticArrays
+
+# Static array type aliases for 3D math
+const SVec3f = SVector{3, Float32}
+const SVec3d = SVector{3, Float64}
+const SMat3d = SMatrix{3, 3, Float64, 9}
+
 # Exceptions (must be first for other modules to use)
 include("Exceptions.jl")
 
@@ -100,6 +107,9 @@ export LyrError, ParseError, CompressionError
 export InvalidMagicError
 export ChunkSizeMismatchError, CompressionBoundsError, DecompressionSizeError
 export ValueCountError
+
+# Exports - Static Arrays
+export SVec3f, SVec3d, SMat3d
 
 # Exports - Render
 export Camera, camera_ray

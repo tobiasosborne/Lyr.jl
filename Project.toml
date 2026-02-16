@@ -6,6 +6,7 @@ authors = ["Lyr.jl Contributors"]
 [deps]
 Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 BenchmarkTools = "1.6"
@@ -16,6 +17,7 @@ Debugger = "0.7.16"
 Infiltrator = "1.9.7"
 JET = "0.11"
 PropCheck = "0.10"
+StaticArrays = "1"
 julia = "1.9"
 
 [extras]
