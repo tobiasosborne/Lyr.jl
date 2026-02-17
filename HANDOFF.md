@@ -2,34 +2,81 @@
 
 ---
 
-## Latest Session (2026-02-16) — DDA ray traversal (Phase 1.2)
+## Latest Session (2026-02-17) — VolumeRayIntersector + housekeeping
 
-**Status**: 🟢 COMPLETE — 3 issues closed, 1246 tests pass
+**Status**: 🟢 COMPLETE — 6 issues closed, 1342 tests pass
 
 ### What Was Done
 
 | # | ID | P | Type | What |
 |---|-----|---|------|------|
-| 1 | `bcba` | P1 | task | AABB struct (SVec3d min/max), refactored `intersect_bbox` to AABB primary + BBox overload. 12 new tests. |
-| 2 | `lmzm` | P1 | feature | Amanatides-Woo 3D-DDA in `src/DDA.jl`: `DDAState`, `dda_init`, `dda_step!`. 112 new tests. |
-| 3 | `p7md` | P1 | feature | Node-level DDA: `NodeDDA`, `node_dda_init`, `node_dda_child_index`, `node_dda_inside`, `node_dda_voxel_origin`. 57 new tests. |
+| 1 | `9ysk` | P1 | feature | `VolumeRayIntersector{T}` — lazy front-to-back leaf iterator via explicit state machine (3-phase: I1 DDA → I2 DDA → root advance). 57 new tests. |
+| 2 | `ck6p` | P3 | feature | Closed as done — hierarchical DDA already implemented in previous sessions (`gduf`). |
+| 3 | `ydx` | P3 | feature | Closed as duplicate of `ck6p`/`9ysk` — DDA tree traversal for level set ray marching. |
+| 4 | `m647` | P3 | task | Closed as done — `intersect_leaves` with populated trees tested in `test_volume_ray_intersector.jl`. |
+| 5 | `tyk7` | P3 | task | Closed as done — unsupported grid types (PointDataIndex32) already skip gracefully in `File.jl` and `GridDescriptor.jl`. |
+| 6 | `gim` | P3 | task | Closed as done — `.claude/` directory already deleted. |
+
+### Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `src/DDA.jl` | Added `VolumeRayIntersector{T}`, `VRIState{T}`, `Base.iterate` (2 methods), `_vri_advance` helper |
+| `src/Lyr.jl` | Added `VolumeRayIntersector` to exports |
+| `test/test_volume_ray_intersector.jl` | **NEW** — 10 test cases (57 assertions): empty tree, traits, DDA equivalence on cube+sphere, brute-force equivalence, laziness, ordering, miss, types, for-loop |
+| `test/runtests.jl` | Include `test_volume_ray_intersector.jl` |
+
+### Phase 1.2 Status: DDA Ray Traversal — COMPLETE
+
+All 8 issues in the chain are now closed:
+```
+✅ avxb  New Ray type with SVector
+  ✅ bcba  AABB-ray slab intersection
+    ✅ lmzm  3D-DDA stepper (Amanatides-Woo)
+      ✅ p7md  Node-level DDA
+        ✅ gduf  Hierarchical DDA (Root→I2→I1→Leaf)
+          ✅ 9ysk  VolumeRayIntersector iterator    ← this session
+            ○ tzw5  Level set surface finding         ← NEXT
+              ○ ay5g  Replace sphere_trace
+```
+
+### Next Priority
+
+1. **`tzw5`** — Level set surface finding: DDA + per-voxel zero crossing (next in Phase 1.2)
+2. **`ay5g`** — Replace sphere_trace with DDA-based implementation (final Phase 1.2)
+3. **`i70d`** — Design NanoVDB flat layout (Phase 1.3 entry point)
+
+### Beads Note
+
+Beads database was reinitialized this session (`bd init --from-jsonl` after restoring `.beads/` files from git). 307 issues recovered (59 open, 248 closed). Prefix is mixed (`ly-` / `path-tracer-`) — run `bd rename-prefix --repair` if needed.
+
+---
+
+## Previous Session (2026-02-16) — Hierarchical DDA + DDA foundation
+
+**Status**: 🟢 COMPLETE — 4 issues closed, 1285 tests pass
+
+### What Was Done
+
+| # | ID | P | Type | What |
+|---|-----|---|------|------|
+| 1 | `gduf` | P1 | feature | Hierarchical DDA: `intersect_leaves_dda` — Root → I2 → I1 → Leaf traversal. 88 new tests. |
+| 2 | `bcba` | P1 | task | AABB struct (SVec3d min/max), refactored `intersect_bbox` to AABB primary + BBox overload. 12 new tests. |
+| 3 | `lmzm` | P1 | feature | Amanatides-Woo 3D-DDA in `src/DDA.jl`: `DDAState`, `dda_init`, `dda_step!`. 112 new tests. |
+| 4 | `p7md` | P1 | feature | Node-level DDA: `NodeDDA`, `node_dda_init`, `node_dda_child_index`, `node_dda_inside`, `node_dda_voxel_origin`. 57 new tests. |
 
 ### Files Modified/Created
 
 | File | Change |
 |------|--------|
 | `src/Ray.jl` | Added `AABB` struct + `BBox` converter; refactored `intersect_bbox` to use AABB |
-| `src/DDA.jl` | **NEW** — DDA stepper + NodeDDA (node-level traversal) |
+| `src/DDA.jl` | **NEW** — DDA stepper + NodeDDA + hierarchical traversal |
 | `src/Lyr.jl` | Include DDA.jl; export AABB + DDA symbols |
 | `test/test_ray.jl` | +12 AABB tests |
 | `test/test_dda.jl` | **NEW** — 112 DDA tests |
 | `test/test_node_dda.jl` | **NEW** — 57 NodeDDA tests |
-| `test/runtests.jl` | Include test_dda.jl, test_node_dda.jl |
-
-### Next Priority
-
-1. **`gduf`** — Hierarchical DDA: compose Root → I2 → I1 → Leaf traversal (next in Phase 1.2 chain)
-2. **`i70d`** — Design NanoVDB flat layout (Phase 1.3 entry point, parallelizable)
+| `test/test_hierarchical_dda.jl` | **NEW** — 88 hierarchical DDA tests |
+| `test/runtests.jl` | Include new test files |
 
 ---
 
