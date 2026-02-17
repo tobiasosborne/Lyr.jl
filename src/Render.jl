@@ -67,64 +67,18 @@ end
 """
     sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int) -> Union{Tuple{NTuple{3, Float64}, NTuple{3, Float64}}, Nothing}
 
-Sphere trace along a ray through a level set grid.
-Returns (hit_point, normal) or nothing if no hit.
+Find the first surface intersection along a ray through a level set grid.
+Returns `(hit_point, normal)` as `NTuple{3,Float64}` tuples, or `nothing`.
 
-For level sets, the value at each point is the signed distance to the surface.
-We step by this distance until we're close enough to the surface.
+Delegates to `find_surface` (DDA + zero-crossing bisection). The `max_steps`
+and `world_bounds` parameters are retained for API compatibility but ignored —
+DDA terminates by geometry, not by step count.
 """
 function sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int;
-                      world_bounds::Union{Nothing, Tuple{NTuple{3,Float64}, NTuple{3,Float64}}}=nothing) where T <: AbstractFloat
-    # Get grid bounds for early termination
-    if world_bounds !== nothing
-        world_min, world_max = world_bounds
-    else
-        bbox = active_bounding_box(grid.tree)
-        if bbox === nothing
-            return nothing
-        end
-        world_min = index_to_world(grid.transform, bbox.min)
-        world_max = index_to_world(grid.transform, bbox.max)
-    end
-
-    # Ray-box intersection in world space (float coordinates)
-    t_enter, t_exit = _intersect_float_bbox(ray, world_min, world_max)
-
-    if t_enter > t_exit || t_exit < 0.0
-        return nothing
-    end
-
-    # Start at entry point (or ray origin if inside box)
-    t = max(t_enter, 0.001)
-    vs = voxel_size(grid.transform)[1]  # Get scalar voxel size
-    background = Float64(grid.tree.background)
-
-    # Surface threshold — within half a voxel (SDF values are in world units)
-    threshold = vs * 0.5
-
-    for _ in 1:max_steps
-        if t > t_exit + background
-            return nothing
-        end
-
-        point = _ray_at(ray, t)
-        dist = _safe_sample(grid, point, background)
-
-        # Check if we hit the surface
-        if abs(dist) < threshold
-            normal = _estimate_normal(grid, point, vs)
-            return (point, normal)
-        end
-
-        # Sphere tracing: step by SDF distance, clamped conservatively
-        # Never step more than 1 voxel when near or at background
-        # (trilinear can corrupt values at node boundaries → wrong large distances)
-        step = min(abs(dist), vs * 2.0)
-        step = max(step, vs * 0.1)
-        t += step
-    end
-
-    nothing
+                      world_bounds=nothing) where T <: AbstractFloat
+    hit = find_surface(ray, grid)
+    hit === nothing && return nothing
+    (Tuple(hit.position), Tuple(hit.normal))
 end
 
 """
@@ -305,14 +259,6 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
     # Normalize light direction
     light = _normalize(light_dir)
 
-    # Pre-compute world bounds once (active_bounding_box is O(active_voxels))
-    bbox = active_bounding_box(grid.tree)
-    wb = if bbox !== nothing
-        (index_to_world(grid.transform, bbox.min), index_to_world(grid.transform, bbox.max))
-    else
-        nothing
-    end
-
     for y in 1:height
         for x in 1:width
             # Convert pixel to normalized coordinates
@@ -321,11 +267,10 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
             v = 1.0 - (Float64(y) - 0.5) / Float64(height)
 
             ray = camera_ray(camera, u, v, aspect)
-            result = sphere_trace(ray, grid, max_steps; world_bounds=wb)
+            hit = find_surface(ray, grid)
 
-            if result !== nothing
-                _, normal = result
-                intensity = shade(normal, light)
+            if hit !== nothing
+                intensity = shade(Tuple(hit.normal), light)
                 pixels[y, x] = (intensity, intensity, intensity)
             else
                 pixels[y, x] = background

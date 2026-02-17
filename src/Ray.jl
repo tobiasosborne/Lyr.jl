@@ -119,68 +119,11 @@ end
 
 Return all leaves the ray passes through, sorted by entry time.
 Each `LeafIntersection{T}` contains `t_enter`, `t_exit`, and `leaf` fields.
+
+Implemented via `VolumeRayIntersector` (hierarchical DDA). Results are
+equivalent to the old brute-force implementation but O(leaves_hit) instead
+of O(all_leaves).
 """
 function intersect_leaves(ray::Ray, tree::Tree{T}) where T
-    # Collect all leaf intersections
-    intersections = LeafIntersection{T}[]
-
-    for (_, entry) in tree.table
-        if entry isa InternalNode2{T}
-            _intersect_internal2!(intersections, ray, entry)
-        end
-    end
-
-    # Sort by entry time
-    sort!(intersections, by=x -> x.t_enter)
-
-    intersections
-end
-
-function _intersect_internal2!(intersections::Vector{LeafIntersection{T}}, ray::Ray, node::InternalNode2{T}) where T
-    # Check if ray intersects this node's bounding box
-    node_size = Int32(4096)  # 8 * 16 * 32
-    bbox = BBox(node.origin, Coord(node.origin[1] + node_size - Int32(1),
-                                    node.origin[2] + node_size - Int32(1),
-                                    node.origin[3] + node_size - Int32(1)))
-
-    if intersect_bbox(ray, bbox) === nothing
-        return
-    end
-
-    # Check children
-    for (i, _) in enumerate(on_indices(node.child_mask))
-        child = node.table[i]::InternalNode1{T}
-        _intersect_internal1!(intersections, ray, child)
-    end
-end
-
-function _intersect_internal1!(intersections::Vector{LeafIntersection{T}}, ray::Ray, node::InternalNode1{T}) where T
-    # Check if ray intersects this node's bounding box
-    node_size = Int32(128)  # 8 * 16
-    bbox = BBox(node.origin, Coord(node.origin[1] + node_size - Int32(1),
-                                    node.origin[2] + node_size - Int32(1),
-                                    node.origin[3] + node_size - Int32(1)))
-
-    if intersect_bbox(ray, bbox) === nothing
-        return
-    end
-
-    # Check leaves
-    for (i, _) in enumerate(on_indices(node.child_mask))
-        leaf = node.table[i]::LeafNode{T}
-        _intersect_leaf!(intersections, ray, leaf)
-    end
-end
-
-function _intersect_leaf!(intersections::Vector{LeafIntersection{T}}, ray::Ray, leaf::LeafNode{T}) where T
-    leaf_size = Int32(8)
-    bbox = BBox(leaf.origin, Coord(leaf.origin[1] + leaf_size - Int32(1),
-                                    leaf.origin[2] + leaf_size - Int32(1),
-                                    leaf.origin[3] + leaf_size - Int32(1)))
-
-    result = intersect_bbox(ray, bbox)
-    if result !== nothing
-        t_enter, t_exit = result
-        push!(intersections, LeafIntersection{T}(t_enter, t_exit, leaf))
-    end
+    collect(VolumeRayIntersector(tree, ray))
 end

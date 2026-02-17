@@ -103,6 +103,24 @@
         @test isempty(intersections)
     end
 
+    @testset "intersect_leaves matches intersect_leaves_dda" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if isfile(cube_path)
+            tree = parse_vdb(cube_path).grids[1].tree
+            ray = Ray((-20.0, 4.0, 4.0), (1.0, 0.0, 0.0))
+
+            hits = intersect_leaves(ray, tree)
+            ref  = intersect_leaves_dda(ray, tree)
+
+            @test length(hits) == length(ref)
+            for (h, r) in zip(hits, ref)
+                @test h.leaf.origin == r.leaf.origin
+                @test h.t_enter ≈ r.t_enter atol=1e-10
+                @test h.t_exit  ≈ r.t_exit  atol=1e-10
+            end
+        end
+    end
+
     @testset "AABB construction" begin
         aabb = AABB(SVec3d(0.0, 0.0, 0.0), SVec3d(1.0, 1.0, 1.0))
         @test aabb.min == SVec3d(0.0, 0.0, 0.0)

@@ -144,11 +144,6 @@ using Lyr
     end
 
     @testset "Sphere Tracing" begin
-        # Note: These sample VDB files are sparse narrow-band level sets
-        # that only store values very close to the surface boundary.
-        # Sphere tracing requires dense SDF coverage, so we test the
-        # infrastructure rather than expecting surface hits on these files.
-
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
 
         if isfile(cube_path)
@@ -156,17 +151,62 @@ using Lyr
             grid = vdb.grids[1]
 
             @testset "sphere_trace returns nothing for miss" begin
-                # Ray pointing away from the grid
                 ray = Ray((100.0, 100.0, 100.0), (1.0, 0.0, 0.0))
                 result = sphere_trace(ray, grid, 100)
                 @test result === nothing
             end
 
             @testset "sphere_trace handles rays outside grid" begin
-                # Ray that doesn't intersect the bounding box at all
                 ray = Ray((1000.0, 1000.0, 1000.0), (1.0, 1.0, 1.0))
                 result = sphere_trace(ray, grid, 100)
                 @test result === nothing
+            end
+        end
+
+        sphere_path = joinpath(@__DIR__, "fixtures", "samples", "sphere.vdb")
+
+        if isfile(sphere_path)
+            vdb = parse_vdb(sphere_path)
+            grid = vdb.grids[1]
+
+            @testset "sphere_trace hits sphere.vdb" begin
+                # sphere.vdb has radius ~20 voxels, voxel_size ~0.1
+                ray = Ray(SVec3d(-50.0, 0.0, 0.0), SVec3d(1.0, 0.0, 0.0))
+                result = sphere_trace(ray, grid, 500)
+
+                @test result !== nothing
+                if result !== nothing
+                    point, normal = result
+                    @test point isa NTuple{3, Float64}
+                    @test normal isa NTuple{3, Float64}
+                    # Hit on near side — x < 0
+                    @test point[1] < 0.0
+                    # Outward normal opposes ray direction
+                    @test normal[1] < -0.5
+                    # Unit normal
+                    len = sqrt(normal[1]^2 + normal[2]^2 + normal[3]^2)
+                    @test len ≈ 1.0 atol=1e-6
+                end
+            end
+
+            @testset "sphere_trace miss — ray above sphere" begin
+                ray = Ray(SVec3d(-50.0, 100.0, 0.0), SVec3d(1.0, 0.0, 0.0))
+                result = sphere_trace(ray, grid, 500)
+                @test result === nothing
+            end
+
+            @testset "sphere_trace max_steps ignored — DDA has no step limit" begin
+                # max_steps is kept for API compat but DDA terminates by geometry
+                ray = Ray(SVec3d(-50.0, 0.0, 0.0), SVec3d(1.0, 0.0, 0.0))
+                result_small = sphere_trace(ray, grid, 1)    # would fail old sphere tracer
+                result_large = sphere_trace(ray, grid, 10000)
+                # Both should give same result — DDA is geometry-driven
+                @test (result_small === nothing) == (result_large === nothing)
+                if result_small !== nothing && result_large !== nothing
+                    p1, _ = result_small
+                    p2, _ = result_large
+                    @test p1[1] ≈ p2[1] atol=1e-10
+                end
             end
         end
     end

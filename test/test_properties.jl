@@ -188,6 +188,7 @@
             gen = PropCheck.interleave(itype(Float32), coord_gen())
 
             result = check(gen) do (bg, c)
+                isnan(bg) && return true  # NaN == NaN is false by IEEE 754
                 tree = RootNode{Float32}(bg, Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}())
                 get_value(tree, c) == bg && is_active(tree, c) == false
             end
