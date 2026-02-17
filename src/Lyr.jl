@@ -38,6 +38,7 @@ include("Interpolation.jl")
 include("Ray.jl")
 include("DDA.jl")
 include("Render.jl")
+include("Surface.jl")
 
 # TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
 include("TinyVDB/TinyVDB.jl")
@@ -122,5 +123,8 @@ export SVec3f, SVec3d, SMat3d
 export Camera, camera_ray
 export sphere_trace, shade
 export render_image, write_ppm
+
+# Exports - Surface
+export SurfaceHit, find_surface
 
 end # module
