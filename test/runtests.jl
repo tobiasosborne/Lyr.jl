@@ -23,6 +23,7 @@ using Cthulhu
     include("test_dda.jl")
     include("test_node_dda.jl")
     include("test_hierarchical_dda.jl")
+    include("test_volume_ray_intersector.jl")
     include("test_render.jl")
     include("test_integration.jl")
     include("test_parser_equivalence.jl")

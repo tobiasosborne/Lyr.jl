@@ -278,3 +278,162 @@ function _dda_leaf!(results::Vector{LeafIntersection{T}}, ray::Ray,
         push!(results, LeafIntersection{T}(t_enter, t_exit, leaf))
     end
 end
+
+# --- VolumeRayIntersector: Lazy front-to-back leaf iteration ---
+
+"""
+    VolumeRayIntersector{T}
+
+Lazy iterator yielding `LeafIntersection{T}` in front-to-back order via
+hierarchical DDA traversal. Implements `Base.iterate` for use in for-loops
+and with `first`, `collect`, etc.
+
+Unlike `intersect_leaves_dda` which eagerly collects all hits, this iterator
+yields one hit at a time, enabling early termination without allocating the
+full result set.
+
+# Example
+```julia
+for hit in VolumeRayIntersector(tree, ray)
+    # process hit.leaf, hit.t_enter, hit.t_exit
+end
+```
+"""
+struct VolumeRayIntersector{T}
+    tree::Tree{T}
+    ray::Ray
+end
+
+Base.IteratorSize(::Type{<:VolumeRayIntersector}) = Base.SizeUnknown()
+Base.eltype(::Type{VolumeRayIntersector{T}}) where T = LeafIntersection{T}
+
+"""
+    VRIState{T}
+
+Mutable state for the `VolumeRayIntersector` state machine.
+Tracks position at root, I2 (NodeDDA over 32³ grid), and I1 (NodeDDA over 16³ grid)
+levels of the hierarchical DDA traversal.
+"""
+mutable struct VRIState{T}
+    roots::Vector{Tuple{Float64, InternalNode2{T}}}
+    root_idx::Int
+    i2_ndda::Union{NodeDDA, Nothing}
+    i2_node::Union{InternalNode2{T}, Nothing}
+    i1_ndda::Union{NodeDDA, Nothing}
+    i1_node::Union{InternalNode1{T}, Nothing}
+end
+
+function Base.iterate(vri::VolumeRayIntersector{T}) where T
+    ray = vri.ray
+    roots = Tuple{Float64, InternalNode2{T}}[]
+
+    for (_, entry) in vri.tree.table
+        if entry isa InternalNode2{T}
+            o = entry.origin
+            aabb = AABB(
+                SVec3d(Float64(o[1]), Float64(o[2]), Float64(o[3])),
+                SVec3d(Float64(o[1]) + 4096.0, Float64(o[2]) + 4096.0, Float64(o[3]) + 4096.0)
+            )
+            hit = intersect_bbox(ray, aabb)
+            if hit !== nothing
+                push!(roots, (hit[1], entry))
+            end
+        end
+    end
+
+    sort!(roots, by=first)
+    isempty(roots) && return nothing
+
+    state = VRIState{T}(roots, 0, nothing, nothing, nothing, nothing)
+    _vri_advance(ray, state)
+end
+
+function Base.iterate(vri::VolumeRayIntersector{T}, state::VRIState{T}) where T
+    _vri_advance(vri.ray, state)
+end
+
+"""
+    _vri_advance(ray::Ray, state::VRIState{T}) -> Union{Tuple{LeafIntersection{T}, VRIState{T}}, Nothing}
+
+Advance the VRI state machine to the next leaf intersection.
+
+State machine phases:
+1. Drain current I1 DDA for leaf hits
+2. Step I2 DDA to find next I1 child with AABB hit
+3. Advance to next pre-sorted root entry
+"""
+function _vri_advance(ray::Ray, state::VRIState{T})::Union{Tuple{LeafIntersection{T}, VRIState{T}}, Nothing} where T
+    while true
+        # Phase 1: Drain current I1 DDA for leaf hits
+        while state.i1_ndda !== nothing && node_dda_inside(state.i1_ndda)
+            ndda = state.i1_ndda
+            child_idx = node_dda_child_index(ndda)
+
+            if is_on(state.i1_node.child_mask, child_idx)
+                table_idx = count_on_before(state.i1_node.child_mask, child_idx) + 1
+                leaf = state.i1_node.table[table_idx]::LeafNode{T}
+
+                o = leaf.origin
+                s = Int32(8)
+                bbox = BBox(o, Coord(o[1] + s - Int32(1), o[2] + s - Int32(1), o[3] + s - Int32(1)))
+                hit = intersect_bbox(ray, bbox)
+
+                if hit !== nothing
+                    t_enter, t_exit = hit
+                    dda_step!(ndda.state)
+                    return (LeafIntersection{T}(t_enter, t_exit, leaf), state)
+                end
+            end
+
+            dda_step!(ndda.state)
+        end
+        state.i1_ndda = nothing
+        state.i1_node = nothing
+
+        # Phase 2: Step I2 DDA to find next I1 child with AABB hit
+        found_i1 = false
+        while state.i2_ndda !== nothing && node_dda_inside(state.i2_ndda)
+            ndda = state.i2_ndda
+            child_idx = node_dda_child_index(ndda)
+
+            if is_on(state.i2_node.child_mask, child_idx)
+                table_idx = count_on_before(state.i2_node.child_mask, child_idx) + 1
+                i1_node = state.i2_node.table[table_idx]::InternalNode1{T}
+
+                o = i1_node.origin
+                aabb = AABB(
+                    SVec3d(Float64(o[1]), Float64(o[2]), Float64(o[3])),
+                    SVec3d(Float64(o[1]) + 128.0, Float64(o[2]) + 128.0, Float64(o[3]) + 128.0)
+                )
+                hit = intersect_bbox(ray, aabb)
+
+                if hit !== nothing
+                    tmin, _ = hit
+                    state.i1_ndda = node_dda_init(ray, tmin, o, Int32(16), Int32(8))
+                    state.i1_node = i1_node
+                    dda_step!(ndda.state)
+                    found_i1 = true
+                    break
+                end
+            end
+
+            dda_step!(ndda.state)
+        end
+
+        if found_i1
+            continue  # Back to Phase 1
+        end
+
+        state.i2_ndda = nothing
+        state.i2_node = nothing
+
+        # Phase 3: Advance to next pre-sorted root entry
+        state.root_idx += 1
+        state.root_idx > length(state.roots) && return nothing
+
+        tmin, i2_node = state.roots[state.root_idx]
+        o = i2_node.origin
+        state.i2_ndda = node_dda_init(ray, tmin, o, Int32(32), Int32(128))
+        state.i2_node = i2_node
+    end
+end
