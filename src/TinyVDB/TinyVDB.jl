@@ -57,8 +57,10 @@ export LeafNodeData, InternalNodeData, RootNodeData
 export LOG2DIM_LEAF, LOG2DIM_I1, LOG2DIM_I2
 export read_leaf_topology, read_internal_topology, read_root_topology
 
-# Values
-export NO_MASK_OR_INACTIVE_VALS, NO_MASK_AND_ONE_INACTIVE_VAL, NO_MASK_AND_ALL_VALS
+# Values - per_node_flag constants (must match tinyvdbio.h enum)
+export NO_MASK_OR_INACTIVE_VALS, NO_MASK_AND_MINUS_BG, NO_MASK_AND_ONE_INACTIVE_VAL
+export MASK_AND_NO_INACTIVE_VALS, MASK_AND_ONE_INACTIVE_VAL, MASK_AND_TWO_INACTIVE_VALS
+export NO_MASK_AND_ALL_VALS
 export read_leaf_values, read_internal_values, read_tree_values
 
 # Parser

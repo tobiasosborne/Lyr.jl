@@ -104,7 +104,13 @@ function read_mask(bytes::Vector{UInt8}, pos::Int, log2dim::Int32)::Tuple{NodeMa
     word_count = (1 << (3 * log2dim)) >> 6
     words = Vector{UInt64}(undef, word_count)
 
-    @inbounds for i in 1:word_count
+    # Bounds check before reading
+    bytes_needed = word_count * 8
+    if pos + bytes_needed - 1 > length(bytes)
+        error("read_mask: bounds error at pos=$pos, need $bytes_needed bytes, have $(length(bytes) - pos + 1)")
+    end
+
+    for i in 1:word_count
         word, pos = read_u64(bytes, pos)
         words[i] = word
     end
