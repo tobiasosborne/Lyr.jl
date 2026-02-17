@@ -2,53 +2,79 @@
 
 ---
 
-## Latest Session (2026-02-17) — VolumeRayIntersector + housekeeping
+## Latest Session (2026-02-17) — DDA renderer complete + beads housekeeping
 
-**Status**: 🟢 COMPLETE — 6 issues closed, 1342 tests pass
+**Status**: 🟢 COMPLETE — 9 issues closed, 4 new issues created, 1390 tests pass
 
 ### What Was Done
 
 | # | ID | P | Type | What |
 |---|-----|---|------|------|
-| 1 | `9ysk` | P1 | feature | `VolumeRayIntersector{T}` — lazy front-to-back leaf iterator via explicit state machine (3-phase: I1 DDA → I2 DDA → root advance). 57 new tests. |
-| 2 | `ck6p` | P3 | feature | Closed as done — hierarchical DDA already implemented in previous sessions (`gduf`). |
-| 3 | `ydx` | P3 | feature | Closed as duplicate of `ck6p`/`9ysk` — DDA tree traversal for level set ray marching. |
-| 4 | `m647` | P3 | task | Closed as done — `intersect_leaves` with populated trees tested in `test_volume_ray_intersector.jl`. |
-| 5 | `tyk7` | P3 | task | Closed as done — unsupported grid types (PointDataIndex32) already skip gracefully in `File.jl` and `GridDescriptor.jl`. |
-| 6 | `gim` | P3 | task | Closed as done — `.claude/` directory already deleted. |
+| 1 | `ay5g` | P1 | task | Replace `intersect_leaves` (brute-force O(all_leaves)) with `collect(VolumeRayIntersector(...))` (DDA O(leaves_hit)). Make `sphere_trace` delegate to `find_surface`. Update `render_image` to call `find_surface` directly, removing stale world-bounds pre-computation. −100 LOC. |
+| 2 | `9ysk` | P1 | feature | Closed stale — `VolumeRayIntersector` already implemented in commit `15c9d90`. |
+| 3 | `tzw5` | P1 | feature | Closed stale — `find_surface` already implemented in commit `476e6c4` (`src/Surface.jl`). |
+| 4 | `ck6p` | P3 | feature | Closed stale — superseded by `gduf`/`9ysk`. |
+| 5 | `ydx` | P3 | feature | Closed stale — duplicate. |
+| 6 | `m647` | P3 | task | Closed stale — already tested in `test_volume_ray_intersector.jl`. |
+| 7 | `tyk7` | P3 | task | Closed stale — handled in `File.jl`. |
+| 8 | `gim` | P3 | task | Closed stale — `.claude/` is hook-managed. |
+| 9 | NaN guard | fix | test | Fixed pre-existing `NaN == NaN` bug in `test_properties.jl` "Empty tree returns background". |
 
-### Files Modified/Created
+**New issues created** (render quality findings from test renders):
+
+| ID | Title | P | Blocks |
+|----|-------|---|--------|
+| `1s6w` | Fix missed zero-crossings at near-grazing voxel incidence | P2 | — |
+| `ikrs` | Feature-preserving normals at sharp geometric creases | P2 | blocked by `czn` |
+| `8lcs` | Multi-sample anti-aliasing (jittered supersampling) | P2 | — |
+| `ga40` | Gamma correction and exposure control in render_image | P3 | blocked by `8lcs` |
+
+### Files Modified
 
 | File | Change |
 |------|--------|
-| `src/DDA.jl` | Added `VolumeRayIntersector{T}`, `VRIState{T}`, `Base.iterate` (2 methods), `_vri_advance` helper |
-| `src/Lyr.jl` | Added `VolumeRayIntersector` to exports |
-| `test/test_volume_ray_intersector.jl` | **NEW** — 10 test cases (57 assertions): empty tree, traits, DDA equivalence on cube+sphere, brute-force equivalence, laziness, ordering, miss, types, for-loop |
-| `test/runtests.jl` | Include `test_volume_ray_intersector.jl` |
+| `src/Ray.jl` | `intersect_leaves` → 1-line `collect(VolumeRayIntersector(...))`. Deleted `_intersect_internal2!`, `_intersect_internal1!`, `_intersect_leaf!` |
+| `src/Render.jl` | `sphere_trace` delegates to `find_surface`. `render_image` calls `find_surface` directly |
+| `test/test_render.jl` | +3 testsets: `sphere_trace` hits sphere.vdb, miss, max_steps-is-ignored |
+| `test/test_ray.jl` | +1 testset: `intersect_leaves` equivalence vs `intersect_leaves_dda` on cube.vdb |
+| `test/test_properties.jl` | `isnan(bg)` guard in "Empty tree returns background" property test |
 
 ### Phase 1.2 Status: DDA Ray Traversal — COMPLETE
 
-All 8 issues in the chain are now closed:
 ```
 ✅ avxb  New Ray type with SVector
   ✅ bcba  AABB-ray slab intersection
     ✅ lmzm  3D-DDA stepper (Amanatides-Woo)
       ✅ p7md  Node-level DDA
         ✅ gduf  Hierarchical DDA (Root→I2→I1→Leaf)
-          ✅ 9ysk  VolumeRayIntersector iterator    ← this session
-            ○ tzw5  Level set surface finding         ← NEXT
-              ○ ay5g  Replace sphere_trace
+          ✅ 9ysk  VolumeRayIntersector iterator
+            ✅ tzw5  Level set surface finding
+              ✅ ay5g  Replace sphere_trace    ← this session
 ```
+
+### Beads Housekeeping
+
+- Purged 72 stale `ly-*` closed issues from DB + JSONL (were causing `bd sync` prefix-mismatch loop)
+- Removed erroneous `sync.branch = master` config (caused sync to loop on local JSONL)
+- Workflow: commit `.beads/` directly to master — do NOT use `bd sync`
+- Database now clean: **235 issues, all `path-tracer-*`**
+
+### Render Quality — Known Artifacts & Roadmap
+
+Test renders of `bunny.vdb` and `icosahedron.vdb` confirm the DDA renderer is geometrically correct (no node-boundary block artifacts). Remaining visual issues and their issues:
+
+| Artifact | Root Cause | Issue |
+|----------|-----------|-------|
+| Horizontal banding (bunny) | 1 sample/pixel voxel aliasing | `8lcs` AA |
+| Dark speckles at face edges (icosahedron) | Central-diff gradient straddles crease | `czn` → `ikrs` |
+| Diagonal scan lines on flat faces | DDA misses sign-change at grazing incidence | `1s6w` |
+| Washed-out midtones | Linear output, no gamma | `ga40` |
 
 ### Next Priority
 
-1. **`tzw5`** — Level set surface finding: DDA + per-voxel zero crossing (next in Phase 1.2)
-2. **`ay5g`** — Replace sphere_trace with DDA-based implementation (final Phase 1.2)
+1. **`1s6w`** — Fix grazing DDA missed zero-crossings (standalone P2 bug, fast win)
+2. **`8lcs`** — Multi-sample AA (standalone P2, eliminates banding)
 3. **`i70d`** — Design NanoVDB flat layout (Phase 1.3 entry point)
-
-### Beads Note
-
-Beads database was reinitialized this session (`bd init --from-jsonl` after restoring `.beads/` files from git). 307 issues recovered (59 open, 248 closed). Prefix is mixed (`ly-` / `path-tracer-`) — run `bd rename-prefix --repair` if needed.
 
 ---
 
