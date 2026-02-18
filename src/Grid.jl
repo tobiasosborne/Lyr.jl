@@ -37,6 +37,13 @@ struct Grid{T}
     tree::Tree{T}
 end
 
+function Base.show(io::IO, g::Grid{T}) where T
+    lc = leaf_count(g.tree)
+    ac = active_voxel_count(g.tree)
+    vs = voxel_size(g.transform)
+    print(io, "Grid{", T, "}(\"", g.name, "\", ", g.grid_class, ", ", lc, " leaves, ", ac, " active, voxel=", round(vs[1]; sigdigits=4), ")")
+end
+
 """
     read_grid(::Type{T}, bytes, pos, codec, mask_compressed, name, grid_class, version; value_size) -> Tuple{Grid{T}, Int}
 

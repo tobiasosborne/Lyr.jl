@@ -71,6 +71,7 @@ import Lyr:
     include("test_scene.jl")
     include("test_volume_renderer.jl")
     include("test_output.jl")
+    include("test_show.jl")
     include("test_properties.jl")
     include("test_type_stability.jl")
     include("test_jet.jl")

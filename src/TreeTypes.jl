@@ -108,3 +108,31 @@ end
 Type alias for the root of a VDB tree.
 """
 const Tree{T} = RootNode{T}
+
+# --- Base.show methods ---
+
+function Base.show(io::IO, leaf::LeafNode{T}) where T
+    n = count_on(leaf.value_mask)
+    print(io, "LeafNode{", T, "}(origin=(", leaf.origin.x, ", ", leaf.origin.y, ", ", leaf.origin.z, "), ", n, "/512 active)")
+end
+
+function Base.show(io::IO, t::Tile{T}) where T
+    print(io, "Tile{", T, "}(", t.value, ", ", t.active ? "active" : "inactive", ")")
+end
+
+function Base.show(io::IO, node::InternalNode1{T}) where T
+    nc = count_on(node.child_mask)
+    nt = count_on(node.value_mask)
+    print(io, "InternalNode1{", T, "}(origin=(", node.origin.x, ", ", node.origin.y, ", ", node.origin.z, "), ", nc, " children, ", nt, " tiles)")
+end
+
+function Base.show(io::IO, node::InternalNode2{T}) where T
+    nc = count_on(node.child_mask)
+    nt = count_on(node.value_mask)
+    print(io, "InternalNode2{", T, "}(origin=(", node.origin.x, ", ", node.origin.y, ", ", node.origin.z, "), ", nc, " children, ", nt, " tiles)")
+end
+
+function Base.show(io::IO, tree::RootNode{T}) where T
+    n = length(tree.table)
+    print(io, "Tree{", T, "}(background=", tree.background, ", ", n, " root entr", n == 1 ? "y" : "ies", ")")
+end

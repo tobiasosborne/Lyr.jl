@@ -15,6 +15,15 @@ struct VDBFile
     grids::Vector{Union{Grid{Float32}, Grid{Float64}, Grid{NTuple{3, Float32}}}}
 end
 
+function Base.show(io::IO, vdb::VDBFile)
+    ng = length(vdb.grids)
+    print(io, "VDBFile(v", vdb.header.format_version, ", ", ng, " grid", ng == 1 ? "" : "s")
+    for g in vdb.grids
+        print(io, ", \"", g.name, "\"")
+    end
+    print(io, ")")
+end
+
 """
     parse_vdb(bytes::Vector{UInt8}) -> VDBFile
 

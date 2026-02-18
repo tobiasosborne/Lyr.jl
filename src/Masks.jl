@@ -37,6 +37,10 @@ const LeafMask = Mask{512, 8}          # 8x8x8 = 512 voxels, 8 words
 const Internal1Mask = Mask{4096, 64}   # 16x16x16 = 4096 children, 64 words
 const Internal2Mask = Mask{32768, 512} # 32x32x32 = 32768 children, 512 words
 
+function Base.show(io::IO, m::Mask{N,W}) where {N,W}
+    print(io, "Mask{", N, "}(", count_on(m), "/", N, " on)")
+end
+
 """
     Base.length(m::Mask{N,W}) -> Int
 
