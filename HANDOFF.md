@@ -2,7 +2,89 @@
 
 ---
 
-## Latest Session (2026-02-18) — NanoVDB flat-buffer implementation
+## Latest Session (2026-02-18) — API cleanup & code hygiene
+
+**Status**: 🟢 COMPLETE — 14 issues closed, 9183 tests pass (23 new)
+
+### What Was Done
+
+Systematic cleanup pass across the codebase: export reduction, dead code removal, naming fixes, algorithm improvements, and REPL experience.
+
+| # | ID | P | Type | What |
+|---|-----|---|------|------|
+| 1 | `ydgg` | P2 | task | Reduce public API from 195 → 129 exports. Binary r/w primitives, parser internals, DDA primitives, compression functions, coordinate internals, exception detail types, render/volume/GPU internals removed from export. Tests import explicitly via `runtests.jl`. |
+| 2 | `hwz9` | P3 | task | Move `TinyVDBBridge.jl` from `src/` to `test/` — test infrastructure, not production code |
+| 3 | `mphw` | P3 | task | Dead code `_estimate_normal_safe` — already removed in prior session |
+| 4 | `9ikg` | P3 | task | Dead code `_bisect_surface` — already removed in prior session |
+| 5 | `hgtb` | P3 | task | TinyVDB `read_grid_descriptors`: `read_i32` → `read_u32` for grid count |
+| 6 | `z986` | P3 | task | TinyVDB `read_root_topology`: `read_i32` → `read_u32` for tile/child counts |
+| 7 | `rep3` | P3 | task | TinyVDB `read_grid`: `read_i32` → `read_u32` for buffer_count |
+| 8 | `ne2` | P3 | bug | Half-precision: replaced heap-allocating `bytes[pos:pos+1]` + `reinterpret` with zero-alloc `read_f16_le` |
+| 9 | `05ih` | P3 | task | Renamed `inactive_val1/val2` → `inactive_val0/val1` to match C++ `inactiveVal0/inactiveVal1` |
+| 10 | `9u3` | P3 | task | Added `ROOT_TILE_VOXELS = 4096^3` named constant, documented all tile region sizes |
+| 11 | `n9aw` | P3 | task | Renamed misleading `offset_to_data` → `data_pos` in TinyVDB header |
+| 12 | `thac` | P3 | task | Renamed `src/Topology.jl` → `src/ChildOrigins.jl` (was confusing with TinyVDB/Topology.jl) |
+| 13 | `9ezy` | P3 | task | Reduced TinyVDB exports from 45+ → 9 symbols (test oracle API only) |
+| 14 | `40mo` | P3 | task | Fixed `off_indices` iterator: O(N) linear scan → O(count_off) CTZ-based |
+| 15 | `qgdu` | P3 | feature | Added `Base.show` methods for Mask, LeafNode, Tile, InternalNode1/2, Tree, Grid, VDBFile |
+| 16 | `x0u3` | P3 | feature | Covered by `qgdu` — Base.show methods for REPL experience |
+
+Also removed dead `_safe_sample_nearest` from Render.jl.
+
+### Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `src/Lyr.jl` | Export reduction (195→129), include rename |
+| `src/Masks.jl` | `Base.show` for Mask, CTZ-based `off_indices` |
+| `src/TreeTypes.jl` | `Base.show` for LeafNode, Tile, InternalNode1/2, RootNode |
+| `src/Grid.jl` | `Base.show` for Grid |
+| `src/File.jl` | `Base.show` for VDBFile |
+| `src/Render.jl` | Removed dead `_safe_sample_nearest` |
+| `src/Values.jl` | Zero-alloc half-precision read, `inactive_val0/1` rename |
+| `src/Accessors.jl` | `ROOT_TILE_VOXELS` constant |
+| `src/ChildOrigins.jl` | Renamed from `src/Topology.jl` |
+| `src/TinyVDB/TinyVDB.jl` | Reduced exports (45+ → 9) |
+| `src/TinyVDB/GridDescriptor.jl` | `read_i32` → `read_u32` |
+| `src/TinyVDB/Topology.jl` | `read_i32` → `read_u32` |
+| `src/TinyVDB/Parser.jl` | `read_i32` → `read_u32` |
+| `src/TinyVDB/Types.jl` | Renamed `offset_to_data` → `data_pos` |
+| `src/TinyVDB/Header.jl` | Updated docstring |
+| `test/runtests.jl` | Explicit `import Lyr:` for internal test symbols |
+| `test/test_show.jl` | **NEW** — 23 tests for Base.show methods |
+| `test/test_tinyvdb.jl` | Explicit imports for reduced TinyVDB exports |
+| `test/test_values.jl` | `inactive_val0/1` rename |
+| `test/TinyVDBBridge.jl` | Moved from `src/` |
+| `test/test_parser_equivalence.jl` | Updated include path |
+
+### Test Results
+
+```
+9183 pass, 0 fail, 0 errors (was 9160)
+23 new tests (Base.show methods)
+```
+
+### Project Status Summary
+
+**~9,200 LOC source, ~8,700 LOC tests, 41 files, 281 issues closed, 32 open**
+
+| Phase | Status | Key Components |
+|-------|--------|----------------|
+| Phase 1: Foundation | **COMPLETE** | VDB read/write, DDA traversal, NanoVDB flat layout |
+| Phase 2: Volume Renderer | **COMPLETE (basic)** | Delta/ratio tracking, transfer functions, scene, PNG output |
+| Phase 3: GPU Acceleration | **Scaffolded** | GPUNanoGrid + CPU reference kernels, needs KA.jl wiring |
+| Phase 4: Creation Tools | Not started | Mesh-to-SDF, procedural, CSG |
+| Phase 5: Ecosystem | Not started | Makie, animation, multi-scatter, differentiable rendering |
+
+### Next Priority
+
+1. **GPU kernels** — Wire KernelAbstractions.jl to existing NanoVDB buffer + CPU reference kernels
+2. **Makie recipe** (`9gqg`) — Interactive volume preview
+3. **Render quality** — Grazing DDA (`1s6w`), AA (`8lcs`), crease normals (`ikrs`)
+
+---
+
+## Previous Session (2026-02-18) — NanoVDB flat-buffer implementation
 
 **Status**: 🟢 COMPLETE — 8 issues closed, 7664 tests pass (6274 new)
 
