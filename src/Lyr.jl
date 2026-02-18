@@ -40,6 +40,9 @@ include("DDA.jl")
 include("Render.jl")
 include("Surface.jl")
 
+# NanoVDB flat-buffer representation (GPU-ready)
+include("NanoVDB.jl")
+
 # TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
 include("TinyVDB/TinyVDB.jl")
 
@@ -115,6 +118,15 @@ export LyrError, ParseError, CompressionError
 export InvalidMagicError
 export ChunkSizeMismatchError, CompressionBoundsError, DecompressionSizeError
 export ValueCountError
+
+# Exports - NanoVDB
+export NanoGrid, NanoLeafView, NanoI1View, NanoI2View
+export NanoValueAccessor, NanoLeafHit, NanoVolumeRayIntersector
+export build_nanogrid
+export nano_origin, nano_is_active, nano_get_value
+export nano_child_count, nano_tile_count, nano_has_child, nano_has_tile
+export nano_child_offset, nano_tile_value
+export nano_background, nano_bbox, nano_root_count, nano_i2_count, nano_i1_count, nano_leaf_count
 
 # Exports - Static Arrays
 export SVec3f, SVec3d, SMat3d

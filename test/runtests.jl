@@ -26,6 +26,7 @@ using Cthulhu
     include("test_volume_ray_intersector.jl")
     include("test_render.jl")
     include("test_surface.jl")
+    include("test_nanovdb.jl")
     include("test_integration.jl")
     include("test_parser_equivalence.jl")
     include("test_properties.jl")
