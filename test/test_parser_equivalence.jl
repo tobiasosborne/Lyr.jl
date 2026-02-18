@@ -1,6 +1,6 @@
 # Bridge for converting TinyVDB output to Lyr types (test-only)
 const TinyVDB = Lyr.TinyVDB
-include(joinpath(@__DIR__, "..", "src", "TinyVDBBridge.jl"))
+include(joinpath(@__DIR__, "TinyVDBBridge.jl"))
 
 @testset "Parser Equivalence" begin
     # Both Main Lyr and TinyVDB (sequential) parsers must produce identical trees

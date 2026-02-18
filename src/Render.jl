@@ -108,23 +108,6 @@ function _intersect_float_bbox(ray::Ray, bmin::NTuple{3,Float64}, bmax::NTuple{3
     (tmin, tmax)
 end
 
-"""
-    _safe_sample_nearest(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64) -> Float64
-
-Sample grid at point using nearest-neighbor, returning fallback if outside bounds.
-Nearest-neighbor avoids trilinear corruption at narrow-band edges where some corners
-return background while others return real SDF values.
-"""
-function _safe_sample_nearest(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64)::Float64 where T
-    if !all(isfinite, point)
-        return fallback
-    end
-    max_coord = 1e9
-    if any(abs(p) > max_coord for p in point)
-        return fallback
-    end
-    Float64(sample_world(grid, point; method=:nearest))
-end
 
 """
     _safe_sample(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64) -> Float64
