@@ -246,15 +246,31 @@ off_indices(m::Mask{N,W}) where {N,W} = OffIndicesIterator{N,W}(m)
 Base.IteratorSize(::Type{OffIndicesIterator{N,W}}) where {N,W} = Base.SizeUnknown()
 Base.eltype(::Type{OffIndicesIterator{N,W}}) where {N,W} = Int
 
-function Base.iterate(it::OffIndicesIterator{N,W}, state=0) where {N,W}
-    i = state
-    while i < N
-        if is_off(it.mask, i)
-            return (i, i + 1)
-        end
-        i += 1
+function Base.iterate(it::OffIndicesIterator{N,W}, state=nothing) where {N,W}
+    # Same CTZ technique as OnIndicesIterator, but on ~word (complement bits)
+    if state === nothing
+        word_idx = 1
+        @inbounds remaining = ~it.mask.words[1]
+    else
+        word_idx, remaining = state
     end
-    nothing
+
+    @inbounds while true
+        if remaining != 0
+            tz = trailing_zeros(remaining)
+            idx = (word_idx - 1) * 64 + tz
+            if idx < N
+                remaining &= remaining - 1  # Clear lowest set bit
+                return (idx, (word_idx, remaining))
+            else
+                return nothing  # Past valid range
+            end
+        end
+
+        word_idx += 1
+        word_idx > W && return nothing
+        remaining = ~it.mask.words[word_idx]
+    end
 end
 
 """

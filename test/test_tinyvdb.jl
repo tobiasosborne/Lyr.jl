@@ -8,6 +8,27 @@ using Test
 include(joinpath(@__DIR__, "..", "src", "TinyVDB", "TinyVDB.jl"))
 using .TinyVDB
 
+# Import internal TinyVDB symbols for unit testing
+import .TinyVDB:
+    # Binary
+    read_u8, read_i32, read_u32, read_i64, read_u64, read_f32, read_f64, read_string,
+    # Header/constants
+    VDB_MAGIC, read_header, NodeType, NODE_ROOT, NODE_INTERNAL, NODE_LEAF,
+    # Mask
+    is_on, set_on!, count_on, read_mask,
+    # Grid descriptor
+    strip_suffix, read_grid_descriptor, read_grid_descriptors,
+    # Compression
+    COMPRESS_NONE, COMPRESS_ZIP, COMPRESS_ACTIVE_MASK, COMPRESS_BLOSC,
+    read_grid_compression, read_compressed_data,
+    # Topology
+    read_leaf_topology, read_internal_topology, read_root_topology,
+    # Values
+    NO_MASK_OR_INACTIVE_VALS, NO_MASK_AND_MINUS_BG,
+    read_leaf_values, read_tree_values,
+    # Parser
+    read_metadata, read_transform
+
 @testset "TinyVDB Binary Primitives" begin
 
     @testset "read_u8" begin

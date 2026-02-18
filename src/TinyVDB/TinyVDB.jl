@@ -30,41 +30,15 @@ include("Values.jl")
 include("Parser.jl")
 
 # =============================================================================
-# Exports
+# Exports — minimal test oracle interface
+# Internal symbols accessible via TinyVDB.symbol_name
 # =============================================================================
 
-# Binary primitives
-export read_u8, read_i32, read_u32, read_i64, read_u64, read_f32, read_f64, read_string
+# Entry point
+export parse_tinyvdb, TinyVDBFile, TinyGrid
 
-# Data structures
-export Coord, VDBHeader, NodeType, NODE_ROOT, NODE_INTERNAL, NODE_LEAF
-
-# Mask
-export NodeMask, is_on, set_on!, count_on, read_mask
-
-# Header
-export read_header, VDB_MAGIC
-
-# Grid Descriptor
-export GridDescriptor, strip_suffix, read_grid_descriptor, read_grid_descriptors
-
-# Compression
-export COMPRESS_NONE, COMPRESS_ZIP, COMPRESS_ACTIVE_MASK, COMPRESS_BLOSC
-export read_grid_compression, read_compressed_data, read_f32_values
-
-# Topology
-export LeafNodeData, InternalNodeData, RootNodeData
-export LOG2DIM_LEAF, LOG2DIM_I1, LOG2DIM_I2
-export read_leaf_topology, read_internal_topology, read_root_topology
-
-# Values - per_node_flag constants (must match tinyvdbio.h enum)
-export NO_MASK_OR_INACTIVE_VALS, NO_MASK_AND_MINUS_BG, NO_MASK_AND_ONE_INACTIVE_VAL
-export MASK_AND_NO_INACTIVE_VALS, MASK_AND_ONE_INACTIVE_VAL, MASK_AND_TWO_INACTIVE_VALS
-export NO_MASK_AND_ALL_VALS
-export read_leaf_values, read_internal_values, read_tree_values
-
-# Parser
-export TinyGrid, TinyVDBFile
-export read_metadata, read_transform, read_grid, parse_tinyvdb
+# Tree data structures (needed by TinyVDBBridge and equivalence tests)
+export RootNodeData, InternalNodeData, LeafNodeData
+export NodeMask, Coord, VDBHeader, GridDescriptor
 
 end # module TinyVDB
