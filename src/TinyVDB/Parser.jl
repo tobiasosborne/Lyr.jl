@@ -186,7 +186,7 @@ function read_grid(bytes::Vector{UInt8}, gd::GridDescriptor, header::VDBHeader):
     voxel_size, translation, pos = read_transform(bytes, pos)
 
     # Read buffer_count (TreeBase) - must be 1
-    buffer_count, pos = read_i32(bytes, pos)
+    buffer_count, pos = read_u32(bytes, pos)
     if buffer_count != 1
         @warn "Multi-buffer trees are not supported, found buffer_count=$buffer_count"
     end

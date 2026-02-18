@@ -145,7 +145,7 @@
 
     @testset "read_dense_values: flag 3 — MASK_AND_NO_INACTIVE_VALS" begin
         # Two inactive values: background and -background, selected by selection mask.
-        # selection_mask on → inactive_val1 (background), off → inactive_val2 (-background)
+        # selection_mask on → inactive_val0 (background), off → inactive_val1 (-background)
         background = 3.0f0
         mask = make_leaf_mask([0])  # 1 active: bit 0
 
@@ -163,12 +163,12 @@
 
         vals, _ = Lyr.read_dense_values(Float32, buf, 1, NoCompression(), true, mask, background)
         @test vals[1] == 50.0f0   # bit 0 active
-        @test vals[2] == 3.0f0    # bit 1 inactive, sel ON → inactive_val1 = background
-        @test vals[3] == -3.0f0   # bit 2 inactive, sel OFF → inactive_val2 = -background
+        @test vals[2] == 3.0f0    # bit 1 inactive, sel ON → inactive_val0 = background
+        @test vals[3] == -3.0f0   # bit 2 inactive, sel OFF → inactive_val1 = -background
     end
 
     @testset "read_dense_values: flag 4 — MASK_AND_ONE_INACTIVE_VAL" begin
-        # inactive_val1 = background, inactive_val2 = explicit value, selected by selection mask.
+        # inactive_val0 = background, inactive_val1 = explicit value, selected by selection mask.
         background = 1.0f0
         mask = make_leaf_mask([0])  # 1 active: bit 0
 
@@ -178,7 +178,7 @@
 
         buf = UInt8[]
         push!(buf, 0x04)  # metadata = 4
-        # One explicit inactive value (inactive_val2)
+        # One explicit inactive value (inactive_val1)
         append!(buf, f32_bytes(88.0f0))
         append!(buf, sel_mask_bytes)  # 64 bytes selection mask
         # Sparse: 1 active value
@@ -186,8 +186,8 @@
 
         vals, _ = Lyr.read_dense_values(Float32, buf, 1, NoCompression(), true, mask, background)
         @test vals[1] == 20.0f0   # bit 0 active
-        @test vals[2] == 88.0f0   # bit 1 inactive, sel OFF → inactive_val2 = 88.0
-        @test vals[3] == 1.0f0    # bit 2 inactive, sel ON  → inactive_val1 = background
+        @test vals[2] == 88.0f0   # bit 1 inactive, sel OFF → inactive_val1 = 88.0
+        @test vals[3] == 1.0f0    # bit 2 inactive, sel ON  → inactive_val0 = background
     end
 
     @testset "read_dense_values: flag 5 — MASK_AND_TWO_INACTIVE_VALS" begin
@@ -202,16 +202,16 @@
         buf = UInt8[]
         push!(buf, 0x05)  # metadata = 5
         # Two explicit inactive values
-        append!(buf, f32_bytes(11.0f0))  # inactive_val1
-        append!(buf, f32_bytes(22.0f0))  # inactive_val2
+        append!(buf, f32_bytes(11.0f0))  # inactive_val0
+        append!(buf, f32_bytes(22.0f0))  # inactive_val1
         append!(buf, sel_mask_bytes)  # 64 bytes selection mask
         # Sparse: 1 active value
         append!(buf, f32_bytes(33.0f0))
 
         vals, _ = Lyr.read_dense_values(Float32, buf, 1, NoCompression(), true, mask, background)
         @test vals[1] == 33.0f0   # bit 0 active
-        @test vals[2] == 11.0f0   # bit 1 inactive, sel ON → inactive_val1
-        @test vals[3] == 22.0f0   # bit 2 inactive, sel OFF → inactive_val2
+        @test vals[2] == 11.0f0   # bit 1 inactive, sel ON → inactive_val0
+        @test vals[3] == 22.0f0   # bit 2 inactive, sel OFF → inactive_val1
     end
 
     @testset "read_dense_values: flag 6 — NO_MASK_AND_ALL_VALS" begin

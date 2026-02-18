@@ -267,8 +267,8 @@ function read_root_topology(bytes::Vector{UInt8}, pos::Int;
     background, pos = read_f32(bytes, pos)
 
     # Read counts
-    num_tiles, pos = read_i32(bytes, pos)
-    num_children, pos = read_i32(bytes, pos)
+    num_tiles, pos = read_u32(bytes, pos)
+    num_children, pos = read_u32(bytes, pos)
 
     # Read tiles
     tiles = Vector{Tuple{Coord, Float32, Bool}}()

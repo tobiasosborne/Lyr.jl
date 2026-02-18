@@ -159,9 +159,9 @@ Returns a dictionary mapping grid names to descriptors, and the new position.
 """
 function read_grid_descriptors(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String, GridDescriptor}, Int}
     # Read count
-    count, pos = read_i32(bytes, pos)
+    count, pos = read_u32(bytes, pos)
 
-    if count < 0 || count > 10000
+    if count > 10000
         error("Invalid grid descriptor count: $count")
     end
 

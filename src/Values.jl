@@ -15,24 +15,24 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
     metadata, pos = read_u8(bytes, pos)
 
     # 2. Inactive values based on metadata
+    inactive_val0 = background
     inactive_val1 = background
-    inactive_val2 = background
 
     if metadata == 0 # NO_MASK_OR_INACTIVE_VALS
-        inactive_val1 = background
+        inactive_val0 = background
     elseif metadata == 1 # NO_MASK_AND_MINUS_BG
-        inactive_val1 = -background
+        inactive_val0 = -background
     elseif metadata == 2 # NO_MASK_AND_ONE_INACTIVE_VAL
-        inactive_val1, pos = _read_value(T, bytes, pos, is_half)
+        inactive_val0, pos = _read_value(T, bytes, pos, is_half)
     elseif metadata == 3 # MASK_AND_NO_INACTIVE_VALS
-        inactive_val1 = background
-        inactive_val2 = -background
+        inactive_val0 = background
+        inactive_val1 = -background
     elseif metadata == 4 # MASK_AND_ONE_INACTIVE_VAL
-        inactive_val1 = background
-        inactive_val2, pos = _read_value(T, bytes, pos, is_half)
-    elseif metadata == 5 # MASK_AND_TWO_INACTIVE_VALS
+        inactive_val0 = background
         inactive_val1, pos = _read_value(T, bytes, pos, is_half)
-        inactive_val2, pos = _read_value(T, bytes, pos, is_half)
+    elseif metadata == 5 # MASK_AND_TWO_INACTIVE_VALS
+        inactive_val0, pos = _read_value(T, bytes, pos, is_half)
+        inactive_val1, pos = _read_value(T, bytes, pos, is_half)
     end
 
     # 3. Read selection mask if metadata is 3, 4, or 5
@@ -70,13 +70,13 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
                     all_values[i+1] = stored_values[active_idx]
                     active_idx += 1
                 else
-                    all_values[i+1] = inactive_val1
+                    all_values[i+1] = inactive_val0
                 end
             else
                 if selection_mask !== nothing
-                    all_values[i+1] = is_on(selection_mask, i) ? inactive_val1 : inactive_val2
+                    all_values[i+1] = is_on(selection_mask, i) ? inactive_val0 : inactive_val1
                 else
-                    all_values[i+1] = inactive_val1
+                    all_values[i+1] = inactive_val0
                 end
             end
         end
@@ -85,7 +85,7 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
             if i <= length(stored_values)
                 all_values[i] = stored_values[i]
             else
-                all_values[i] = inactive_val1
+                all_values[i] = inactive_val0
             end
         end
     end
@@ -100,9 +100,8 @@ Read a single value, handling half-precision (Float16 → T widening).
 """
 function _read_value(::Type{T}, bytes::Vector{UInt8}, pos::Int, is_half::Bool)::Tuple{T, Int} where T
     if is_half
-        @boundscheck checkbounds(bytes, pos:pos+1)
-        @inbounds val = T(reinterpret(Float16, bytes[pos:pos+1])[1])
-        (val, pos + 2)
+        f16, pos = read_f16_le(bytes, pos)
+        (T(f16), pos)
     else
         read_tile_value(T, bytes, pos)
     end
