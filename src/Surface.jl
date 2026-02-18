@@ -197,6 +197,29 @@ function find_surface(ray::Ray, grid::Grid{T})::Union{SurfaceHit, Nothing} where
     for leaf_hit in VolumeRayIntersector(grid.tree, idx_ray)
         leaf = leaf_hit.leaf
 
+        # Pre-check: sample SDF at leaf entry point to catch crossings
+        # that occur right at a leaf boundary (grazing-incidence fix).
+        entry_p = idx_ray.origin + leaf_hit.t_enter * idx_ray.direction
+        entry_c = coord(round(Int32, entry_p[1]), round(Int32, entry_p[2]), round(Int32, entry_p[3]))
+        if _voxel_in_leaf(entry_c, leaf.origin)
+            entry_offset = leaf_offset(entry_c)
+            entry_active = is_on(leaf.value_mask, entry_offset)
+            entry_sdf = entry_active ? Float64(leaf.values[entry_offset + 1]) : Float64(bg)
+            entry_t = _coord_t(idx_ray, entry_c)
+
+            if prev_sdf > 0.0 && entry_sdf <= 0.0 && isfinite(prev_sdf)
+                t_hit = _bisect_crossing(idx_ray, acc, prev_t, entry_t, bg)
+                idx_point = idx_ray.origin + t_hit * idx_ray.direction
+                idx_normal = _surface_normal(acc, idx_point, bg)
+                world_point = index_to_world(grid.transform, idx_point)
+                world_normal = _transform_normal(grid.transform, idx_normal)
+                return SurfaceHit(t_hit, world_point, world_normal)
+            end
+
+            prev_sdf = entry_sdf
+            prev_t = entry_t
+        end
+
         # DDA through this leaf's voxels at stride 1
         dda = dda_init(idx_ray, leaf_hit.t_enter, 1.0)
 

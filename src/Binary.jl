@@ -83,6 +83,19 @@ function read_i64_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Int64, Int}
 end
 
 """
+    read_f16_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float16, Int}
+
+Read a 16-bit (half-precision) float in little-endian format.
+"""
+function read_f16_le(bytes::Vector{UInt8}, pos::Int)::Tuple{Float16, Int}
+    @boundscheck checkbounds(bytes, pos:pos+1)
+    GC.@preserve bytes begin
+        @inbounds val = _unaligned_load(Float16, pointer(bytes, pos))
+    end
+    (ltoh(val), pos + 2)
+end
+
+"""
     read_f32_le(bytes::Vector{UInt8}, pos::Int) -> Tuple{Float32, Int}
 
 Read a 32-bit float in little-endian format.

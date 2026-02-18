@@ -53,6 +53,35 @@
         @test read_i64_le(bytes, 1)[1] == Int64(-1)
     end
 
+    @testset "read_f16_le" begin
+        # 1.0 in IEEE 754 half-precision: 0x3C00
+        bytes = UInt8[0x00, 0x3C]
+        val, pos = read_f16_le(bytes, 1)
+        @test val == Float16(1.0)
+        @test pos == 3
+
+        # -1.0 half: 0xBC00
+        bytes = UInt8[0x00, 0xBC]
+        @test read_f16_le(bytes, 1)[1] == Float16(-1.0)
+
+        # 0.0 half
+        bytes = UInt8[0x00, 0x00]
+        @test read_f16_le(bytes, 1)[1] == Float16(0.0)
+
+        # 0.5 half: 0x3800
+        bytes = UInt8[0x00, 0x38]
+        @test read_f16_le(bytes, 1)[1] == Float16(0.5)
+
+        # Round-trip
+        for x in [Float16(0.25), Float16(2.0), Float16(-3.5), Float16(Inf)]
+            buf = collect(reinterpret(UInt8, [x]))
+            @test read_f16_le(buf, 1)[1] == x
+        end
+
+        # Bounds check
+        @test_throws BoundsError read_f16_le(UInt8[0x00], 1)
+    end
+
     @testset "read_f32_le" begin
         # 1.0f0 in IEEE 754
         bytes = UInt8[0x00, 0x00, 0x80, 0x3f]

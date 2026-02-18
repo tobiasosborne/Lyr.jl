@@ -158,63 +158,6 @@ function read_i2_topology_v222(::Type{T}, bytes::Vector{UInt8}, pos::Int, origin
 end
 
 """
-    read_selection_masks_v222!(i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int) -> Int
-
-Read selection masks for all leaves in an I2 subtree (v222+ format).
-Mutates the I2TopoData in place to add selection masks.
-"""
-function read_selection_masks_v222!(i2_topo::I2TopoData{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{I2TopoData{T}, Int} where T
-    # Create new I1 children with selection masks filled in
-    new_i1_children = Vector{I1TopoData{T}}()
-
-    for i1_topo in i2_topo.children
-        new_leaves = Vector{LeafTopoWithSelection}()
-        for leaf in i1_topo.leaves
-            selection_mask, pos = read_mask(LeafMask, bytes, pos)
-            push!(new_leaves, LeafTopoWithSelection(leaf.origin, leaf.value_mask, selection_mask))
-        end
-        push!(new_i1_children, I1TopoData{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, new_leaves, i1_topo.node_values))
-    end
-
-    new_i2_topo = I2TopoData{T}(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, new_i1_children, i2_topo.node_values)
-    (new_i2_topo, pos)
-end
-
-"""
-    align_to_16(pos::Int) -> Int
-
-Round up position to next 16-byte boundary.
-"""
-function align_to_16(pos::Int)::Int
-    remainder = (pos - 1) % 16  # -1 because Julia is 1-indexed
-    if remainder == 0
-        pos
-    else
-        pos + (16 - remainder)
-    end
-end
-
-"""
-    read_leaf_values_v222_raw(::Type{T}, bytes::Vector{UInt8}, pos::Int, selection_mask::LeafMask, background::T) -> Tuple{NTuple{512,T}, Int}
-
-Read leaf values from raw Float32 array (v222+ level set format).
-Only voxels with bits set in selection_mask have stored values.
-"""
-function read_leaf_values_v222_raw(::Type{T}, bytes::Vector{UInt8}, pos::Int, selection_mask::LeafMask, background::T)::Tuple{NTuple{512,T}, Int} where T
-    values = Vector{T}(undef, 512)
-
-    for i in 0:511
-        if is_on(selection_mask, i)
-            values[i+1], pos = read_tile_value(T, bytes, pos)
-        else
-            values[i+1] = background
-        end
-    end
-
-    (NTuple{512,T}(values), pos)
-end
-
-"""
     materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, version::UInt32) -> Tuple{InternalNode2{T}, Int}
 
 Materialize values for an I2 subtree from the values section (v222+ format).

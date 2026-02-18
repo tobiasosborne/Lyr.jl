@@ -182,4 +182,25 @@ using Lyr
             end
         end
     end
+
+    @testset "Grazing-incidence: entry pre-check catches leaf boundary crossings" begin
+        # The grazing fix adds a pre-check at leaf entry to catch sign changes
+        # that DDA might step over. Verify find_surface still works on all fixtures.
+        for fixture in ["cube.vdb", "sphere.vdb", "icosahedron.vdb", "torus.vdb"]
+            path = joinpath(@__DIR__, "fixtures", "samples", fixture)
+            isfile(path) || continue
+
+            vdb = parse_vdb(path)
+            grid = vdb.grids[1]
+
+            # Fire direct ray from well outside
+            ray = Ray(SVec3d(-50.0, 0.0, 0.0), SVec3d(1.0, 0.0, 0.0))
+            result = find_surface(ray, grid)
+            @test result !== nothing
+            if result !== nothing
+                len = sqrt(result.normal[1]^2 + result.normal[2]^2 + result.normal[3]^2)
+                @test len ≈ 1.0 atol=1e-6
+            end
+        end
+    end
 end

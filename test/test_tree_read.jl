@@ -56,23 +56,6 @@
     end
 
     # =========================================================================
-    # align_to_16
-    # =========================================================================
-
-    @testset "align_to_16" begin
-        # Position 1 is already 16-byte aligned (byte 0 in 0-indexed)
-        @test Lyr.align_to_16(1) == 1
-        # Position 2 should align to 17
-        @test Lyr.align_to_16(2) == 17
-        # Position 16 should align to 17
-        @test Lyr.align_to_16(16) == 17
-        # Position 17 is aligned (byte 16 in 0-indexed)
-        @test Lyr.align_to_16(17) == 17
-        # Position 33 is aligned (byte 32 in 0-indexed)
-        @test Lyr.align_to_16(33) == 33
-    end
-
-    # =========================================================================
     # read_internal_tiles
     # =========================================================================
 
@@ -100,32 +83,6 @@
         @test vals[1] == 10.0f0
         @test vals[2] == 20.0f0
         @test pos == 11  # 2 * (4 + 1) + 1
-    end
-
-    # =========================================================================
-    # read_leaf_values_v222_raw
-    # =========================================================================
-
-    @testset "read_leaf_values_v222_raw: sparse selection" begin
-        # Selection mask: only bits 0 and 2 on
-        sel_words = ntuple(i -> i == 1 ? UInt64(5) : UInt64(0), 8)  # bits 0, 2
-        sel_mask = Mask{512,8}(sel_words)
-
-        buf = UInt8[]
-        # Bit 0: stored value
-        append!(buf, f32_bytes(100.0f0))
-        # Bit 1: not in selection → background
-        # Bit 2: stored value
-        append!(buf, f32_bytes(200.0f0))
-        # Bits 3-511: not in selection → background
-        background = -1.0f0
-
-        vals, pos = Lyr.read_leaf_values_v222_raw(Float32, buf, 1, sel_mask, background)
-        @test vals[1] == 100.0f0
-        @test vals[2] == -1.0f0  # background
-        @test vals[3] == 200.0f0
-        @test vals[4] == -1.0f0  # background
-        @test pos == 9  # 2 * 4 + 1
     end
 
     # =========================================================================

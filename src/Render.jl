@@ -1,5 +1,7 @@
 # Render.jl - Sphere tracing renderer for VDB level sets
 
+using Random: Xoshiro
+
 """
     Camera
 
@@ -82,29 +84,6 @@ function sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int;
 end
 
 """
-    _bisect_surface(ray, grid, t_pos, t_neg, vs, bg) -> NTuple{3,Float64}
-
-Binary search between t_pos (SDF > 0) and t_neg (SDF < 0) to find the zero crossing.
-Returns the world-space point closest to the surface.
-"""
-function _bisect_surface(ray::Ray, grid::Grid{T}, t_pos::Float64, t_neg::Float64,
-                         vs::Float64, bg::Float64)::NTuple{3,Float64} where T
-    lo = t_pos
-    hi = t_neg
-    for _ in 1:8  # 8 iterations → ~1/256 voxel precision
-        mid = (lo + hi) * 0.5
-        p = _ray_at(ray, mid)
-        d = _safe_sample_nearest(grid, p, bg)
-        if d > 0.0
-            lo = mid
-        else
-            hi = mid
-        end
-    end
-    _ray_at(ray, (lo + hi) * 0.5)
-end
-
-"""
     _intersect_float_bbox(ray::Ray, bmin::NTuple{3,Float64}, bmax::NTuple{3,Float64}) -> Tuple{Float64, Float64}
 
 Ray-box intersection for float bounding box. Returns (t_enter, t_exit).
@@ -168,42 +147,6 @@ function _safe_sample(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64
 end
 
 """
-    _estimate_normal_safe(grid::Grid{T}, point::NTuple{3,Float64}, h::Float64, bg::Float64) -> NTuple{3,Float64}
-
-Estimate normal with safe sampling.
-"""
-function _estimate_normal_safe(grid::Grid{T}, point::NTuple{3,Float64}, h::Float64, bg::Float64)::NTuple{3,Float64} where T
-    # Compute gradient in index space using ±1 voxel offsets for stability.
-    # This avoids world-space rounding artifacts at node boundaries.
-    ijk = world_to_index_float(grid.transform, point)
-    c = Coord(round(Int32, ijk[1]), round(Int32, ijk[2]), round(Int32, ijk[3]))
-    cv = Float64(get_value(grid.tree, c))
-    bg_f = Float64(bg)
-
-    dx = _gradient_axis_safe(grid.tree, c, Int32(1), Int32(0), Int32(0), cv, bg_f)
-    dy = _gradient_axis_safe(grid.tree, c, Int32(0), Int32(1), Int32(0), cv, bg_f)
-    dz = _gradient_axis_safe(grid.tree, c, Int32(0), Int32(0), Int32(1), cv, bg_f)
-    _normalize((dx, dy, dz))
-end
-
-function _gradient_axis_safe(tree::Tree{T}, c::Coord, di::Int32, dj::Int32, dk::Int32,
-                              center::Float64, bg::Float64)::Float64 where T
-    vp = Float64(get_value(tree, Coord(c.x + di, c.y + dj, c.z + dk)))
-    vm = Float64(get_value(tree, Coord(c.x - di, c.y - dj, c.z - dk)))
-    p_ok = abs(vp) < bg - 1e-6
-    m_ok = abs(vm) < bg - 1e-6
-    if p_ok && m_ok
-        (vp - vm) * 0.5
-    elseif p_ok
-        vp - center
-    elseif m_ok
-        center - vm
-    else
-        0.0
-    end
-end
-
-"""
     _estimate_normal(grid::Grid{T}, point::NTuple{3, Float64}, h::Float64) -> NTuple{3, Float64}
 
 Estimate surface normal using central differences on the SDF.
@@ -241,40 +184,108 @@ end
 
 """
     render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
-                 light_dir::NTuple{3, Float64}=(0.577, 0.577, 0.577),
-                 background::NTuple{3, Float64}=(0.1, 0.1, 0.15),
-                 max_steps::Int=200) -> Matrix{NTuple{3, Float64}}
+                 light_dir=(0.577, 0.577, 0.577),
+                 background=(0.1, 0.1, 0.15),
+                 max_steps=200,
+                 samples_per_pixel=1,
+                 gamma=1.0,
+                 seed=UInt64(42)) -> Matrix{NTuple{3, Float64}}
 
 Render a VDB level set grid to an image.
 
 Returns a height×width matrix of RGB tuples, each channel in [0, 1].
+
+# Keyword Arguments
+- `samples_per_pixel::Int=1` - Number of jittered samples per pixel (1, 4, 9, 16, etc.)
+- `gamma::Float64=1.0` - Gamma correction exponent (2.2 for sRGB display)
+- `seed::UInt64=42` - RNG seed for deterministic jittered sampling
 """
 function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
                       light_dir::NTuple{3, Float64}=(0.577, 0.577, 0.577),
                       background::NTuple{3, Float64}=(0.1, 0.1, 0.15),
-                      max_steps::Int=200) where T <: AbstractFloat
+                      max_steps::Int=200,
+                      samples_per_pixel::Int=1,
+                      gamma::Float64=1.0,
+                      seed::UInt64=UInt64(42)) where T <: AbstractFloat
     aspect = Float64(width) / Float64(height)
     pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
 
     # Normalize light direction
     light = _normalize(light_dir)
 
+    # Compute stratification grid size
+    spp = max(1, samples_per_pixel)
+    k = isqrt(spp)  # stratification grid dimension
+    if k * k != spp
+        k = isqrt(spp) + 1  # round up to next square for non-square spp
+    end
+    actual_spp = k * k
+    inv_spp = 1.0 / actual_spp
+    inv_k = 1.0 / k
+
+    # Gamma correction exponent
+    inv_gamma = gamma > 0.0 ? 1.0 / gamma : 1.0
+
     for y in 1:height
+        rng = Xoshiro(seed + UInt64(y))
         for x in 1:width
-            # Convert pixel to normalized coordinates
-            # Flip v so y=1 is top of image
-            u = (Float64(x) - 0.5) / Float64(width)
-            v = 1.0 - (Float64(y) - 0.5) / Float64(height)
+            if actual_spp == 1
+                # Fast path: single sample, no jitter
+                u = (Float64(x) - 0.5) / Float64(width)
+                v = 1.0 - (Float64(y) - 0.5) / Float64(height)
 
-            ray = camera_ray(camera, u, v, aspect)
-            hit = find_surface(ray, grid)
+                ray = camera_ray(camera, u, v, aspect)
+                hit = find_surface(ray, grid)
 
-            if hit !== nothing
-                intensity = shade(Tuple(hit.normal), light)
-                pixels[y, x] = (intensity, intensity, intensity)
+                if hit !== nothing
+                    intensity = shade(Tuple(hit.normal), light)
+                    pixels[y, x] = (intensity, intensity, intensity)
+                else
+                    pixels[y, x] = background
+                end
             else
-                pixels[y, x] = background
+                # Multi-sample: stratified jittered supersampling
+                acc_r = 0.0
+                acc_g = 0.0
+                acc_b = 0.0
+
+                for sy in 0:k-1
+                    for sx in 0:k-1
+                        # Jittered sub-pixel offset within stratum
+                        jx = (sx + rand(rng)) * inv_k
+                        jy = (sy + rand(rng)) * inv_k
+
+                        u = (Float64(x) - 1.0 + jx) / Float64(width)
+                        v = 1.0 - (Float64(y) - 1.0 + jy) / Float64(height)
+
+                        ray = camera_ray(camera, u, v, aspect)
+                        hit = find_surface(ray, grid)
+
+                        if hit !== nothing
+                            intensity = shade(Tuple(hit.normal), light)
+                            acc_r += intensity
+                            acc_g += intensity
+                            acc_b += intensity
+                        else
+                            acc_r += background[1]
+                            acc_g += background[2]
+                            acc_b += background[3]
+                        end
+                    end
+                end
+
+                pixels[y, x] = (acc_r * inv_spp, acc_g * inv_spp, acc_b * inv_spp)
             end
+        end
+    end
+
+    # Apply gamma correction if needed
+    if inv_gamma != 1.0
+        for i in eachindex(pixels)
+            r, g, b = pixels[i]
+            pixels[i] = (clamp(r, 0.0, 1.0) ^ inv_gamma,
+                         clamp(g, 0.0, 1.0) ^ inv_gamma,
+                         clamp(b, 0.0, 1.0) ^ inv_gamma)
         end
     end
 

@@ -46,10 +46,22 @@ include("NanoVDB.jl")
 # TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
 include("TinyVDB/TinyVDB.jl")
 
+# Phase 2: VDB Writer
+include("BinaryWrite.jl")
+include("FileWrite.jl")
+
+# Phase 2: Volume Rendering Pipeline
+include("TransferFunction.jl")
+include("PhaseFunction.jl")
+include("Scene.jl")
+include("VolumeIntegrator.jl")
+include("Output.jl")
+include("GPU.jl")
+
 # Exports - Binary
 export read_u8, read_u32_le, read_u64_le
 export read_i32_le, read_i64_le
-export read_f32_le, read_f64_le
+export read_f16_le, read_f32_le, read_f64_le
 export read_bytes, read_cstring, read_string_with_size
 
 # Exports - Masks
@@ -138,5 +150,37 @@ export render_image, write_ppm
 
 # Exports - Surface
 export SurfaceHit, find_surface
+
+# Exports - VDB Writer
+export write_vdb, write_vdb_to_buffer
+export write_u8!, write_u32_le!, write_u64_le!, write_i32_le!, write_i64_le!
+export write_f16_le!, write_f32_le!, write_f64_le!
+export write_bytes!, write_cstring!, write_string_with_size!
+export write_tile_value!
+
+# Exports - Transfer Functions
+export ControlPoint, TransferFunction, evaluate
+export tf_blackbody, tf_cool_warm, tf_smoke, tf_viridis
+
+# Exports - Phase Functions
+export PhaseFunction, IsotropicPhase, HenyeyGreensteinPhase
+export sample_phase
+
+# Exports - Scene
+export AbstractLight, PointLight, DirectionalLight
+export VolumeMaterial, VolumeEntry, Scene
+
+# Exports - Volume Integrator
+export delta_tracking_step, ratio_tracking
+export render_volume_image, render_volume_preview
+
+# Exports - Output
+export tonemap_reinhard, tonemap_aces, tonemap_exposure, auto_exposure
+export write_exr, write_png
+
+# Exports - GPU
+export GPUNanoGrid, adapt_nanogrid
+export gpu_sphere_trace_cpu!, gpu_volume_march_cpu!
+export ProgressiveAccumulator, accumulate!, resolve
 
 end # module
