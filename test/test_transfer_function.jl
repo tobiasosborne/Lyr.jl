@@ -2,11 +2,6 @@
 using Test
 using Lyr
 
-# Include source into Lyr module until Lyr.jl adds the include/exports
-Base.include(Lyr, joinpath(@__DIR__, "..", "src", "TransferFunction.jl"))
-using .Lyr: ControlPoint, TransferFunction, evaluate
-using .Lyr: tf_blackbody, tf_cool_warm, tf_smoke, tf_viridis
-
 @testset "TransferFunction" begin
     @testset "ControlPoint construction" begin
         cp = ControlPoint(0.5, (1.0, 0.0, 0.0, 1.0))

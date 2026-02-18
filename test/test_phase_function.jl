@@ -3,11 +3,6 @@ using Test
 using Lyr
 using Random: Xoshiro, rand
 
-# Include source into Lyr module until Lyr.jl adds the include/exports
-Base.include(Lyr, joinpath(@__DIR__, "..", "src", "PhaseFunction.jl"))
-using .Lyr: PhaseFunction, IsotropicPhase, HenyeyGreensteinPhase
-using .Lyr: evaluate, sample_phase
-
 @testset "PhaseFunction" begin
     @testset "IsotropicPhase" begin
         pf = IsotropicPhase()

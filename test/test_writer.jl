@@ -11,37 +11,16 @@
 # 8. Grid descriptor write — round-trip
 # 9. Transform write — round-trip
 #
-# NOTE: This test file includes the writer source files into the Lyr module
-# so it can run standalone without modifying src/Lyr.jl.
-
 using Test
 using Lyr
 
-# Include writer source files into Lyr module (user will add proper includes later)
-Base.include(Lyr, joinpath(@__DIR__, "..", "src", "BinaryWrite.jl"))
-Base.include(Lyr, joinpath(@__DIR__, "..", "src", "FileWrite.jl"))
-
-# Access writer functions via Lyr module
-const write_u8! = Lyr.write_u8!
-const write_u32_le! = Lyr.write_u32_le!
-const write_u64_le! = Lyr.write_u64_le!
-const write_i32_le! = Lyr.write_i32_le!
-const write_i64_le! = Lyr.write_i64_le!
-const write_f16_le! = Lyr.write_f16_le!
-const write_f32_le! = Lyr.write_f32_le!
-const write_f64_le! = Lyr.write_f64_le!
-const write_bytes! = Lyr.write_bytes!
-const write_cstring! = Lyr.write_cstring!
-const write_string_with_size! = Lyr.write_string_with_size!
-const write_tile_value! = Lyr.write_tile_value!
+# Internal helpers accessed via Lyr. prefix
 const write_header! = Lyr.write_header!
 const write_metadata! = Lyr.write_metadata!
 const write_mask! = Lyr.write_mask!
 const write_transform! = Lyr.write_transform!
 const write_grid_descriptor! = Lyr.write_grid_descriptor!
 const write_tree! = Lyr.write_tree!
-const write_vdb = Lyr.write_vdb
-const write_vdb_to_buffer = Lyr.write_vdb_to_buffer
 const grid_type_string = Lyr.grid_type_string
 const grid_class_string = Lyr.grid_class_string
 
