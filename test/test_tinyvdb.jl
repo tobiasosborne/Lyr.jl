@@ -435,7 +435,7 @@ end
             true,             # is_compressed
             false,            # half_precision
             "test-uuid",      # uuid
-            UInt64(256)       # offset_to_data
+            UInt64(256)       # data_pos
         )
         @test h.file_version == UInt32(222)
         @test h.major_version == UInt32(9)
@@ -443,7 +443,7 @@ end
         @test h.is_compressed == true
         @test h.half_precision == false
         @test h.uuid == "test-uuid"
-        @test h.offset_to_data == UInt64(256)
+        @test h.data_pos == UInt64(256)
     end
 
     @testset "NodeType" begin
@@ -494,7 +494,7 @@ end
         @test header.minor_version == UInt32(0)
         @test header.is_compressed == false  # v222+ doesn't have compression byte
         @test header.uuid == uuid
-        @test header.offset_to_data == UInt64(pos)
+        @test header.data_pos == UInt64(pos)
         # 8 (magic) + 4 (file_ver) + 4 (major) + 4 (minor) + 1 (has_offsets) + 36 (uuid) = 57
         # So pos should be 58 (1-indexed, next position after byte 57)
         @test pos == 58

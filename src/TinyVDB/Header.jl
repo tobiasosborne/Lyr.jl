@@ -26,7 +26,7 @@ The VDB header layout is:
 - [21]    is_compressed (byte, only for version 220-221)
 - [36 bytes] uuid (ASCII string)
 
-Returns the header and the position immediately after the header (offset_to_data).
+Returns the header and the 1-indexed position immediately after the header.
 """
 function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     # Read and verify magic bytes

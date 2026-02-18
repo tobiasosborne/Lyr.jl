@@ -23,7 +23,7 @@ struct VDBHeader
     is_compressed::Bool
     half_precision::Bool
     uuid::String
-    offset_to_data::UInt64
+    data_pos::UInt64  # 1-indexed position after header (redundant with read_header return pos)
 end
 
 """

@@ -234,7 +234,7 @@ function active_voxel_count(tree::Tree{T})::Int where T
         if entry isa Tile{T}
             if entry.active
                 # A tile represents a large number of active voxels
-                count += 4096^3  # Full Internal2 region
+                count += ROOT_TILE_VOXELS
             end
         else
             node2 = entry::InternalNode2{T}
@@ -246,8 +246,10 @@ function active_voxel_count(tree::Tree{T})::Int where T
 end
 
 # Tile region sizes for counting active voxels
-const INTERNAL2_TILE_VOXELS = 128^3   # Full Internal1 region
-const INTERNAL1_TILE_VOXELS = 8^3     # Full leaf region
+# Root tiles cover a full Internal2 region: 32³ × 16³ × 8³ = 4096³ voxels
+const ROOT_TILE_VOXELS = 4096^3
+const INTERNAL2_TILE_VOXELS = 128^3   # Full Internal1 region: 16³ × 8³
+const INTERNAL1_TILE_VOXELS = 8^3     # Full leaf region: 8³
 
 """
     _count_active_tiles(node, tile_voxels::Int) -> Int
