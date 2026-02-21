@@ -2,7 +2,41 @@
 
 ---
 
-## Latest Session (2026-02-21) — Denoising filters for MC volume rendering
+## Latest Session (2026-02-21) — Gaussian splatting + grid builder + MD demo
+
+**Status**: 🟢 COMPLETE — 4 issues closed, 10410 tests pass (49 new)
+
+### What Was Done
+
+Added two missing pipeline pieces for particle-to-volume visualization:
+
+1. **`build_grid`** (`src/GridBuilder.jl`, ~100 LOC) — Builds a complete VDB tree bottom-up from sparse `Dict{Coord, T}` data. Groups voxels by leaf origin → I1 origin → I2 origin, constructs masks and node tables in correct order.
+
+2. **`gaussian_splat`** (`src/Particles.jl`, ~50 LOC) — Converts particle positions into a smooth density field via Gaussian kernel splatting. Supports configurable voxel size, sigma, cutoff, and optional per-particle weighted values.
+
+3. **MD spring demo** (`scripts/md_spring_demo.jl`, ~150 LOC) — End-to-end demo: 1000 particles on a 10×10×10 grid, harmonic spring forces, velocity Verlet integration, splat → build_grid → write_vdb → render → denoise → tonemap → PPM output.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/GridBuilder.jl` | **NEW** — `build_grid` + `_build_mask` helper |
+| `src/Particles.jl` | **NEW** — `gaussian_splat` |
+| `src/Lyr.jl` | Include both files + export `build_grid`, `gaussian_splat` |
+| `scripts/md_spring_demo.jl` | **NEW** — complete MD → render pipeline demo |
+| `test/test_grid_builder.jl` | **NEW** — 49 tests: single voxel, multi-leaf, multi-I1/I2, negatives, empty, round-trip write/parse, Float64, splat symmetry/accumulation/conservation |
+| `test/runtests.jl` | Include `test_grid_builder.jl` |
+
+### Key Design Decisions
+
+- `build_grid` works with any `T` (Float32, Float64, etc.) — builds immutable `Mask` from word tuples via `_build_mask`
+- Children sorted by bit index before insertion into node tables (matches `on_indices` iteration order)
+- `gaussian_splat` returns `Dict{Coord, Float32}` — directly feeds into `build_grid`
+- Demo uses `render_volume_image` (MC delta tracking), not preview renderer, for quality output
+
+---
+
+## Previous Session (2026-02-21) — Denoising filters for MC volume rendering
 
 **Status**: 🟢 COMPLETE — 1 issue closed, 10361 tests pass (558 new)
 

@@ -71,6 +71,7 @@ import Lyr:
     include("test_integration.jl")
     include("test_parser_equivalence.jl")
     include("test_writer.jl")
+    include("test_grid_builder.jl")
     include("test_transfer_function.jl")
     include("test_phase_function.jl")
     include("test_scene.jl")

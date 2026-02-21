@@ -46,6 +46,10 @@ include("NanoVDB.jl")
 # TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
 include("TinyVDB/TinyVDB.jl")
 
+# Grid construction from sparse data
+include("GridBuilder.jl")
+include("Particles.jl")
+
 # Phase 2: VDB Writer
 include("BinaryWrite.jl")
 include("FileWrite.jl")
@@ -126,6 +130,9 @@ export Camera, render_image, write_ppm
 
 # Surface
 export SurfaceHit, find_surface
+
+# Grid Builder
+export build_grid, gaussian_splat
 
 # VDB Writer (high-level only)
 export write_vdb, write_vdb_to_buffer
