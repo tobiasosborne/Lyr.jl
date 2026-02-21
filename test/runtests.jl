@@ -38,7 +38,8 @@ import Lyr:
     # Volume internals
     delta_tracking_step, ratio_tracking,
     # GPU internals
-    _gpu_get_value, _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
+    _gpu_get_value, _gpu_get_value_trilinear,
+    _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
     _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
     _bake_tf_lut, _estimate_density_range,
     # Scene abstract

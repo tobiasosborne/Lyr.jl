@@ -221,6 +221,55 @@ All arithmetic uses Int32 for GPU compatibility.
 end
 
 # ============================================================================
+# Device-side trilinear interpolation
+# ============================================================================
+
+"""
+    _gpu_get_value_trilinear(buf, background, fx, fy, fz, header_T_size) -> Float32
+
+Device-side trilinear interpolation through NanoGrid buffer.
+Samples 8 corners of the voxel containing (fx, fy, fz) and
+lerps based on fractional position.
+"""
+@inline function _gpu_get_value_trilinear(buf, background::Float32,
+                                           fx::Float32, fy::Float32, fz::Float32,
+                                           header_T_size::Int32)::Float32
+    # Floor coordinates
+    x0 = floor(Int32, fx)
+    y0 = floor(Int32, fy)
+    z0 = floor(Int32, fz)
+    x1 = x0 + Int32(1)
+    y1 = y0 + Int32(1)
+    z1 = z0 + Int32(1)
+
+    # Fractional part
+    tx = fx - Float32(x0)
+    ty = fy - Float32(y0)
+    tz = fz - Float32(z0)
+
+    # Sample 8 corners
+    c000 = _gpu_get_value(buf, background, x0, y0, z0, header_T_size)
+    c100 = _gpu_get_value(buf, background, x1, y0, z0, header_T_size)
+    c010 = _gpu_get_value(buf, background, x0, y1, z0, header_T_size)
+    c110 = _gpu_get_value(buf, background, x1, y1, z0, header_T_size)
+    c001 = _gpu_get_value(buf, background, x0, y0, z1, header_T_size)
+    c101 = _gpu_get_value(buf, background, x1, y0, z1, header_T_size)
+    c011 = _gpu_get_value(buf, background, x0, y1, z1, header_T_size)
+    c111 = _gpu_get_value(buf, background, x1, y1, z1, header_T_size)
+
+    # Trilinear interpolation
+    c00 = c000 * (1.0f0 - tx) + c100 * tx
+    c10 = c010 * (1.0f0 - tx) + c110 * tx
+    c01 = c001 * (1.0f0 - tx) + c101 * tx
+    c11 = c011 * (1.0f0 - tx) + c111 * tx
+
+    c0 = c00 * (1.0f0 - ty) + c10 * ty
+    c1 = c01 * (1.0f0 - ty) + c11 * ty
+
+    c0 * (1.0f0 - tz) + c1 * tz
+end
+
+# ============================================================================
 # Device-side ray-AABB intersection
 # ============================================================================
 
@@ -386,14 +435,11 @@ For shadow rays, uses ratio tracking transmittance estimation.
 
             t >= t_exit && break
 
-            # Sample density at current position
+            # Sample density at current position (trilinear interpolation)
             pos_x = cam_px + t * dx
             pos_y = cam_py + t * dy
             pos_z = cam_pz + t * dz
-            cx = round(Int32, pos_x)
-            cy = round(Int32, pos_y)
-            cz = round(Int32, pos_z)
-            density = _gpu_get_value(buf, background, cx, cy, cz, header_T_size)
+            density = _gpu_get_value_trilinear(buf, background, pos_x, pos_y, pos_z, header_T_size)
             density = max(0.0f0, density)
 
             sigma_real = density * sigma_maj
@@ -432,10 +478,7 @@ For shadow rays, uses ratio tracking transmittance estimation.
                             sp_x = shadow_ox + st * light_dx
                             sp_y = shadow_oy + st * light_dy
                             sp_z = shadow_oz + st * light_dz
-                            scx = round(Int32, sp_x)
-                            scy = round(Int32, sp_y)
-                            scz = round(Int32, sp_z)
-                            sd = _gpu_get_value(buf, background, scx, scy, scz, header_T_size)
+                            sd = _gpu_get_value_trilinear(buf, background, sp_x, sp_y, sp_z, header_T_size)
                             sd = max(0.0f0, sd)
 
                             s_real = sd * sigma_maj

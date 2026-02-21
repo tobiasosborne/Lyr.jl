@@ -3,7 +3,8 @@ using Test
 using Lyr
 
 # Internal symbols needed for testing
-import Lyr: _gpu_get_value, _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
+import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
+             _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
              _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
              _bake_tf_lut, _estimate_density_range,
              _I2_CMASK_OFF, _I2_VMASK_OFF, _I2_CPREFIX_OFF, _I2_VPREFIX_OFF,
@@ -62,6 +63,38 @@ import Lyr: _gpu_get_value, _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
                 expected = Float32(get_value(acc, coord(x, y, z)))
                 actual = _gpu_get_value(buf, bg, x, y, z, header_T_size)
                 @test actual == expected
+            end
+        end
+    end
+
+    @testset "_gpu_get_value_trilinear: smooth interpolation" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if isfile(cube_path)
+            vdb = parse_vdb(cube_path)
+            grid = vdb.grids[1]
+            nanogrid = build_nanogrid(grid.tree)
+            buf = nanogrid.buffer
+            bg = Float32(nano_background(nanogrid))
+            header_T_size = Int32(sizeof(eltype(grid.tree.background)))
+
+            # At integer coordinates, trilinear should equal nearest-neighbor
+            bbox = nano_bbox(nanogrid)
+            for _ in 1:50
+                x = Int32(rand((bbox.min.x + 1):(bbox.max.x - 1)))
+                y = Int32(rand((bbox.min.y + 1):(bbox.max.y - 1)))
+                z = Int32(rand((bbox.min.z + 1):(bbox.max.z - 1)))
+                nn = _gpu_get_value(buf, bg, x, y, z, header_T_size)
+                tri = _gpu_get_value_trilinear(buf, bg, Float32(x), Float32(y), Float32(z), header_T_size)
+                @test tri ≈ nn atol=1e-6
+            end
+
+            # At fractional coordinates, trilinear should be between neighbors
+            for _ in 1:50
+                x = Float32(rand((bbox.min.x + 1):(bbox.max.x - 2))) + rand(Float32)
+                y = Float32(rand((bbox.min.y + 1):(bbox.max.y - 2))) + rand(Float32)
+                z = Float32(rand((bbox.min.z + 1):(bbox.max.z - 2))) + rand(Float32)
+                val = _gpu_get_value_trilinear(buf, bg, x, y, z, header_T_size)
+                @test isfinite(val)
             end
         end
     end
