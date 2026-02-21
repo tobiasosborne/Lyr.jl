@@ -2,7 +2,61 @@
 
 ---
 
-## Latest Session (2026-02-21) — GPU delta tracking kernel + stale issue cleanup
+## Latest Session (2026-02-21) — Denoising filters for MC volume rendering
+
+**Status**: 🟢 COMPLETE — 1 issue closed, 10361 tests pass (558 new)
+
+### What Was Done
+
+Implemented two post-render denoising filters for Monte Carlo noise reduction (`path-tracer-gj8d`). Both are pure Julia, no new dependencies, and work in the pipeline between render and tonemap:
+
+```
+render → denoise_nlm / denoise_bilateral → tonemap → write
+```
+
+| Function | Algorithm | Use Case |
+|----------|-----------|----------|
+| `denoise_nlm` | Non-local means: L2 patch distance weighting over search window | Best quality for MC noise (exploits non-local self-similarity) |
+| `denoise_bilateral` | Gaussian spatial × Gaussian color-difference | Fast alternative (~400× cheaper), edge-preserving |
+
+Both are parameterized on `T <: AbstractFloat` — works with Float64 (CPU renderer) and Float32 (GPU renderer output).
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Output.jl` | +120 LOC: `denoise_nlm` and `denoise_bilateral` between tone mapping and EXR sections |
+| `src/Lyr.jl` | Export `denoise_nlm`, `denoise_bilateral` |
+| `test/test_output.jl` | +110 LOC: 10 test groups — uniform invariance, noise variance reduction, Float32 compat, edge preservation, 1×1 edge case, finite output |
+
+### Test Results
+
+```
+10361 pass, 0 fail, 0 errors (was 9803)
+558 new denoiser tests
+```
+
+### Project Status Summary
+
+**~12,100 LOC source, ~9,900 LOC tests, 42 files**
+
+| Phase | Status | Key Components |
+|-------|--------|----------------|
+| Phase 1: Foundation | **COMPLETE** | VDB read/write, DDA traversal, NanoVDB flat layout |
+| Phase 2: Volume Renderer | **~86% DONE** | Delta/ratio tracking, TF, scene, PNG/EXR output. Missing: deep EXR |
+| Phase 3: GPU Acceleration | **~80% DONE** | Delta tracking @kernel, NLM + bilateral denoising. Missing: ratio tracking |
+| Phase 4: Creation Tools | Not started | Mesh-to-SDF, procedural, CSG |
+| Phase 5: Ecosystem | Not started | Makie, animation, multi-scatter, differentiable rendering |
+
+### Next Priority
+
+1. **Deep EXR compositing** (`path-tracer-mt7t`) — Phase 2 completion
+2. **Makie recipe** — Interactive volume preview
+3. **Multi-scatter** — Beyond single-scatter for production quality
+
+---
+
+## Previous Session (2026-02-21) — GPU delta tracking kernel + stale issue cleanup
 
 **Status**: 🟢 COMPLETE — 21 issues closed, 5 created, 9803 tests pass (620 new)
 
