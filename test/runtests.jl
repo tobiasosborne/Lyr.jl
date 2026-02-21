@@ -37,6 +37,10 @@ import Lyr:
     camera_ray, sphere_trace, shade,
     # Volume internals
     delta_tracking_step, ratio_tracking,
+    # GPU internals
+    _gpu_get_value, _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
+    _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
+    _bake_tf_lut, _estimate_density_range,
     # Scene abstract
     AbstractLight
 
@@ -70,6 +74,7 @@ import Lyr:
     include("test_phase_function.jl")
     include("test_scene.jl")
     include("test_volume_renderer.jl")
+    include("test_gpu.jl")
     include("test_output.jl")
     include("test_show.jl")
     include("test_properties.jl")

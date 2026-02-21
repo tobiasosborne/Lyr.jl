@@ -151,6 +151,7 @@ export write_exr, write_png
 
 # GPU
 export GPUNanoGrid, adapt_nanogrid
+export gpu_render_volume
 export ProgressiveAccumulator, accumulate!, resolve
 
 end # module

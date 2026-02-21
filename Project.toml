@@ -4,15 +4,19 @@ version = "0.1.0"
 authors = ["Lyr.jl Contributors"]
 
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
+Adapt = "4"
 BenchmarkTools = "1.6"
 Blosc = "0.7"
 CodecZlib = "0.7"
+KernelAbstractions = "0.9"
 Cthulhu = "2"
 Debugger = "0.7.16"
 Infiltrator = "1.9.7"
