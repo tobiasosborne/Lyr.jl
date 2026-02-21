@@ -2,7 +2,69 @@
 
 ---
 
-## Latest Session (2026-02-18) — API cleanup & code hygiene
+## Latest Session (2026-02-21) — GPU delta tracking kernel + stale issue cleanup
+
+**Status**: 🟢 COMPLETE — 21 issues closed, 5 created, 9803 tests pass (620 new)
+
+### What Was Done
+
+Audited codebase against VISION.md, closed 19 stale beads issues verified as complete, created 5 new VISION gap issues, and implemented the GPU delta tracking kernel via KernelAbstractions.jl.
+
+**Issue housekeeping**:
+- Closed 19 stale issues: 8 NanoVDB (all phases done), 4 recent commits (show/rename/exports/off_indices), 5 dead code, 2 other (read_f16_le, DDA sphere_trace)
+- Created 5 VISION gap issues: Deep EXR (P2), GPU delta tracking (P1), GPU ratio tracking (P1, blocked by delta), Denoising (P2), Deprecate fixed-step march (P3)
+
+**GPU delta tracking kernel** (`path-tracer-6y5p`, `path-tracer-zzml`):
+
+| Component | What |
+|-----------|------|
+| `_gpu_buf_count_on_before` | Device-side prefix sum lookup for mask child indexing |
+| `_gpu_get_value` | Stateless Root→I2→I1→Leaf traversal on flat NanoGrid buffer (all Int32 arithmetic) |
+| `_gpu_ray_box_intersect` | Float32 ray-AABB slab intersection |
+| `_gpu_xorshift` / `_gpu_wang_hash` | Per-pixel RNG (xorshift32 + Wang hash for decorrelation) |
+| `_gpu_tf_lookup` | Device-side 1D transfer function LUT evaluation |
+| `delta_tracking_kernel!` | KA.jl `@kernel`: exponential free-flight, null-collision rejection, ratio tracking shadow rays, single-scatter |
+| `gpu_render_volume` | Dispatch wrapper: bakes TF LUT, adapts buffer, progressive spp accumulation |
+
+### Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `Project.toml` | Added KernelAbstractions v0.9 + Adapt v4 deps |
+| `src/GPU.jl` | +595 LOC: device-side buffer ops, value lookup, delta tracking @kernel, render wrapper |
+| `src/Lyr.jl` | Export `gpu_render_volume` |
+| `test/test_gpu.jl` | **NEW** — 620 tests: _gpu_get_value vs NanoValueAccessor (200+200 coords on cube+smoke), ray-box, RNG, TF LUT, render smoke tests, determinism, multi-spp |
+| `test/runtests.jl` | Include test_gpu.jl + GPU internal imports |
+
+### Test Results
+
+```
+9803 pass, 0 fail, 0 errors (was 9183)
+620 new GPU tests (value lookup correctness, kernel smoke tests, determinism)
+```
+
+### Project Status Summary
+
+**~12,000 LOC source, ~9,300 LOC tests, 42 files**
+
+| Phase | Status | Key Components |
+|-------|--------|----------------|
+| Phase 1: Foundation | **COMPLETE** | VDB read/write, DDA traversal, NanoVDB flat layout |
+| Phase 2: Volume Renderer | **~86% DONE** | Delta/ratio tracking, TF, scene, PNG/EXR output. Missing: deep EXR |
+| Phase 3: GPU Acceleration | **~67% DONE** | Delta tracking @kernel, ratio tracking, CPU backend. Missing: denoising |
+| Phase 4: Creation Tools | Not started | Mesh-to-SDF, procedural, CSG |
+| Phase 5: Ecosystem | Not started | Makie, animation, multi-scatter, differentiable rendering |
+
+### Next Priority
+
+1. **Deep EXR compositing** (`path-tracer-mt7t`) — Phase 2 completion
+2. **Denoising** (`path-tracer-gj8d`) — Phase 3 completion
+3. **Makie recipe** — Interactive volume preview
+4. **Multi-scatter** — Beyond single-scatter for production quality
+
+---
+
+## Previous Session (2026-02-18) — API cleanup & code hygiene
 
 **Status**: 🟢 COMPLETE — 14 issues closed, 9183 tests pass (23 new)
 
