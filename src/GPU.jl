@@ -382,8 +382,9 @@ For shadow rays, uses ratio tracking transmittance estimation.
     px = ((idx - Int32(1)) % width) + Int32(1)
     py = ((idx - Int32(1)) ÷ width) + Int32(1)
 
-    # Initialize per-pixel RNG
-    rng_state = _gpu_wang_hash(UInt32(idx) + seed)
+    # Initialize per-pixel RNG — hash pixel and sample separately to prevent
+    # cross-correlation (idx+seed collides: pixel 1 sample 2 == pixel 2 sample 1)
+    rng_state = _gpu_wang_hash(_gpu_wang_hash(UInt32(idx)) ⊻ seed)
 
     # Jittered sub-pixel offset
     jx, rng_state = _gpu_xorshift(rng_state)
