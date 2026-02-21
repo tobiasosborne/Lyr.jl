@@ -81,6 +81,132 @@ function auto_exposure(pixels::Matrix{NTuple{3, Float64}})::Float64
 end
 
 # ============================================================================
+# Denoising filters for Monte Carlo noise
+# ============================================================================
+
+"""
+    denoise_nlm(pixels::Matrix{NTuple{3, T}};
+                search_radius=7, patch_radius=3, h=T(0.1)) -> Matrix{NTuple{3, T}}
+
+Non-local means denoiser. Compares patches across a search window and averages
+pixels weighted by patch similarity. Excellent for Monte Carlo noise where
+the noise is spatially uncorrelated.
+
+- `search_radius`: half-size of the search window (default 7 → 15×15)
+- `patch_radius`:  half-size of comparison patches (default 3 → 7×7)
+- `h`:             filtering strength (larger = smoother)
+"""
+function denoise_nlm(pixels::Matrix{NTuple{3, T}};
+                     search_radius::Int=7,
+                     patch_radius::Int=3,
+                     h::T=T(0.1)) where T <: AbstractFloat
+    height, width = size(pixels)
+    result = similar(pixels)
+    inv_h2 = one(T) / (h * h)
+    patch_area = T((2 * patch_radius + 1)^2)
+
+    for j in 1:width, i in 1:height
+        sum_r = zero(T)
+        sum_g = zero(T)
+        sum_b = zero(T)
+        sum_w = zero(T)
+
+        # Search window bounds
+        sj_lo = max(1, j - search_radius)
+        sj_hi = min(width, j + search_radius)
+        si_lo = max(1, i - search_radius)
+        si_hi = min(height, i + search_radius)
+
+        for sj in sj_lo:sj_hi, si in si_lo:si_hi
+            # Compute L2 patch distance
+            dist2 = zero(T)
+            count = 0
+            for dj in -patch_radius:patch_radius, di in -patch_radius:patch_radius
+                pi = i + di; pj = j + dj
+                qi = si + di; qj = sj + dj
+                if 1 <= pi <= height && 1 <= pj <= width &&
+                   1 <= qi <= height && 1 <= qj <= width
+                    pr, pg, pb = pixels[pi, pj]
+                    qr, qg, qb = pixels[qi, qj]
+                    dr = pr - qr; dg = pg - qg; db = pb - qb
+                    dist2 += dr*dr + dg*dg + db*db
+                    count += 1
+                end
+            end
+            # Normalize by patch area
+            d2_norm = count > 0 ? dist2 / T(count) : zero(T)
+            w = exp(-d2_norm * inv_h2)
+
+            sr, sg, sb = pixels[si, sj]
+            sum_r += w * sr
+            sum_g += w * sg
+            sum_b += w * sb
+            sum_w += w
+        end
+
+        inv_w = one(T) / sum_w
+        result[i, j] = (sum_r * inv_w, sum_g * inv_w, sum_b * inv_w)
+    end
+    result
+end
+
+"""
+    denoise_bilateral(pixels::Matrix{NTuple{3, T}};
+                      spatial_sigma=T(2.0), range_sigma=T(0.1),
+                      radius=0) -> Matrix{NTuple{3, T}}
+
+Edge-stopping bilateral filter. Much faster than NLM (~400×) but less effective
+on Monte Carlo noise. Preserves edges where color changes sharply.
+
+- `spatial_sigma`: std-dev of the spatial Gaussian
+- `range_sigma`:   std-dev of the color-difference Gaussian
+- `radius`:        filter radius (0 = auto: `ceil(2 * spatial_sigma)`)
+"""
+function denoise_bilateral(pixels::Matrix{NTuple{3, T}};
+                           spatial_sigma::T=T(2.0),
+                           range_sigma::T=T(0.1),
+                           radius::Int=0) where T <: AbstractFloat
+    height, width = size(pixels)
+    result = similar(pixels)
+
+    r = radius > 0 ? radius : ceil(Int, T(2) * spatial_sigma)
+    inv_spatial2 = one(T) / (T(2) * spatial_sigma * spatial_sigma)
+    inv_range2 = one(T) / (T(2) * range_sigma * range_sigma)
+
+    for j in 1:width, i in 1:height
+        cr, cg, cb = pixels[i, j]
+        sum_r = zero(T)
+        sum_g = zero(T)
+        sum_b = zero(T)
+        sum_w = zero(T)
+
+        ni_lo = max(1, i - r)
+        ni_hi = min(height, i + r)
+        nj_lo = max(1, j - r)
+        nj_hi = min(width, j + r)
+
+        for nj in nj_lo:nj_hi, ni in ni_lo:ni_hi
+            di = T(ni - i); dj = T(nj - j)
+            spatial_w = exp(-(di*di + dj*dj) * inv_spatial2)
+
+            nr, ng, nb = pixels[ni, nj]
+            dr = nr - cr; dg = ng - cg; db = nb - cb
+            range_w = exp(-(dr*dr + dg*dg + db*db) * inv_range2)
+
+            w = spatial_w * range_w
+            sum_r += w * nr
+            sum_g += w * ng
+            sum_b += w * nb
+            sum_w += w
+        end
+
+        inv_w = one(T) / sum_w
+        result[i, j] = (sum_r * inv_w, sum_g * inv_w, sum_b * inv_w)
+    end
+    result
+end
+
+# ============================================================================
 # EXR output (optional — requires OpenEXR.jl)
 # ============================================================================
 

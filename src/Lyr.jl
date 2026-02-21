@@ -147,6 +147,7 @@ export render_volume_image, render_volume_preview
 
 # Output
 export tonemap_reinhard, tonemap_aces, tonemap_exposure, auto_exposure
+export denoise_nlm, denoise_bilateral
 export write_exr, write_png
 
 # GPU

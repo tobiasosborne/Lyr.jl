@@ -1,6 +1,7 @@
 # Test output formats and tone mapping
 using Test
 using Lyr
+using Random
 
 @testset "Output" begin
     @testset "tonemap_reinhard" begin
@@ -88,5 +89,118 @@ using Lyr
         ppm_path = replace(tmpfile, ".png" => ".ppm")
         @test isfile(ppm_path)
         rm(ppm_path)
+    end
+
+    @testset "denoise_nlm" begin
+        @testset "uniform image unchanged" begin
+            pixels = fill((0.5, 0.5, 0.5), 8, 8)
+            result = denoise_nlm(pixels)
+            for i in eachindex(result)
+                @test result[i][1] ≈ 0.5 atol=1e-10
+                @test result[i][2] ≈ 0.5 atol=1e-10
+                @test result[i][3] ≈ 0.5 atol=1e-10
+            end
+        end
+
+        @testset "reduces noise variance" begin
+            rng = MersenneTwister(42)
+            base = 0.5
+            pixels = Matrix{NTuple{3, Float64}}(undef, 16, 16)
+            for i in eachindex(pixels)
+                noise = (rand(rng) - 0.5) * 0.2
+                v = base + noise
+                pixels[i] = (v, v, v)
+            end
+            result = denoise_nlm(pixels; h=0.1)
+            # Compute variance of red channel
+            vals_in = [p[1] for p in pixels]
+            vals_out = [p[1] for p in result]
+            var_in = sum((v - base)^2 for v in vals_in) / length(vals_in)
+            var_out = sum((v - base)^2 for v in vals_out) / length(vals_out)
+            @test var_out < var_in
+        end
+
+        @testset "Float32 input" begin
+            pixels = fill((0.5f0, 0.3f0, 0.7f0), 8, 8)
+            result = denoise_nlm(pixels; h=0.1f0)
+            @test eltype(result) == NTuple{3, Float32}
+            @test result[1, 1][1] ≈ 0.5f0 atol=1e-5
+        end
+
+        @testset "1x1 image" begin
+            pixels = [(0.3, 0.4, 0.5);;]
+            result = denoise_nlm(pixels)
+            @test result[1, 1] == (0.3, 0.4, 0.5)
+        end
+
+        @testset "output finite and non-negative" begin
+            rng = MersenneTwister(123)
+            pixels = Matrix{NTuple{3, Float64}}(undef, 8, 8)
+            for i in eachindex(pixels)
+                v = rand(rng) * 2.0
+                pixels[i] = (v, v * 0.5, v * 0.3)
+            end
+            result = denoise_nlm(pixels)
+            for i in eachindex(result)
+                r, g, b = result[i]
+                @test isfinite(r) && isfinite(g) && isfinite(b)
+            end
+        end
+    end
+
+    @testset "denoise_bilateral" begin
+        @testset "uniform image unchanged" begin
+            pixels = fill((0.5, 0.5, 0.5), 8, 8)
+            result = denoise_bilateral(pixels)
+            for i in eachindex(result)
+                @test result[i][1] ≈ 0.5 atol=1e-10
+                @test result[i][2] ≈ 0.5 atol=1e-10
+                @test result[i][3] ≈ 0.5 atol=1e-10
+            end
+        end
+
+        @testset "reduces noise variance" begin
+            rng = MersenneTwister(99)
+            base = 0.5
+            pixels = Matrix{NTuple{3, Float64}}(undef, 16, 16)
+            for i in eachindex(pixels)
+                noise = (rand(rng) - 0.5) * 0.2
+                v = base + noise
+                pixels[i] = (v, v, v)
+            end
+            result = denoise_bilateral(pixels; range_sigma=0.1)
+            vals_in = [p[1] for p in pixels]
+            vals_out = [p[1] for p in result]
+            var_in = sum((v - base)^2 for v in vals_in) / length(vals_in)
+            var_out = sum((v - base)^2 for v in vals_out) / length(vals_out)
+            @test var_out < var_in
+        end
+
+        @testset "edge preservation" begin
+            # Black left half, white right half
+            pixels = Matrix{NTuple{3, Float64}}(undef, 8, 16)
+            for j in 1:16, i in 1:8
+                v = j <= 8 ? 0.0 : 1.0
+                pixels[i, j] = (v, v, v)
+            end
+            result = denoise_bilateral(pixels; spatial_sigma=2.0, range_sigma=0.05)
+            # Far-left column should remain near black
+            @test result[4, 1][1] < 0.05
+            # Far-right column should remain near white
+            @test result[4, 16][1] > 0.95
+        end
+
+        @testset "Float32 input" begin
+            pixels = fill((0.5f0, 0.3f0, 0.7f0), 8, 8)
+            result = denoise_bilateral(pixels; spatial_sigma=2.0f0, range_sigma=0.1f0)
+            @test eltype(result) == NTuple{3, Float32}
+            @test result[1, 1][1] ≈ 0.5f0 atol=1e-5
+        end
+
+        @testset "1x1 image" begin
+            pixels = [(0.3, 0.4, 0.5);;]
+            result = denoise_bilateral(pixels)
+            @test result[1, 1] == (0.3, 0.4, 0.5)
+        end
     end
 end
