@@ -2,7 +2,91 @@
 
 ---
 
-## Latest Session (2026-02-21) — Gaussian splatting + grid builder + MD demo
+## Latest Session (2026-02-22) — Field Protocol + voxelize + visualize
+
+**Status**: COMPLETE — 6 issues closed, 36,027 tests pass (25,617 new)
+
+### What Was Done
+
+Implemented the Field Protocol — the core v1.0 abstraction layer that bridges physics computation to volumetric rendering. This is the product per the PRD: "minimal cognitive distance from physics to pixels."
+
+1. **Field Protocol** (`src/FieldProtocol.jl`, ~250 LOC) — Abstract types (`AbstractField`, `AbstractContinuousField`, `AbstractDiscreteField`), domain types (`BoxDomain` with SVec3d), and reference implementations (`ScalarField3D`, `VectorField3D`, `ComplexScalarField3D`, `ParticleField`, `TimeEvolution`). Interface: `evaluate()`, `domain()`, `field_eltype()`, `characteristic_scale()`.
+
+2. **Voxelize** (`src/Voxelize.jl`, ~150 LOC) — `voxelize()` bridges fields to VDB grids: uniform sampling for scalar fields, magnitude reduction for vector fields, `abs2` for complex fields (probability density), Gaussian splatting for particles. Auto `voxel_size` from `characteristic_scale / 5`.
+
+3. **Visualize** (`src/Visualize.jl`, ~250 LOC) — `visualize(field)` is a one-call entry point: voxelize → build_nanogrid → auto-camera → Scene → render_volume_image → tonemap → write. Presets: `camera_orbit/front/iso`, `material_emission/cloud/fire`, `light_studio/natural/dramatic`.
+
+4. **Example scripts** (`examples/`, 4 scripts) — EM dipole (ScalarField3D), 3D Ising model (ScalarField3D from lattice), hydrogen 3d_z² orbital (ComplexScalarField3D), MD spring particles (ParticleField). All run end-to-end.
+
+### Files Created/Modified
+
+| File | Change |
+|------|--------|
+| `src/FieldProtocol.jl` | **NEW** — Field Protocol types + interface |
+| `src/Voxelize.jl` | **NEW** — voxelize() for all field types |
+| `src/Visualize.jl` | **NEW** — visualize(), presets, auto-camera |
+| `src/Lyr.jl` | 3 includes + ~20 new exports |
+| `test/test_field_protocol.jl` | **NEW** — 44 tests |
+| `test/test_voxelize.jl` | **NEW** — 25,547 tests |
+| `test/test_visualize.jl` | **NEW** — 26 tests |
+| `test/runtests.jl` | 3 includes + import |
+| `examples/em_dipole.jl` | **NEW** — EM field visualization |
+| `examples/ising_model.jl` | **NEW** — Ising model visualization |
+| `examples/hydrogen_orbital.jl` | **NEW** — QM orbital visualization |
+| `examples/md_particles.jl` | **NEW** — MD particle visualization |
+| `VISION.md` | Rewritten: agent-native physics visualization platform |
+| `PRD.md` | Updated: v1.0 product requirements |
+
+### Test Results
+
+```
+36,027 pass, 0 fail, 0 errors (was 10,410)
+25,617 new tests (Field Protocol: 44, Voxelize: 25,547, Visualize: 26)
+```
+
+### Project Status Summary
+
+**~14,300 LOC source, ~11,000 LOC tests, 45 source files**
+
+| Phase | Status | Key Components |
+|-------|--------|----------------|
+| Phase 1: Foundation | **COMPLETE** | VDB read/write, DDA traversal, NanoVDB flat layout |
+| Phase 2: Volume Renderer | **~86% DONE** | Delta/ratio tracking, TF, scene, PNG/EXR, denoising |
+| Phase 3: Field Protocol | **COMPLETE** | AbstractField, voxelize, visualize, 4 example scripts |
+| Phase 4: Physics Modules | Not started | LyrEM, LyrQM, etc. (separate packages) |
+| Phase 5: Production Quality | Not started | Multi-scatter, differentiable, Makie integration |
+
+### v1.0 Checklist (from PRD)
+
+- [x] VDB read/write
+- [x] Delta tracking (CPU + GPU)
+- [x] Ratio tracking shadows
+- [x] Transfer functions
+- [x] Camera models
+- [x] Scene graph
+- [x] Denoising (NLM + bilateral)
+- [x] Tonemapping
+- [x] PNG + basic EXR output
+- [x] Grid builder
+- [x] Gaussian splatting
+- [x] GPU delta tracking kernel
+- [x] **Field Protocol** (AbstractField, evaluate, domain, field_eltype)
+- [x] **voxelize()** (continuous field → VDB grid)
+- [x] **visualize()** (high-level entry point with defaults)
+- [x] **Example scripts** (4 physics domains: EM, stat mech, QM, classical)
+- [x] **Docstrings** (agent-contract quality on all new code)
+- [x] **10,000+ tests** (36,027)
+
+### Next Priority
+
+1. **Julia General registry** — package registration
+2. **Deep EXR compositing** — Phase 2 completion
+3. **Multi-scatter** — Production rendering quality
+4. **Makie integration** — Interactive viewports
+
+---
+
+## Previous Session (2026-02-21) — Gaussian splatting + grid builder + MD demo
 
 **Status**: 🟢 COMPLETE — 4 issues closed, 10410 tests pass (49 new)
 
