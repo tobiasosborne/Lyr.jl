@@ -38,7 +38,22 @@ grid = voxelize(field)  # auto voxel_size = 0.2
 function voxelize(f::ScalarField3D;
                   voxel_size::Float64=auto_voxel_size(f),
                   threshold::Float64=1e-6,
-                  normalize::Bool=true)
+                  normalize::Bool=true,
+                  adaptive::Bool=true,
+                  block_tolerance::Float64=0.01)
+    if adaptive
+        _voxelize_adaptive(f; voxel_size=voxel_size, threshold=threshold,
+                           normalize=normalize, block_tolerance=block_tolerance)
+    else
+        _voxelize_uniform(f; voxel_size=voxel_size, threshold=threshold,
+                          normalize=normalize)
+    end
+end
+
+function _voxelize_uniform(f::ScalarField3D;
+                           voxel_size::Float64=auto_voxel_size(f),
+                           threshold::Float64=1e-6,
+                           normalize::Bool=true)
     dom = domain(f)
     inv_vs = 1.0 / voxel_size
 
@@ -61,6 +76,108 @@ function voxelize(f::ScalarField3D;
             data[coord(ix, iy, iz)] = Float32(val)
             abs_val = abs(val)
             abs_val > max_val && (max_val = abs_val)
+        end
+    end
+
+    if normalize && max_val > 0.0
+        _normalize_and_threshold!(data, max_val, threshold)
+    elseif !normalize && threshold > 0.0
+        _apply_threshold!(data, threshold)
+    end
+
+    build_grid(data, 0.0f0; name="density",
+               grid_class=GRID_FOG_VOLUME, voxel_size=voxel_size)
+end
+
+"""
+    _voxelize_adaptive(f; voxel_size, threshold, normalize, block_tolerance)
+
+Adaptive voxelization: divide domain into 8³ blocks (VDB leaf size),
+sample corners to estimate variation, only fill leaves where the field
+has significant structure. Skips near-constant regions entirely.
+
+`block_tolerance` controls the relative variation threshold — blocks where
+`(max - min) / global_max < block_tolerance` are skipped.
+"""
+function _voxelize_adaptive(f::ScalarField3D;
+                            voxel_size::Float64=auto_voxel_size(f),
+                            threshold::Float64=1e-6,
+                            normalize::Bool=true,
+                            block_tolerance::Float64=0.01)
+    dom = domain(f)
+    inv_vs = 1.0 / voxel_size
+    B = Int32(8)  # block size = VDB leaf dimension
+
+    # Domain bounds in index space, aligned to block boundaries
+    imin = fld(floor(Int32, dom.min[1] * inv_vs), B) * B
+    jmin = fld(floor(Int32, dom.min[2] * inv_vs), B) * B
+    kmin = fld(floor(Int32, dom.min[3] * inv_vs), B) * B
+    imax = cld(ceil(Int32, dom.max[1] * inv_vs), B) * B
+    jmax = cld(ceil(Int32, dom.max[2] * inv_vs), B) * B
+    kmax = cld(ceil(Int32, dom.max[3] * inv_vs), B) * B
+
+    # Pass 1: sample block corners to find global max and identify active blocks
+    global_max = 0.0
+    corner_cache = Dict{NTuple{3,Int32}, Float64}()
+
+    function _sample_corner(ix, iy, iz)
+        key = (ix, iy, iz)
+        get!(corner_cache, key) do
+            evaluate(f, Float64(ix) * voxel_size, Float64(iy) * voxel_size, Float64(iz) * voxel_size)
+        end
+    end
+
+    # Collect block info: (block_origin, corner_min, corner_max)
+    blocks = NTuple{3,Int32}[]
+    block_ranges = Float64[]  # max - min per block
+
+    for bz in kmin:B:imax-1, by in jmin:B:jmax-1, bx in imin:B:imax-1
+        # Sample 8 corners of this block
+        cmin = Inf; cmax = -Inf
+        for dz in (Int32(0), B), dy in (Int32(0), B), dx in (Int32(0), B)
+            v = _sample_corner(bx + dx, by + dy, bz + dz)
+            v < cmin && (cmin = v)
+            v > cmax && (cmax = v)
+        end
+        amax = max(abs(cmin), abs(cmax))
+        amax > global_max && (global_max = amax)
+        push!(blocks, (bx, by, bz))
+        push!(block_ranges, cmax - cmin)
+    end
+
+    global_max == 0.0 && return build_grid(Dict{Coord,Float32}(), 0.0f0;
+                                           name="density", grid_class=GRID_FOG_VOLUME, voxel_size=voxel_size)
+
+    # Pass 2: only fill blocks with significant variation
+    abs_tol = block_tolerance * global_max
+    data = Dict{Coord, Float32}()
+    max_val = 0.0
+
+    for (idx, (bx, by, bz)) in enumerate(blocks)
+        # Skip blocks where field is near-zero AND near-constant
+        block_range = block_ranges[idx]
+
+        # Check if any corner has significant value
+        any_significant = false
+        for dz in (Int32(0), B), dy in (Int32(0), B), dx in (Int32(0), B)
+            if abs(_sample_corner(bx + dx, by + dy, bz + dz)) > abs_tol
+                any_significant = true
+                break
+            end
+        end
+        !any_significant && block_range < abs_tol && continue
+
+        # Fill this leaf at full resolution
+        for iz in bz:(bz+B-Int32(1)), iy in by:(by+B-Int32(1)), ix in bx:(bx+B-Int32(1))
+            x = Float64(ix) * voxel_size
+            y = Float64(iy) * voxel_size
+            z = Float64(iz) * voxel_size
+            val = evaluate(f, x, y, z)
+            if abs(val) > 0.0
+                data[coord(ix, iy, iz)] = Float32(val)
+                abs_val = abs(val)
+                abs_val > max_val && (max_val = abs_val)
+            end
         end
     end
 

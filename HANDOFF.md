@@ -10,6 +10,10 @@
 
 Implemented the Field Protocol — the core v1.0 abstraction layer that bridges physics computation to volumetric rendering. This is the product per the PRD: "minimal cognitive distance from physics to pixels."
 
+Also added adaptive voxelization (`adaptive=true`, default) to `voxelize()` — samples block corners first, only fills 8³ leaves where the field has structure. Helps for localized fields (orbitals, particles). For smooth fields filling the whole domain (e.g., dipole 1/r²), uniform is faster — use `adaptive=false`.
+
+Explored vector field visualization: three overlapping volumes with directional coloring (warm = E_z up, cool = E_z down, white = radial). Multi-volume compositing works. HD renders of all 4 examples produced.
+
 1. **Field Protocol** (`src/FieldProtocol.jl`, ~250 LOC) — Abstract types (`AbstractField`, `AbstractContinuousField`, `AbstractDiscreteField`), domain types (`BoxDomain` with SVec3d), and reference implementations (`ScalarField3D`, `VectorField3D`, `ComplexScalarField3D`, `ParticleField`, `TimeEvolution`). Interface: `evaluate()`, `domain()`, `field_eltype()`, `characteristic_scale()`.
 
 2. **Voxelize** (`src/Voxelize.jl`, ~150 LOC) — `voxelize()` bridges fields to VDB grids: uniform sampling for scalar fields, magnitude reduction for vector fields, `abs2` for complex fields (probability density), Gaussian splatting for particles. Auto `voxel_size` from `characteristic_scale / 5`.
