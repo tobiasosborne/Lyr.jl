@@ -43,7 +43,9 @@ import Lyr:
     _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
     _bake_tf_lut, _estimate_density_range,
     # Scene abstract
-    AbstractLight
+    AbstractLight,
+    # Visualize internals
+    _auto_camera
 
 @testset "Lyr.jl" begin
     include("test_binary.jl")
@@ -83,4 +85,7 @@ import Lyr:
     include("test_type_stability.jl")
     include("test_jet.jl")
     include("test_cthulhu.jl")
+    include("test_field_protocol.jl")
+    include("test_voxelize.jl")
+    include("test_visualize.jl")
 end

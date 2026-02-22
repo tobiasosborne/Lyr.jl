@@ -62,6 +62,11 @@ include("VolumeIntegrator.jl")
 include("Output.jl")
 include("GPU.jl")
 
+# Field Protocol — the interface between physics and visualization
+include("FieldProtocol.jl")
+include("Voxelize.jl")
+include("Visualize.jl")
+
 # ============================================================================
 # Public API — only user-facing symbols are exported.
 # Internal symbols (binary readers, parser functions, DDA primitives, etc.)
@@ -161,5 +166,22 @@ export write_exr, write_png
 export GPUNanoGrid, adapt_nanogrid
 export gpu_render_volume
 export ProgressiveAccumulator, accumulate!, resolve
+
+# Field Protocol
+export AbstractDomain, BoxDomain, center, extent
+export AbstractField, AbstractContinuousField, AbstractDiscreteField
+export ScalarField3D, VectorField3D, ComplexScalarField3D
+export ParticleField, TimeEvolution
+export field_eltype, domain, characteristic_scale
+# Note: evaluate is already exported from TransferFunction.jl
+
+# Voxelize
+export voxelize
+
+# Visualize
+export visualize
+export camera_orbit, camera_front, camera_iso
+export material_emission, material_cloud, material_fire
+export light_studio, light_natural, light_dramatic
 
 end # module

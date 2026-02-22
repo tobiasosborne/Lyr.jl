@@ -1,206 +1,449 @@
 # Lyr.jl — Product Requirements Document
 
-## Status: Phase 3 — Unify Parsers
-
-**Date:** 2026-02-13
-**Scope:** Bring TinyVDB's correct sequential reading into Main Lyr's idiomatic type system
-
----
-
-## 1. Executive Summary
-
-Lyr.jl is a pure Julia OpenVDB file format parser with two implementations:
-
-| Implementation | LOC | Tests | Status |
-|---|---|---|---|
-| **Main Lyr (src/*.jl)** | ~3,850 | 756 total (3 errors) | Rich types, buggy v222+ parser |
-| **TinyVDB (src/TinyVDB/*.jl)** | ~1,540 | 308 (all pass) | Correct parser, flat types |
-
-**Previous strategy** (Phases 1-2): Fix TinyVDB, bridge to Lyr types, route compatible files through TinyVDB. This is complete — 196/197 beads issues closed.
-
-**New strategy** (Phase 3): Port TinyVDB's sequential reading into Main Lyr's parser. Main Lyr's type system (`LeafNode{T}`, `Mask{N,W}`, `NTuple{512,T}`) is superior Julia. TinyVDB's sequential reading is correct. Combine them. TinyVDB becomes a test oracle.
+**Version**: 1.0 draft
+**Date**: 2026-02-22
+**Status**: Draft for review
 
 ---
 
-## 2. Comparative Analysis
+## Product Thesis
 
-### 2.1 What Main Lyr Does Well
+**Minimal cognitive distance from physics to pixels.**
 
-- **Parametric immutable types**: `LeafNode{T}` with `NTuple{512,T}` — stack-friendly, zero-alloc
-- **Immutable bitmasks**: `Mask{N,W}` with `NTuple{W,UInt64}` — compiler-optimizable
-- **Full type hierarchy**: `AbstractNode{T}` with proper dispatch
-- **Multi-type support**: Float32, Float64, NTuple{3,Float32}
-- **Full feature set**: Accessors, Interpolation, Ray tracing, Rendering
-- **v220 support**: Pre-v222 interleaved format (bunny_cloud.vdb)
-- **Blosc compression**: Production VDB files
-- **Rich transforms**: 5 transform types including general affine
+Lyr.jl is a production-quality volumetric renderer for scientific data, designed to be operated primarily by AI agents. It is the visualization layer missing from the Julia scientific computing ecosystem.
 
-### 2.2 What TinyVDB Does Well
-
-- **Sequential reading**: Never seeks to `block_offset`, matches C++ reference exactly
-- **Spec-driven metadata**: Clean type-dispatched approach, no heuristics
-- **Half-precision**: Detects `_HalfFloat`, threads `value_size` through pipeline
-- **No heuristic guards**: Trusts file-declared counts, no origin validation hacks
-- **Line-for-line C++ correspondence**: Every function maps to tinyvdbio.h
-
-### 2.3 What TinyVDB Lacks (Un-Julian Design)
-
-- **Mutable types**: `mutable struct LeafNodeData` with `Vector{Float32}` — heap-allocated
-- **Type erasure**: `children::Vector{Tuple{Int32, Any}}` — loses compile-time dispatch
-- **Hardcoded Float32**: No parametric types
-- **No feature stack**: Relies on TinyVDBBridge for accessors, rendering, etc.
+The value proposition is not "no GUI." It is that an AI agent, given a physicist's natural-language intent and Lyr's API, can produce publication-quality volume renderings with no intermediate cognitive burden on the user. The user never maps physics concepts to tool-specific operations. The agent handles the mapping. Lyr provides the rendering engine and the protocol that makes the mapping tractable.
 
 ---
 
-## 3. The Root Bug in Main Lyr
+## Problem Statement
 
-### 3.1 Diagnosis
+The current landscape forces scientists into one of two bad choices:
 
-Main Lyr's v222+ parser (`read_tree_v222` in TreeRead.jl) has a two-phase design that is sound in principle. The bug is that the topology pass doesn't skip embedded internal node values.
+1. **Monolithic commercial tools** (COMSOL, ANSYS, Houdini) that bundle solvers, visualization, and GUI into a $50K/year rent-seeking package. The visualization is locked inside the tool. The workflow is non-reproducible (click sequences). The learning curve is months.
 
-**TinyVDB topology pass** (correct):
+2. **Plotting libraries** (Matplotlib, Makie.jl, ParaView) that produce adequate 2D/3D plots but cannot do production-quality volume rendering — Monte Carlo path tracing, proper denoising, HDR output, physical camera models.
+
+Neither option composes with the Julia scientific computing ecosystem. Neither is agent-friendly. Neither produces Houdini-quality volume renders from arbitrary physics computations.
+
+**Lyr fills the gap**: a scriptable, GPU-portable, production-quality volume renderer with an open protocol that any physics computation can render through, designed for agent-mediated interaction.
+
+---
+
+## Strategic Positioning
+
+Lyr does **not** replace COMSOL, Blender, or Houdini alone.
+
+The **agent + Julia ecosystem** replaces COMSOL. Gmsh.jl meshes geometry. Gridap.jl or DifferentialEquations.jl solves PDEs. Lyr visualizes the result. The agent orchestrates the pipeline. The user describes what they want in natural language. No single tool in this chain costs $50K/year. Every step is reproducible code.
+
+Lyr's specific role: **the production-quality volumetric visualization layer that the Julia ecosystem lacks.** Makie.jl handles plots, surfaces, and interactive viewports. Lyr handles path-traced volumes. They compose; they don't compete.
+
+### Competitive Moat
+
+No existing tool combines:
+
+- Production-quality Monte Carlo volume rendering (delta tracking, ratio tracking)
+- GPU portability via KernelAbstractions.jl (NVIDIA, AMD, Apple, CPU)
+- An open field protocol designed for agent-mediated composition
+- Native Julia composability with the entire SciML/GPU/AD ecosystem
+- Fully scriptable, reproducible output (no GUI state)
+
+---
+
+## Scope Boundaries
+
+### Lyr IS
+
+- A production-quality **volumetric renderer**
+- An **open protocol** (the Field Protocol) for converting physics data to renderable grids
+- A set of **example scripts** demonstrating physics visualization workflows
+- An API designed to be **navigated by AI agents** via comprehensive docstrings and type signatures
+
+### Lyr is NOT
+
+- A physics solver. Use DifferentialEquations.jl, QuantumOptics.jl, Gridap.jl, etc.
+- A general-purpose 3D renderer. No arbitrary mesh import, no polygon rendering, no surface shaders.
+- A GUI application. Not now, not ever. (Interactive Makie viewports for visual feedback are a separate composable tool, not part of Lyr's rendering pipeline.)
+- A scene graph or USD runtime. Scene descriptions are lightweight Julia structs.
+
+### What NOT to Build
+
+- **A GUI.** The agent is the interface.
+- **Physics solvers.** Lyr visualizes fields; it does not compute them.
+- **Polygon/mesh rendering.** For surfaces, lines, and glyphs, compose with Makie.
+- **A full scene graph (USD, etc.).** Too heavy. Julia structs suffice.
+- **OptiX interop.** Closed source, NVIDIA-only, inaccessible from Julia.
+
+---
+
+## The Field Protocol
+
+The Field Protocol is the core product. It is the interface between physics computation and volumetric rendering. It is the contract that makes the agent's job tractable.
+
+### Design Principles
+
+1. **Open, not closed.** The protocol is an abstract interface, not a fixed set of types. Any Julia type that implements the required methods is a Lyr field. The initial types are reference implementations. The community extends without forking.
+
+2. **Idiomatic Julia.** The protocol follows the pattern of `AbstractArray`: a small set of required methods with strong semantic contracts, optional methods with sensible fallbacks, and traits for capabilities. Multiple dispatch handles specialization.
+
+3. **Everything becomes a VDB grid.** Lyr is a volumetric renderer. The Field Protocol's job is to bridge continuous/discrete physics data to voxel grids. The `voxelize` step is the bridge. Fields that cannot be meaningfully voxelized are outside Lyr's scope (compose with Makie instead).
+
+### Required Interface
+
+```julia
+abstract type AbstractField end
+
+# --- Required methods ---
+
+# What does evaluation return?
+fieldtype(f::AbstractField)::Type
+# e.g., Float64, SVec3d, SMatrix{3,3,Float64,9}, ComplexF64
+
+# Where does the field live?
+domain(f::AbstractField)::AbstractDomain
+
+# --- Continuous fields: sample at a point ---
+abstract type AbstractContinuousField <: AbstractField end
+evaluate(f::AbstractContinuousField, x::Float64, y::Float64, z::Float64)
+
+# --- Discrete fields: sample at a site ---
+abstract type AbstractDiscreteField <: AbstractField end
+evaluate(f::AbstractDiscreteField, index)
+sites(f::AbstractDiscreteField)  # iterator over valid indices
 ```
-read I2 masks → skip_mask_values(I2) → read I1 masks → skip_mask_values(I1) → read leaf masks
+
+### Reference Implementations (shipped with Lyr)
+
+These cover the common cases. They are conveniences, not the protocol itself.
+
+```julia
+struct ScalarField3D <: AbstractContinuousField
+    eval_fn::Function         # (x, y, z) → Float64
+    domain::BBox
+    characteristic_scale::Float64
+end
+
+struct VectorField3D <: AbstractContinuousField
+    eval_fn::Function         # (x, y, z) → SVec3d
+    domain::BBox
+    characteristic_scale::Float64
+end
+
+struct TensorField3D <: AbstractContinuousField
+    eval_fn::Function         # (x, y, z) → SMatrix{3,3}
+    domain::BBox
+    characteristic_scale::Float64
+end
+
+struct ComplexScalarField3D <: AbstractContinuousField
+    eval_fn::Function         # (x, y, z) → ComplexF64
+    domain::BBox
+    characteristic_scale::Float64
+end
+
+struct ParticleData <: AbstractField
+    positions::Vector{SVec3d}
+    velocities::Vector{SVec3d}
+    properties::Dict{Symbol, Vector}
+end
+
+struct TimeEvolution{F <: AbstractField}
+    eval_fn::Function         # t → F
+    t_range::Tuple{Float64, Float64}
+    dt_hint::Float64
+end
 ```
 
-**Main Lyr topology pass** (buggy):
+### Domain Types
+
+```julia
+abstract type AbstractDomain end
+
+struct BBox <: AbstractDomain
+    min::SVec3d
+    max::SVec3d
+end
+
+struct LatticeDomain <: AbstractDomain
+    sites::Vector{SVec3d}     # or regular grid specification
+    connectivity::Any         # optional
+end
+
+struct PeriodicDomain <: AbstractDomain
+    unit_cell::BBox
+    periods::SVec3{Int}
+end
 ```
-read I2 masks → [MISSING: skip I2 values] → read I1 masks → [MISSING: skip I1 values] → read leaf masks
+
+### Traits (opt-in capabilities)
+
+```julia
+# Traits unlock rendering features or optimizations
+HasTimeEvolution(::Type{<:AbstractField}) = false
+HasGradient(::Type{<:AbstractField}) = false
+HasSymmetry(::Type{<:AbstractField}) = false
+IsPeriodic(::Type{<:AbstractField}) = false
+IsDifferentiable(::Type{<:AbstractField}) = false
 ```
 
-Because `pos` is wrong after topology, Main Lyr compensates with:
-- `pos = values_start` (seek to `block_offset`) — TreeRead.jl:335
-- Origin validation `abs(x) <= 100000` — TreeRead.jl:243-244
-- Padding detection (peek 128 bytes for zeros) — TreeRead.jl:308-321
-- Early exit `pos >= values_start` — TreeRead.jl:287-288
+### Voxelization: Fields → Grids
 
-These are all band-aids. The fix is to make the topology pass correctly advance `pos`.
+The bridge from protocol to renderer. Every field must become a VDB grid.
 
-### 3.2 Why the Pre-v222 Path Works
+```julia
+# Continuous fields: adaptive sampling
+function voxelize(f::AbstractContinuousField;
+                  voxel_size::Float64 = auto_from_characteristic_scale(f),
+                  threshold::Float64 = 0.0,
+                  max_refinement::Int = 3
+                 )::Grid{Float32}
 
-`read_tree_interleaved` reads topology and values together per-subtree, never seeking. It's already correct. The bug is ONLY in the v222+ separated-topology path.
+# Particle data: Gaussian splatting (already implemented)
+function voxelize(p::ParticleData;
+                  voxel_size::Float64, sigma::Float64, cutoff::Float64
+                 )::Grid{Float32}
 
----
+# Discrete fields: deposit onto grid
+function voxelize(f::AbstractDiscreteField;
+                  voxel_size::Float64, kernel=:gaussian
+                 )::Grid{Float32}
 
-## 4. Implementation Plan — Phase 3
+# Users can define voxelize for custom types
+```
 
-### Step 1: Add `skip_internal_values` to v222+ Topology Pass
+### Visualization Dispatch
 
-**Files:** `TreeRead.jl`
-**Effort:** ~30 lines
+The user (or agent) selects a rendering strategy. Sensible defaults are provided.
 
-Add a function (or inline logic) equivalent to TinyVDB's `skip_mask_values` that advances `pos` past embedded internal node values during the v222+ topology pass. Call it after reading I2 masks and after reading I1 masks in `read_i2_topology_v222`.
+```julia
+# Default: voxelize → volume render
+visualize(f::AbstractContinuousField; kwargs...)
 
-Main Lyr already has `read_dense_values` in Values.jl which handles the same metadata-byte + inactive-vals + selection-mask + compressed-data format. A skip variant just advances `pos` without constructing values.
+# The agent can override the strategy
+visualize(f::AbstractField, strategy::VolumeRender; kwargs...)
+visualize(f::AbstractField, strategy::Isosurface; kwargs...)  # marching cubes → mesh → Makie
+visualize(f::VectorField3D, strategy::FieldLines; kwargs...)  # RK4 → LineData → Makie
+```
 
-**Precondition:** Read TinyVDB's `skip_mask_values` (Topology.jl:132-177) and Main Lyr's `read_dense_values` (Values.jl:13-98) for the format.
-
-### Step 2: Remove Seek and Heuristic Guards
-
-**Files:** `TreeRead.jl`
-**Effort:** Delete ~40 lines
-
-- Delete `pos = values_start` (line 335)
-- Delete `is_valid_i2_origin` function and its call (lines 237-245, 299)
-- Delete padding detection block (lines 303-321)
-- Delete `pos >= values_start` early exit (lines 287-289)
-- Remove `values_start` parameter from `read_tree_v222` and `read_tree` signatures
-- Remove `block_offset` from `read_grid` in Grid.jl
-
-After Step 1, `pos` flows correctly through topology → values. No seeking needed.
-
-### Step 3: Replace Heuristic Metadata Parsing
-
-**Files:** `Metadata.jl`
-**Effort:** Replace ~150 lines with ~40 lines
-
-Replace `read_grid_metadata` with a clean spec-following implementation:
-- Read `tree_version` (u32) + `metadata_count` (u32)
-- For each entry: size-prefixed key, size-prefixed type, size-prefixed value
-- No ASCII scanning heuristics, no nested loops
-
-Also fix `File.jl` line 37: v222+ file-level metadata values need 4-byte size prefix before value bytes (currently calls `skip_metadata_value_heuristic` which reads values directly).
-
-**Reference:** TinyVDB `read_metadata` in Parser.jl for the correct format.
-
-### Step 4: Add Half-Precision Support
-
-**Files:** `GridDescriptor.jl`, `Grid.jl`, `TreeRead.jl`, `Values.jl`
-**Effort:** ~20 lines of threading
-
-- Detect `_HalfFloat` suffix in grid type string → set `half_precision` flag
-- Compute `value_size = half_precision ? 2 : 4`
-- Thread `value_size` through: `read_grid` → `read_tree_v222` → `skip_internal_values` → `read_dense_values`
-- In `read_dense_values`: read Float16 values and convert to Float32 when `value_size == 2`
-
-**Reference:** TinyVDB threads `value_size` through Compression.jl, Topology.jl, Values.jl, Parser.jl.
-
-### Step 5: Add Parser Equivalence Tests
-
-**Files:** `test/test_parser_equivalence.jl` (new)
-**Effort:** ~60 lines
-
-For every compatible test file (v222+, Float32, no Blosc), parse with both Main Lyr and TinyVDB (via bridge), assert identical:
-- Tree structure (root children count, I2/I1/leaf counts)
-- Active voxel counts per leaf
-- Value arrays (within floating-point tolerance)
-- Background values
-
-TinyVDB becomes a permanent test oracle.
-
-### Step 6: Demote TinyVDB, Remove Bridge
-
-**Files:** `File.jl`, `TinyVDBBridge.jl`
-**Effort:** ~20 lines changed, ~230 lines deleted
-
-- Remove routing logic in `parse_vdb` (TinyVDB try-catch path)
-- `parse_vdb` calls `_parse_vdb_legacy` directly (now fixed, rename back to `parse_vdb`)
-- Delete `TinyVDBBridge.jl` (no longer needed — Main Lyr parses correctly)
-- TinyVDB stays in `src/TinyVDB/` as reference implementation, only used by tests
+Note: strategies that produce non-volumetric output (isosurfaces, field lines, glyphs) generate data for Makie, not for Lyr's volume renderer. This is by design.
 
 ---
 
-## 5. What Stays Unchanged
+## Rendering Engine
 
-| Component | Files | Why |
-|---|---|---|
-| Type system | `TreeTypes.jl`, `Masks.jl` | Already excellent |
-| Value reading | `Values.jl` (v222+ `read_dense_values`) | Already handles full ReadMaskValues algorithm |
-| Pre-v222 parsing | `TreeRead.jl` (`read_tree_interleaved`) | Already correct (sequential) |
-| Binary primitives | `Binary.jl` | Solid |
-| Compression | `Compression.jl` | Solid |
-| Accessors | `Accessors.jl` | Untouched |
-| Interpolation | `Interpolation.jl` | Untouched |
-| Ray tracing | `Ray.jl` | Untouched |
-| Rendering | `Render.jl` | Untouched |
-| Coordinates | `Coordinates.jl` | Untouched |
-| Transforms | `Transforms.jl` | Untouched |
-| TinyVDB | `src/TinyVDB/*` | Stays as test oracle |
+### Quality Target
+
+Rendered output should be comparable to Houdini Karma volume renders at equivalent sample counts. This is testable: render the same VDB in both and compare.
+
+### v1.0 Rendering Stack (current state: ~86% complete)
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| Delta tracking | Done (CPU + GPU) | Unbiased transmittance estimation |
+| Ratio tracking | Done (CPU) | Variance-reduced shadow estimation |
+| Transfer functions | Done | Blackbody, viridis, cool-warm, smoke, custom |
+| Scene graph | Done | Cameras, lights, materials — lightweight Julia structs |
+| Camera models | Done | Perspective, ortho |
+| Denoising | Done | NLM + bilateral |
+| Tonemapping | Done | HDR → LDR |
+| PNG output | Done | Via standard Julia I/O |
+| EXR output | Done (basic) | HDR + linear color |
+| GPU delta tracking | Done | KernelAbstractions.jl kernel |
+
+### Spatial Data Structures
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| VDB read/write | Done | All versions, multi-grid, round-trip |
+| NanoVDB | Done | GPU-optimized flat buffer |
+| DDA traversal | Done | Hierarchical Amanatides-Woo |
+| Grid builder | Done | `Dict{Coord,T}` → full VDB tree |
+| Gaussian splatting | Done | Particles → density grid |
+| ValueAccessor | Done | Cached tree traversal |
+
+### Architecture Extension Point
+
+The renderer is structured so that future hybrid rendering (volumes + procedural meshes) is possible without rewriting the core:
+
+```julia
+abstract type AbstractRenderable end
+
+struct VolumeRenderable <: AbstractRenderable
+    grid::NanoGrid
+    transfer_function::TransferFunction
+    material::VolumeMaterial
+end
+
+# Future — not v1.0:
+# struct MeshRenderable <: AbstractRenderable ... end
+```
+
+The path integrator calls `intersect(ray, scene)` where the scene contains renderables. Today, all renderables are volumes. The interface permits extension.
 
 ---
 
-## 6. Success Criteria
+## Agent Contract
 
-1. `julia --project -e 'using Pkg; Pkg.test()'` — 0 errors (currently 3)
-2. All test VDB files parsed by Main Lyr directly (no TinyVDB routing)
-3. Parser equivalence tests pass: Main Lyr == TinyVDB for all compatible files
-4. Half-precision cube.vdb parsed correctly by Main Lyr
-5. No heuristic guards in TreeRead.jl
-6. No heuristic metadata parsing in Metadata.jl
-7. TinyVDBBridge.jl deleted
+The agent is the primary interface. This imposes concrete engineering requirements on Lyr's API:
+
+### 1. Comprehensive Docstrings
+
+Every public function must have a docstring that includes:
+- One-line summary
+- Argument types and semantics
+- Return type
+- Example usage
+- Default values and their rationale
+
+The docstring is the UI. It must be sufficient for an agent to generate correct code without hallucinating.
+
+### 2. Informative Type Signatures
+
+Type signatures must be specific enough that an agent can infer correct usage from the signature alone. Prefer `voxel_size::Float64` over `voxel_size` untyped.
+
+### 3. Sensible Defaults
+
+Every parameter must have a sensible default. `visualize(my_field)` must produce a reasonable image with zero configuration. The agent refines from defaults; it doesn't configure from scratch.
+
+### 4. Presets Replace Wizards
+
+Named presets for common configurations:
+- `tf_blackbody`, `tf_viridis`, `tf_cool_warm` (transfer functions)
+- `camera_orbit`, `camera_front`, `camera_iso` (camera positions)
+- `material_cloud`, `material_emission`, `material_fire` (volume materials)
+- `light_studio`, `light_natural`, `light_dramatic` (lighting setups)
+
+### 5. Example Scripts
+
+A curated `examples/` directory that the agent can reference:
+- `hydrogen_orbital.jl` — QM wavefunction → volume render
+- `md_particles.jl` — molecular dynamics → Gaussian splat → volume render
+- `em_dipole.jl` — EM field → voxelized magnitude → volume render
+- `lindblad_decay.jl` — time-dependent density matrix → animation
+- `ising_model.jl` — discrete lattice → voxelized → volume render
+- `heat_diffusion.jl` — PDE solution (via DifferentialEquations.jl) → volume render
+
+These are scripts, not importable library code. They demonstrate the pattern: external solver → Field Protocol → Lyr render.
+
+### 6. Error Messages
+
+Error messages must be diagnostic. When a field fails to voxelize, the error should say why (e.g., "evaluate returned NaN at (x,y,z)" or "domain has zero volume") rather than surfacing a stack trace from the VDB internals. The agent reads error messages to self-correct.
 
 ---
 
-## 7. Design Decision: Why Not Just Promote TinyVDB?
+## Compute Backend
 
-The previous PRD recommended promoting TinyVDB as the sole parser. After analysis, **fixing Main Lyr is better** because:
+Write once, run anywhere via KernelAbstractions.jl.
 
-1. **Type system**: Main Lyr's `LeafNode{T}` with `NTuple{512,T}` and `Mask{N,W}` with `NTuple{W,UInt64}` are zero-alloc, immutable, and parametric. TinyVDB's mutable `Vector`-based types would need a complete rewrite to match.
+| Backend | Status | Performance |
+|---------|--------|-------------|
+| CUDA.jl (NVIDIA) | Production | ~2% overhead vs native CUDA C++ |
+| AMDGPU.jl (AMD) | Supported | Via KernelAbstractions.jl |
+| Metal.jl (Apple) | Supported | Via KernelAbstractions.jl |
+| CPU threads | Fallback | Always works, no GPU required |
 
-2. **Generality**: Main Lyr handles Float64, Vec3f, Blosc, v220, general transforms. Extending TinyVDB to match would effectively recreate Main Lyr.
+Performance-critical types use StaticArrays.jl (SVec3d, SMat3d) for zero-allocation math.
 
-3. **Feature stack**: Accessors, interpolation, ray tracing all operate on Main Lyr's types. Keeping them avoids a rewrite.
+---
 
-4. **The fix is surgical**: The bug is ~1 missing function call in the topology pass. Everything else in Main Lyr is sound.
+## Output Formats
 
-5. **TinyVDB as oracle**: A line-for-line C++ port is more valuable as a correctness reference than as production code. Two independent implementations that agree is stronger than one.
+| Format | Status | Use Case |
+|--------|--------|----------|
+| PNG | Done | Standard image output |
+| EXR (basic) | Done | HDR, linear color, professional compositing |
+| MP4/ProRes | Via FFMPEG.jl in scripts | Animation (agent writes the ffmpeg call) |
+| VDB | Done | Grid interchange with other tools |
+| HDF5/JLD2 | Via Julia packages | Data export |
+
+---
+
+## v1.0 Release Criteria
+
+The following must be complete and tested for v1.0 (Julia General registry):
+
+### Must Have
+
+- [ ] VDB read/write (done)
+- [ ] Delta tracking volume rendering, CPU + GPU (done)
+- [ ] Ratio tracking shadow estimation (done, CPU)
+- [ ] Transfer functions: blackbody, viridis, cool-warm, smoke, custom (done)
+- [ ] Camera models: perspective, orthographic (done)
+- [ ] Scene: cameras, lights, materials (done)
+- [ ] NLM + bilateral denoising (done)
+- [ ] Tonemapping (done)
+- [ ] PNG + basic EXR output (done)
+- [ ] Grid builder: `Dict{Coord,T}` → VDB tree (done)
+- [ ] Gaussian splatting: particles → density grid (done)
+- [ ] GPU delta tracking kernel via KA.jl (done)
+- [ ] **Field Protocol**: `AbstractField`, `AbstractContinuousField`, `AbstractDiscreteField`, reference types, `evaluate`, `domain`, `fieldtype` (not started)
+- [ ] **`voxelize`**: continuous field → VDB grid with adaptive sampling (not started)
+- [ ] **`visualize`**: high-level entry point with sensible defaults (not started)
+- [ ] **Example scripts**: ≥4 physics domains demonstrated (partial)
+- [ ] **Docstrings**: every public function documented to agent-contract standard (partial)
+- [ ] **10,000+ tests passing** (currently 10,410+)
+
+### Not v1.0 (roadmap)
+
+- Multi-scatter (global illumination in volumes)
+- Spectral rendering (wavelength-dependent effects)
+- Differentiable rendering via Enzyme.jl
+- Deep EXR compositing
+- Makie interactive viewport integration
+- Procedural mesh rendering (isosurfaces, glyphs in Lyr's own renderer)
+- Animation pipeline beyond scripted FFMPEG.jl
+- ManifoldDomain for GR applications
+- GPU ratio tracking kernel
+
+---
+
+## Success Metrics
+
+### Technical
+
+- **Render quality**: Side-by-side comparison with Houdini Karma on standard VDB test scenes (cloud, fire, explosion) produces visually comparable results at matched sample counts
+- **Performance**: GPU rendering within 2× of equivalent C++/CUDA implementation on standard benchmarks
+- **Correctness**: Field Protocol round-trip test — `voxelize(ScalarField3D(f, bbox, scale))` sampled at grid points matches `f` to floating-point tolerance
+
+### Adoption
+
+- Agent can generate correct Lyr scripts from natural-language physics descriptions without human intervention for the domains covered by example scripts
+- Time from "describe physics intent" to "rendered image" is under 2 minutes for single-frame renders on consumer GPU
+- Package registers in Julia General with zero vendored dependencies
+
+### Ecosystem
+
+- At least one external physics package produces Lyr-compatible field output (e.g., QuantumOptics.jl state → Lyr `ScalarField3D`)
+- Example scripts cover ≥6 physics domains from the vision document
+
+---
+
+## Technical Risks
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Adaptive voxelization performance for complex fields | Medium | Start with uniform sampling + refinement. Profile on real physics fields before optimizing. |
+| Agent generates incorrect physics code | High | Not Lyr's problem to solve, but good error messages and example scripts reduce the failure rate. Lyr renders what it's given; correctness is the user's responsibility. |
+| KernelAbstractions.jl portability gaps | Low | CPU fallback always works. Test on CUDA (primary), Metal (secondary). |
+| Multi-scatter required for quality parity with Karma | Medium | Defer to post-v1.0. Single-scatter + good denoising is sufficient for most scientific visualization. |
+| Enzyme.jl AD through GPU kernels is research-grade | High | Defer differentiable rendering to post-v1.0. Do not constrain rendering architecture for AD compatibility until Enzyme matures. |
+| Field Protocol too rigid for unforeseen domains | Low | Open protocol + multiple dispatch means the community extends without Lyr's permission. Design for extensibility, not completeness. |
+
+---
+
+## Appendix: The Cognitive Distance Argument
+
+The product thesis — *minimal cognitive distance from physics to pixels* — has three measurable gaps:
+
+1. **Intent → Mathematics.** The user thinks "precessing hydrogen atom in a B-field." The mathematical formulation is the Lindblad master equation with a Zeeman Hamiltonian. This gap is physics knowledge. Lyr does not close it. The user or the agent does.
+
+2. **Mathematics → Code.** The Lindblad equation must become a Julia script that produces field data Lyr can consume. This gap is API surface. The Field Protocol is Lyr's entire leverage on cognitive distance. The narrower and more natural this interface, the smaller this gap — for agents and humans.
+
+3. **Code → Pixels.** The field data must become a production-quality image. This gap is rendering engineering. Sensible defaults, presets, and the agent handle it. The user should never think about transfer functions or sample counts unless they want to.
+
+**Gap 2 is the only one Lyr controls, and it is the Field Protocol.** This is why the Field Protocol is the core product, not the renderer. The renderer is necessary but not differentiating — other tools render volumes. No other tool provides an open, agent-navigable protocol that bridges arbitrary physics computation to production-quality volumetric visualization in a composable, GPU-portable Julia package.
+
+---
+
+*PRD drafted: 2026-02-22*
+*Derived from Socratic review of VISION.md*
