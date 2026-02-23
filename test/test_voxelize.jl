@@ -155,6 +155,26 @@ using StaticArrays
         end
     end
 
+    @testset "Adaptive voxelization — non-cubic domain (Z > X)" begin
+        # Regression: Z-axis loop used imax instead of kmax, skipping Z blocks
+        # Domain: X in [-1,1], Z in [-1,5] — Z range exceeds X range
+        field = ScalarField3D(
+            (x, y, z) -> exp(-(x^2 + y^2 + z^2) / 8.0),
+            BoxDomain((-1.0, -1.0, -1.0), (1.0, 1.0, 5.0)),
+            2.0
+        )
+        vs = characteristic_scale(field) / 5.0  # auto voxel size
+        grid = voxelize(field; adaptive=true, normalize=false, threshold=0.0)
+        acc = ValueAccessor(grid.tree)
+
+        # Voxel at z=4.0 must be populated — this is well within Z domain
+        iz_far = round(Int32, 4.0 / vs)
+        val = get_value(acc, coord(Int32(0), Int32(0), iz_far))
+        expected = Float32(exp(-(0.0 + 0.0 + 16.0) / 8.0))
+        @test val > 0.0f0
+        @test val ≈ expected atol=0.05f0
+    end
+
     @testset "Round-trip: voxelize matches evaluate" begin
         field = ScalarField3D(
             (x, y, z) -> exp(-(x^2 + y^2 + z^2) / 2.0),

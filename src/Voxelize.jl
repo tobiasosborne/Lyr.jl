@@ -131,7 +131,7 @@ function _voxelize_adaptive(f::ScalarField3D;
     blocks = NTuple{3,Int32}[]
     block_ranges = Float64[]  # max - min per block
 
-    for bz in kmin:B:imax-1, by in jmin:B:jmax-1, bx in imin:B:imax-1
+    for bz in kmin:B:kmax-1, by in jmin:B:jmax-1, bx in imin:B:imax-1
         # Sample 8 corners of this block
         cmin = Inf; cmax = -Inf
         for dz in (Int32(0), B), dy in (Int32(0), B), dx in (Int32(0), B)
