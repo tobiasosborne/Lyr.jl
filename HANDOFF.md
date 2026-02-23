@@ -2,7 +2,77 @@
 
 ---
 
-## Latest Session (2026-02-22) — Field Protocol + voxelize + visualize
+## Latest Session (2026-02-23) — Distill code review + fix 2 P1 bugs
+
+**Status**: COMPLETE — 27 issues created, 8 dep edges wired, 2 bugs fixed, 29,080 tests pass
+
+### What Was Done
+
+**1. Distilled 6-specialist code review into 27 actionable beads issues**
+
+Cross-referenced ~1MB of review transcripts against 38 existing open issues and current codebase. Filtered out findings already addressed by v1.0 work (Field Protocol, voxelize, visualize). Created issues with self-contained descriptions (file:line, root cause, recommended fix).
+
+| Priority | Count | Categories |
+|----------|-------|-----------|
+| P1 | 5 | 3 correctness bugs + 2 type stability issues |
+| P2 | 10 | Architecture, performance, API consistency |
+| P3 | 12 | Dedup, threading, minor bugs, docs |
+
+Wired 8 dependency edges forming a DAG:
+```
+T1 (gg2x) → A1 (8mfh) → gtti → A3 (2hm9) → L2 (28v4)
+T2 (m8ub) ↗
+T1 → L4 (6u3q)
+A2 (j3bq) → L1 (85cd)
+A10 (701w) → A7 (igk8)
+```
+
+**2. Fixed `path-tracer-ssn4` — adaptive voxelizer Z-axis bound**
+
+`Voxelize.jl:134`: Z-axis block loop used `imax` (X bound) instead of `kmax`. Non-cubic domains where Z > X silently skipped Z blocks. One-character fix + regression test with elongated domain.
+
+**3. Fixed `path-tracer-9ka2` — multi-volume compositing escaped ray**
+
+`VolumeIntegrator.jl:318`: `break` after `:escaped` exited the entire volume loop, so second volume never tested. Changed to `continue`. Regression test with two synthetic volumes (empty + dense).
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Voxelize.jl` | `imax` → `kmax` on line 134 |
+| `src/VolumeIntegrator.jl` | `break` → `continue` on line 318 |
+| `test/test_voxelize.jl` | +20 LOC: non-cubic domain regression test |
+| `test/test_volume_renderer.jl` | +38 LOC: multi-volume regression test |
+| `.beads/issues.jsonl` | +27 issues, 8 dependency edges |
+
+### Test Results
+
+```
+29,080 pass, 0 fail, 0 errors (was 29,076)
+```
+
+### Project Status Summary
+
+**~14,300 LOC source, ~11,000 LOC tests, 45 source files, 63 open issues**
+
+| Phase | Status | Key Components |
+|-------|--------|----------------|
+| Phase 1: Foundation | **COMPLETE** | VDB read/write, DDA traversal, NanoVDB flat layout |
+| Phase 2: Volume Renderer | **~86% DONE** | Delta/ratio tracking, TF, scene, PNG/EXR, denoising |
+| Phase 3: Field Protocol | **COMPLETE** | AbstractField, voxelize, visualize, 4 example scripts |
+| Phase 4: Physics Modules | Not started | LyrEM, LyrQM, etc. (separate packages) |
+| Phase 5: Production Quality | Not started | Multi-scatter, differentiable, Makie integration |
+
+### Next Priority
+
+Unblocked P1 issues ready to work:
+1. `path-tracer-6esy` — VolumeEntry without NanoGrid silently renders nothing
+2. `path-tracer-gg2x` — FieldProtocol stores closures as abstract `Function` type (blocks 3 downstream issues)
+3. `path-tracer-m8ub` — VolumeMaterial/VolumeEntry use `Any` typed fields (blocks A1)
+
+---
+
+## Previous Session (2026-02-22) — Field Protocol + voxelize + visualize
 
 **Status**: COMPLETE — 6 issues closed, 36,027 tests pass (25,617 new)
 
