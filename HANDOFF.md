@@ -2,7 +2,59 @@
 
 ---
 
-## Latest Session (2026-02-23) — Fix 3 P1 issues (6esy, gg2x, m8ub)
+## Latest Session (2026-02-23) — 4 issues: type stability, dedup, bug fix, API cleanup
+
+**Status**: COMPLETE — 4 issues closed (8mfh, 701w, k250, gt5s), 29,146 tests pass
+
+### What Was Done
+
+**1. `path-tracer-8mfh` — Parametrize VolumeEntry{G} and Scene{V} for type stability**
+
+Replaced `grid::Any` in `VolumeEntry` with parametric `grid::G`. Parametrized `Scene{V}` on its volumes container — single-volume scenes store a `Tuple{VolumeEntry{G}}` (fully specialized), multi-volume scenes keep a `Vector`. Added `Scene(cam, lights::Vector, vol::VolumeEntry)` constructor that auto-wraps in tuple. Both `visualize` pipelines now pass single volumes directly.
+
+**2. `path-tracer-701w` — Extract _render_grid to deduplicate visualize pipelines**
+
+The `ParticleField` and `AbstractContinuousField` `visualize` methods shared 90%+ identical code (camera, material, scene, render, post-process, output). Extracted shared grid→image pipeline into `_render_grid(grid, nanogrid; default_tf, kwargs...)`. Each method handles only its field-specific voxelization, then delegates. Only difference: default transfer function (`tf_viridis()` vs `tf_cool_warm()`).
+
+**3. `path-tracer-k250` — GPU CPU fallback now uses scene background color**
+
+`gpu_volume_march_cpu!` hardcoded `(0,0,0)` for background blend on miss rays. Added `background::NTuple{3,Float64}=(0.0,0.0,0.0)` keyword argument. Test verifies miss rays render with specified background color.
+
+**4. `path-tracer-gt5s` — Deprecate legacy render_image**
+
+Removed `render_image` from export list. Added `Base.depwarn` pointing users to `render_volume_image`/`visualize`. Updated docstring with deprecation notice. Tests use `Lyr.render_image` (qualified access).
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Scene.jl` | `VolumeEntry{G}`, `Scene{V}`, new single-vol+lights constructor |
+| `src/Visualize.jl` | `_render_grid` helper, both pipelines delegate to it |
+| `src/GPU.jl` | `background` kwarg on `gpu_volume_march_cpu!` |
+| `src/Lyr.jl` | Removed `render_image` from exports |
+| `src/Render.jl` | `Base.depwarn` + deprecation docstring on `render_image` |
+| `test/test_scene.jl` | `VolumeEntry[vol]` → `[vol]` |
+| `test/test_gpu.jl` | +33 LOC: background color test for CPU fallback |
+| `test/test_render.jl` | `render_image` → `Lyr.render_image` |
+| `test/test_tinyvdb_bridge.jl` | `render_image` → `Lyr.render_image` |
+
+### Test Results
+
+```
+29,146 pass, 0 fail, 0 errors (was 29,082)
+```
+
+### Next Priority
+
+Ready P2 issues (from `bd ready`):
+- `path-tracer-0qvn` — Camera auto-setup ignores voxel_size transform
+- `path-tracer-igk8` — No visualize method for TimeEvolution (unblocked by 701w)
+- `path-tracer-j3bq` — Hand-rolled NTuple vector math in Render.jl
+- `path-tracer-rcx7` — isdefined(Main, :PNGFiles) antipattern
+
+---
+
+## Previous Session (2026-02-23) — Fix 3 P1 issues (6esy, gg2x, m8ub)
 
 **Status**: COMPLETE — 3 P1 issues fixed, 29,082 tests pass
 
