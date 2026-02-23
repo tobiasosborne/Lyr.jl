@@ -254,38 +254,14 @@ function visualize(field::AbstractContinuousField;
     grid = voxelize(field; voxel_size=voxel_size, threshold=threshold)
     nanogrid = build_nanogrid(grid.tree)
 
-    # 2. Camera
-    cam = camera !== nothing ? camera : _auto_camera(grid)
-
-    # 3. Material
-    mat = if material !== nothing
-        material
-    else
-        tf = transfer_function !== nothing ? transfer_function : tf_viridis()
-        VolumeMaterial(tf; sigma_scale=sigma_scale, emission_scale=emission_scale,
-                       scattering_albedo=0.4)
-    end
-
-    # 4. Lights
-    lts = lights !== nothing ? convert(Vector{AbstractLight}, lights) : light_studio()
-
-    # 5. Scene
-    volume = VolumeEntry(grid, nanogrid, mat)
-    scene = Scene(cam, lts, volume; background=background)
-
-    # 6. Render
-    pixels = render_volume_image(scene, width, height; spp=spp, seed=seed)
-
-    # 7. Post-process
-    denoise && (pixels = denoise_bilateral(pixels))
-    pixels = tonemap(pixels)
-
-    # 8. Output
-    if output !== nothing
-        _write_output(output, pixels)
-    end
-
-    pixels
+    # 2-8. Shared render pipeline
+    _render_grid(grid, nanogrid;
+                 default_tf=tf_viridis(),
+                 material=material, transfer_function=transfer_function,
+                 sigma_scale=sigma_scale, emission_scale=emission_scale,
+                 camera=camera, lights=lights, background=background,
+                 width=width, height=height, spp=spp, seed=seed,
+                 tonemap=tonemap, denoise=denoise, output=output)
 end
 
 function _write_output(path::String, pixels)
@@ -296,6 +272,57 @@ function _write_output(path::String, pixels)
     else
         write_png(path, pixels)
     end
+end
+
+# Shared grid→image pipeline used by all visualize methods.
+# Separated from voxelization so each field type handles its own grid building.
+function _render_grid(grid, nanogrid;
+                      default_tf::TransferFunction,
+                      # Material
+                      material::Union{VolumeMaterial, Nothing},
+                      transfer_function::Union{TransferFunction, Nothing},
+                      sigma_scale::Float64,
+                      emission_scale::Float64,
+                      # Scene
+                      camera::Union{Camera, Nothing},
+                      lights::Union{Vector{<:AbstractLight}, Nothing},
+                      background::NTuple{3,Float64},
+                      # Rendering
+                      width::Int,
+                      height::Int,
+                      spp::Int,
+                      seed::UInt64,
+                      # Post-processing
+                      tonemap::Function,
+                      denoise::Bool,
+                      # Output
+                      output::Union{String, Nothing})
+
+    cam = camera !== nothing ? camera : _auto_camera(grid)
+
+    mat = if material !== nothing
+        material
+    else
+        tf = transfer_function !== nothing ? transfer_function : default_tf
+        VolumeMaterial(tf; sigma_scale=sigma_scale, emission_scale=emission_scale,
+                       scattering_albedo=0.4)
+    end
+
+    lts = lights !== nothing ? convert(Vector{AbstractLight}, lights) : light_studio()
+
+    volume = VolumeEntry(grid, nanogrid, mat)
+    scene = Scene(cam, lts, volume; background=background)
+
+    pixels = render_volume_image(scene, width, height; spp=spp, seed=seed)
+
+    denoise && (pixels = denoise_bilateral(pixels))
+    pixels = tonemap(pixels)
+
+    if output !== nothing
+        _write_output(output, pixels)
+    end
+
+    pixels
 end
 
 """
@@ -339,30 +366,12 @@ function visualize(field::ParticleField;
                     cutoff_sigma=cutoff_sigma, threshold=threshold)
     nanogrid = build_nanogrid(grid.tree)
 
-    # 2-8: same pipeline as continuous fields
-    cam = camera !== nothing ? camera : _auto_camera(grid)
-
-    mat = if material !== nothing
-        material
-    else
-        tf = transfer_function !== nothing ? transfer_function : tf_cool_warm()
-        VolumeMaterial(tf; sigma_scale=sigma_scale, emission_scale=emission_scale,
-                       scattering_albedo=0.4)
-    end
-
-    lts = lights !== nothing ? convert(Vector{AbstractLight}, lights) : light_studio()
-
-    volume = VolumeEntry(grid, nanogrid, mat)
-    scene = Scene(cam, lts, volume; background=background)
-
-    pixels = render_volume_image(scene, width, height; spp=spp, seed=seed)
-
-    denoise && (pixels = denoise_bilateral(pixels))
-    pixels = tonemap(pixels)
-
-    if output !== nothing
-        _write_output(output, pixels)
-    end
-
-    pixels
+    # 2-8. Shared render pipeline
+    _render_grid(grid, nanogrid;
+                 default_tf=tf_cool_warm(),
+                 material=material, transfer_function=transfer_function,
+                 sigma_scale=sigma_scale, emission_scale=emission_scale,
+                 camera=camera, lights=lights, background=background,
+                 width=width, height=height, spp=spp, seed=seed,
+                 tonemap=tonemap, denoise=denoise, output=output)
 end
