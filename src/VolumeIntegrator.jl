@@ -316,7 +316,7 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
                                             sigma_maj, albedo, rng)
 
         if event == :escaped
-            break
+            continue
         end
 
         # Sample density and evaluate transfer function at hit point

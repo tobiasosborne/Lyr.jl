@@ -103,6 +103,48 @@ using Random: Xoshiro
         end
     end
 
+    @testset "Multi-volume: escaped first volume still tests second" begin
+        # Regression: `break` on :escaped skipped subsequent volumes.
+        # Volume 1: zero density + very low sigma (ray escapes in ~1 step)
+        # Volume 2: 16^3 at z=24..39, density=0.3 (bright in tf_smoke)
+        empty_data = Dict{Coord, Float32}()
+        for iz in 0:7, iy in 0:7, ix in 0:7
+            empty_data[coord(Int32(ix), Int32(iy), Int32(iz))] = 0.0f0
+        end
+        empty_grid = build_grid(empty_data, 0.0f0; name="empty")
+        empty_nano = build_nanogrid(empty_grid.tree)
+
+        dense_data = Dict{Coord, Float32}()
+        for iz in 24:39, iy in 0:15, ix in 0:15
+            dense_data[coord(Int32(ix), Int32(iy), Int32(iz))] = 0.3f0
+        end
+        dense_grid = build_grid(dense_data, 0.0f0; name="dense")
+        dense_nano = build_nanogrid(dense_grid.tree)
+
+        cam = Camera((8.0, 8.0, -10.0), (8.0, 8.0, 30.0), (0.0, 1.0, 0.0), 60.0)
+        tf = tf_smoke()
+        mat_dense = VolumeMaterial(tf; sigma_scale=20.0, emission_scale=5.0)
+        # Low sigma_scale → large free-flight steps → fast escape, minimal RNG consumed
+        mat_empty = VolumeMaterial(tf; sigma_scale=0.01, emission_scale=1.0)
+
+        vol_empty = VolumeEntry(empty_grid, empty_nano, mat_empty)
+        vol_dense = VolumeEntry(dense_grid, dense_nano, mat_dense)
+        light = DirectionalLight((0.0, 1.0, 0.0))
+
+        scene_only = Scene(cam, [light], [vol_dense]; background=(0.0, 0.0, 0.0))
+        scene_both = Scene(cam, [light], [vol_empty, vol_dense]; background=(0.0, 0.0, 0.0))
+
+        px_only = render_volume_image(scene_only, 4, 4; spp=128, seed=UInt64(999))
+        px_both = render_volume_image(scene_both, 4, 4; spp=128, seed=UInt64(999))
+
+        any_nonzero = any(any(c -> c > 0.001, p) for p in px_only)
+        @test any_nonzero  # sanity: dense volume alone produces light
+
+        # With the fix, multi-volume also reaches the dense volume
+        any_nonzero_both = any(any(c -> c > 0.001, p) for p in px_both)
+        @test any_nonzero_both
+    end
+
     @testset "Tone mapping round-trip" begin
         pixels = [(0.5, 0.3, 0.8) (1.5, 2.0, 0.1);
                   (0.0, 0.0, 0.0) (0.01, 0.99, 0.5)]
