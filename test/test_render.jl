@@ -220,26 +220,26 @@ using Lyr
             cam = Camera((10.0, 5.0, 10.0), (-3.0, -3.0, -3.0), (0.0, 1.0, 0.0), 60.0)
 
             @testset "spp=1 is default (identical to original)" begin
-                p1 = render_image(grid, cam, 8, 8)
-                p2 = render_image(grid, cam, 8, 8; samples_per_pixel=1)
+                p1 = Lyr.render_image(grid, cam, 8, 8)
+                p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=1)
                 @test p1 == p2
             end
 
             @testset "spp=4 produces valid output" begin
-                pixels = render_image(grid, cam, 8, 8; samples_per_pixel=4)
+                pixels = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4)
                 @test size(pixels) == (8, 8)
                 @test all(p -> all(c -> 0.0 <= c <= 1.0, p), pixels)
             end
 
             @testset "spp=4 is deterministic with same seed" begin
-                p1 = render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
-                p2 = render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
+                p1 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
+                p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
                 @test p1 == p2
             end
 
             @testset "different seeds produce different outputs" begin
-                p1 = render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(1))
-                p2 = render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(999))
+                p1 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(1))
+                p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(999))
                 @test p1 != p2
             end
         end
@@ -254,14 +254,14 @@ using Lyr
             cam = Camera((10.0, 5.0, 10.0), (-3.0, -3.0, -3.0), (0.0, 1.0, 0.0), 60.0)
 
             @testset "gamma=1.0 is default (no change)" begin
-                p1 = render_image(grid, cam, 8, 8)
-                p2 = render_image(grid, cam, 8, 8; gamma=1.0)
+                p1 = Lyr.render_image(grid, cam, 8, 8)
+                p2 = Lyr.render_image(grid, cam, 8, 8; gamma=1.0)
                 @test p1 == p2
             end
 
             @testset "gamma=2.2 produces darker midtones" begin
-                p_linear = render_image(grid, cam, 8, 8; gamma=1.0)
-                p_gamma = render_image(grid, cam, 8, 8; gamma=2.2)
+                p_linear = Lyr.render_image(grid, cam, 8, 8; gamma=1.0)
+                p_gamma = Lyr.render_image(grid, cam, 8, 8; gamma=2.2)
 
                 # Find pixels that are not background and not fully bright/dark
                 mid_found = false
@@ -278,7 +278,7 @@ using Lyr
             end
 
             @testset "gamma correction clamps to [0,1]" begin
-                pixels = render_image(grid, cam, 8, 8; gamma=2.2)
+                pixels = Lyr.render_image(grid, cam, 8, 8; gamma=2.2)
                 @test all(p -> all(c -> 0.0 <= c <= 1.0, p), pixels)
             end
         end
@@ -301,7 +301,7 @@ using Lyr
                     60.0
                 )
 
-                pixels = render_image(grid, cam, 32, 24)
+                pixels = Lyr.render_image(grid, cam, 32, 24)
 
                 @test size(pixels) == (24, 32)  # height x width
             end
@@ -317,7 +317,7 @@ using Lyr
                     60.0
                 )
 
-                pixels = render_image(grid, cam, 8, 8)
+                pixels = Lyr.render_image(grid, cam, 8, 8)
 
                 # Verify we got a result (all pixels should be valid tuples)
                 @test size(pixels) == (8, 8)

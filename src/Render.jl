@@ -166,22 +166,13 @@ function shade(normal::NTuple{3, Float64}, light_dir::NTuple{3, Float64})::Float
 end
 
 """
-    render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
-                 light_dir=(0.577, 0.577, 0.577),
-                 background=(0.1, 0.1, 0.15),
-                 max_steps=200,
-                 samples_per_pixel=1,
-                 gamma=1.0,
-                 seed=UInt64(42)) -> Matrix{NTuple{3, Float64}}
+    render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int; kwargs...)
 
-Render a VDB level set grid to an image.
+!!! warning "Deprecated"
+    `render_image` is deprecated. Use `render_volume_image` (Scene-based volume
+    renderer) or `visualize` (one-call field-to-image) instead.
 
-Returns a height×width matrix of RGB tuples, each channel in [0, 1].
-
-# Keyword Arguments
-- `samples_per_pixel::Int=1` - Number of jittered samples per pixel (1, 4, 9, 16, etc.)
-- `gamma::Float64=1.0` - Gamma correction exponent (2.2 for sRGB display)
-- `seed::UInt64=42` - RNG seed for deterministic jittered sampling
+Legacy level-set renderer. Returns a height×width matrix of RGB tuples in [0, 1].
 """
 function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
                       light_dir::NTuple{3, Float64}=(0.577, 0.577, 0.577),
@@ -190,6 +181,7 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
                       samples_per_pixel::Int=1,
                       gamma::Float64=1.0,
                       seed::UInt64=UInt64(42)) where T <: AbstractFloat
+    Base.depwarn("`render_image` is deprecated, use `render_volume_image` or `visualize` instead.", :render_image)
     aspect = Float64(width) / Float64(height)
     pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
 

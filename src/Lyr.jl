@@ -131,7 +131,7 @@ export nano_background, nano_bbox, nano_root_count, nano_i2_count, nano_i1_count
 export SVec3f, SVec3d, SMat3d
 
 # Render
-export Camera, render_image, write_ppm
+export Camera, write_ppm
 
 # Surface
 export SurfaceHit, find_surface

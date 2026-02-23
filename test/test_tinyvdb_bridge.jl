@@ -240,7 +240,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
         grid = convert_tinyvdb_grid(first(values(tiny.grids)))
 
         cam = Camera((15.0, 10.0, 15.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 60.0)
-        pixels = render_image(grid, cam, 16, 16; max_steps=500)
+        pixels = Lyr.render_image(grid, cam, 16, 16; max_steps=500)
 
         @test size(pixels) == (16, 16)
 
