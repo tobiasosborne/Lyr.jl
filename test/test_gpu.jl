@@ -7,6 +7,7 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
              _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
              _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
              _bake_tf_lut, _estimate_density_range,
+             gpu_volume_march_cpu!,
              _I2_CMASK_OFF, _I2_VMASK_OFF, _I2_CPREFIX_OFF, _I2_VPREFIX_OFF,
              _I2_CHILDCOUNT_OFF, _I2_DATA_OFF,
              _I1_CMASK_OFF, _I1_VMASK_OFF, _I1_CPREFIX_OFF, _I1_VPREFIX_OFF,
@@ -229,6 +230,38 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
             pixels = gpu_render_volume(nanogrid, scene, 8, 8; spp=1)
             @test size(pixels) == (8, 8)
             @test all(p -> all(isfinite, p), pixels)
+        end
+    end
+
+    @testset "gpu_volume_march_cpu! uses scene background color" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if isfile(cube_path)
+            vdb = parse_vdb(cube_path)
+            grid = vdb.grids[1]
+            nanogrid = build_nanogrid(grid.tree)
+            tf = tf_smoke()
+
+            # Camera pointing away from the volume — all rays miss
+            cam = Camera((1000.0, 1000.0, 1000.0), (2000.0, 2000.0, 2000.0),
+                         (0.0, 1.0, 0.0), 40.0)
+
+            bg = (0.3, 0.5, 0.7)
+            output = Matrix{NTuple{3, Float32}}(undef, 4, 4)
+            gpu_volume_march_cpu!(output, nanogrid, cam, tf, 4, 4;
+                                  background=bg)
+
+            # All pixels should be the background color (transmittance=1.0 for miss rays)
+            for px in output
+                @test px[1] ≈ Float32(0.3) atol=0.01
+                @test px[2] ≈ Float32(0.5) atol=0.01
+                @test px[3] ≈ Float32(0.7) atol=0.01
+            end
+
+            # Default background should be black
+            gpu_volume_march_cpu!(output, nanogrid, cam, tf, 4, 4)
+            for px in output
+                @test px == (0.0f0, 0.0f0, 0.0f0)
+            end
         end
     end
 end

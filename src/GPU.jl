@@ -791,10 +791,14 @@ end
 
 """
     gpu_volume_march_cpu!(output, nanogrid, camera, tf_points, width, height;
-                          step_size=0.5, sigma_scale=1.0)
+                          step_size=0.5, sigma_scale=1.0,
+                          background=(0.0, 0.0, 0.0))
 
 CPU fallback for GPU volume marching. Fixed-step emission-absorption
 through NanoGrid with transfer function lookup.
+
+# Keywords
+- `background::NTuple{3,Float64}` — Scene background color blended where rays miss (default: black)
 """
 function gpu_volume_march_cpu!(output::Matrix{NTuple{3, Float32}},
                                 nanogrid::NanoGrid{T},
@@ -802,7 +806,8 @@ function gpu_volume_march_cpu!(output::Matrix{NTuple{3, Float32}},
                                 tf::Any,  # TransferFunction
                                 width::Int, height::Int;
                                 step_size::Float64=0.5,
-                                sigma_scale::Float64=1.0) where T
+                                sigma_scale::Float64=1.0,
+                                background::NTuple{3,Float64}=(0.0, 0.0, 0.0)) where T
     aspect = Float64(width) / Float64(height)
     acc = NanoValueAccessor(nanogrid)
     bbox = nano_bbox(nanogrid)
@@ -847,9 +852,9 @@ function gpu_volume_march_cpu!(output::Matrix{NTuple{3, Float32}},
             end
 
             # Background blend
-            acc_r += transmittance * 0.0
-            acc_g += transmittance * 0.0
-            acc_b += transmittance * 0.0
+            acc_r += transmittance * background[1]
+            acc_g += transmittance * background[2]
+            acc_b += transmittance * background[3]
 
             output[y, x] = (Float32(clamp(acc_r, 0.0, 1.0)),
                             Float32(clamp(acc_g, 0.0, 1.0)),
