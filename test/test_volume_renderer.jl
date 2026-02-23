@@ -145,6 +145,24 @@ using Random: Xoshiro
         @test any_nonzero_both
     end
 
+    @testset "VolumeEntry without NanoGrid throws on render" begin
+        cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if isfile(cube_path)
+            vdb = parse_vdb(cube_path)
+            grid = vdb.grids[1]
+            tf = tf_smoke()
+            mat = VolumeMaterial(tf; sigma_scale=1.0)
+            vol = VolumeEntry(grid, mat)  # nanogrid = nothing
+
+            cam = Camera((10.0, 5.0, 10.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 60.0)
+            light = DirectionalLight((0.577, 0.577, 0.577))
+            scene = Scene(cam, light, vol)
+
+            @test_throws ArgumentError render_volume_preview(scene, 4, 4)
+            @test_throws ArgumentError render_volume_image(scene, 4, 4; spp=1)
+        end
+    end
+
     @testset "Tone mapping round-trip" begin
         pixels = [(0.5, 0.3, 0.8) (1.5, 2.0, 0.1);
                   (0.0, 0.0, 0.0) (0.01, 0.99, 0.5)]

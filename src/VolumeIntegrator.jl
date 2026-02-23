@@ -181,7 +181,8 @@ function _march_emission_absorption(ray::Ray, scene::Scene,
 
     for vol in scene.volumes
         nanogrid = vol.nanogrid
-        nanogrid === nothing && continue
+        nanogrid === nothing && throw(ArgumentError(
+            "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
 
         bmin, bmax = _volume_bounds(nanogrid)
         t_enter, t_exit = _ray_box_intersect(ray, bmin, bmax)
@@ -296,7 +297,8 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
 
     for vol in scene.volumes
         nanogrid = vol.nanogrid
-        nanogrid === nothing && continue
+        nanogrid === nothing && throw(ArgumentError(
+            "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
 
         bmin, bmax = _volume_bounds(nanogrid)
         t_enter, t_exit = _ray_box_intersect(ray, bmin, bmax)

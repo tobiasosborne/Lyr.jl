@@ -74,8 +74,8 @@ Material properties for a volume grid.
 - `scattering_albedo::Float64` - Ratio of scattering to extinction [0,1]
 """
 struct VolumeMaterial
-    transfer_function::Any  # TransferFunction (uses Any to avoid circular dep)
-    phase_function::Any     # PhaseFunction
+    transfer_function::TransferFunction
+    phase_function::PhaseFunction
     sigma_scale::Float64
     emission_scale::Float64
     scattering_albedo::Float64

@@ -183,8 +183,8 @@ field = ScalarField3D(
 evaluate(field, 0.0, 0.0, 0.0)  # 1.0
 ```
 """
-struct ScalarField3D <: AbstractContinuousField
-    eval_fn::Function
+struct ScalarField3D{F} <: AbstractContinuousField
+    eval_fn::F
     domain::BoxDomain
     characteristic_scale::Float64
 end
@@ -196,6 +196,7 @@ domain(f::ScalarField3D) = f.domain
 field_eltype(::ScalarField3D) = Float64
 characteristic_scale(f::ScalarField3D) = f.characteristic_scale
 
+Base.show(io::IO, ::Type{<:ScalarField3D}) = print(io, "ScalarField3D")
 Base.show(io::IO, f::ScalarField3D) =
     print(io, "ScalarField3D($(f.domain), scale=$(f.characteristic_scale))")
 
@@ -220,8 +221,8 @@ field = VectorField3D(
 evaluate(field, 0.0, 0.0, 0.0)  # SVec3d(1.0, 0.0, 0.0)
 ```
 """
-struct VectorField3D <: AbstractContinuousField
-    eval_fn::Function
+struct VectorField3D{F} <: AbstractContinuousField
+    eval_fn::F
     domain::BoxDomain
     characteristic_scale::Float64
 end
@@ -233,6 +234,7 @@ domain(f::VectorField3D) = f.domain
 field_eltype(::VectorField3D) = SVec3d
 characteristic_scale(f::VectorField3D) = f.characteristic_scale
 
+Base.show(io::IO, ::Type{<:VectorField3D}) = print(io, "VectorField3D")
 Base.show(io::IO, f::VectorField3D) =
     print(io, "VectorField3D($(f.domain), scale=$(f.characteristic_scale))")
 
@@ -261,8 +263,8 @@ field = ComplexScalarField3D(
 abs2(evaluate(field, 0.0, 0.0, 0.0))  # probability density at origin
 ```
 """
-struct ComplexScalarField3D <: AbstractContinuousField
-    eval_fn::Function
+struct ComplexScalarField3D{F} <: AbstractContinuousField
+    eval_fn::F
     domain::BoxDomain
     characteristic_scale::Float64
 end
@@ -274,6 +276,7 @@ domain(f::ComplexScalarField3D) = f.domain
 field_eltype(::ComplexScalarField3D) = ComplexF64
 characteristic_scale(f::ComplexScalarField3D) = f.characteristic_scale
 
+Base.show(io::IO, ::Type{<:ComplexScalarField3D}) = print(io, "ComplexScalarField3D")
 Base.show(io::IO, f::ComplexScalarField3D) =
     print(io, "ComplexScalarField3D($(f.domain), scale=$(f.characteristic_scale))")
 
@@ -353,11 +356,14 @@ evolving = TimeEvolution{ScalarField3D}(
 field_at_t = evolving.eval_fn(0.0)  # ScalarField3D at t=0
 ```
 """
-struct TimeEvolution{F <: AbstractField}
-    eval_fn::Function
+struct TimeEvolution{F <: AbstractField, G}
+    eval_fn::G
     t_range::Tuple{Float64, Float64}
     dt_hint::Float64
 end
+
+TimeEvolution{F}(eval_fn, t_range, dt_hint) where {F <: AbstractField} =
+    TimeEvolution{F, typeof(eval_fn)}(eval_fn, t_range, dt_hint)
 
 domain(te::TimeEvolution) = domain(te.eval_fn(te.t_range[1]))
 field_eltype(te::TimeEvolution{F}) where F = field_eltype(te.eval_fn(te.t_range[1]))
