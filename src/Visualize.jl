@@ -271,7 +271,7 @@ function visualize(field::AbstractContinuousField;
 
     # 5. Scene
     volume = VolumeEntry(grid, nanogrid, mat)
-    scene = Scene(cam, lts, VolumeEntry[volume]; background=background)
+    scene = Scene(cam, lts, volume; background=background)
 
     # 6. Render
     pixels = render_volume_image(scene, width, height; spp=spp, seed=seed)
@@ -353,7 +353,7 @@ function visualize(field::ParticleField;
     lts = lights !== nothing ? convert(Vector{AbstractLight}, lights) : light_studio()
 
     volume = VolumeEntry(grid, nanogrid, mat)
-    scene = Scene(cam, lts, VolumeEntry[volume]; background=background)
+    scene = Scene(cam, lts, volume; background=background)
 
     pixels = render_volume_image(scene, width, height; spp=spp, seed=seed)
 

@@ -75,7 +75,7 @@ using Lyr
             @test scene.background == SVec3d(0.0, 0.0, 0.0)
 
             # With custom background
-            scene2 = Scene(cam, AbstractLight[light], VolumeEntry[vol];
+            scene2 = Scene(cam, AbstractLight[light], [vol];
                           background=(0.1, 0.1, 0.15))
             @test scene2.background == SVec3d(0.1, 0.1, 0.15)
         end

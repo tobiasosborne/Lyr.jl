@@ -94,17 +94,18 @@ end
 # ============================================================================
 
 """
-    VolumeEntry
+    VolumeEntry{G}
 
 A volume in the scene: a grid with its material and optional NanoGrid acceleration.
+Parametrized on `G` (the grid type) for type stability in the render pipeline.
 
 # Fields
-- `grid::Grid` - The VDB grid (for accessor-based lookups)
+- `grid::G` - The VDB grid (for accessor-based lookups)
 - `nanogrid::Union{NanoGrid, Nothing}` - Optional NanoGrid for fast lookups
 - `material::VolumeMaterial` - Material properties
 """
-struct VolumeEntry
-    grid::Any  # Grid{T}
+struct VolumeEntry{G}
+    grid::G
     nanogrid::Union{NanoGrid, Nothing}
     material::VolumeMaterial
 end
@@ -117,33 +118,45 @@ VolumeEntry(grid, material::VolumeMaterial) =
 # ============================================================================
 
 """
-    Scene
+    Scene{V}
 
 A complete scene description for rendering.
+Parametrized on `V` (the volumes container type) for type stability.
+Single-volume scenes use a `Tuple{VolumeEntry{G}}` for full specialization;
+multi-volume scenes use `Vector{VolumeEntry{G}}`.
 
 # Fields
 - `camera::Camera` - The view camera
 - `lights::Vector{AbstractLight}` - Scene lights
-- `volumes::Vector{VolumeEntry}` - Volume grids with materials
+- `volumes::V` - Volume grids with materials (Tuple or Vector)
 - `background::SVec3d` - Background color (RGB)
 """
-struct Scene
+struct Scene{V}
     camera::Camera
     lights::Vector{AbstractLight}
-    volumes::Vector{VolumeEntry}
+    volumes::V
     background::SVec3d
 end
 
+# Multi-volume: pass a vector
 function Scene(camera::Camera, lights::Vector{<:AbstractLight},
-               volumes::Vector{VolumeEntry};
+               volumes::Vector{<:VolumeEntry};
                background::NTuple{3,Float64}=(0.0, 0.0, 0.0))
     Scene(camera, convert(Vector{AbstractLight}, lights),
           volumes, SVec3d(background...))
 end
 
+# Single volume + light vector: wrap in tuple for specialization
+function Scene(camera::Camera, lights::Vector{<:AbstractLight},
+               volume::VolumeEntry;
+               background::NTuple{3,Float64}=(0.0, 0.0, 0.0))
+    Scene(camera, convert(Vector{AbstractLight}, lights),
+          (volume,), SVec3d(background...))
+end
+
 # Convenience: single light, single volume
 function Scene(camera::Camera, light::AbstractLight, volume::VolumeEntry;
                background::NTuple{3,Float64}=(0.0, 0.0, 0.0))
-    Scene(camera, AbstractLight[light], VolumeEntry[volume];
+    Scene(camera, AbstractLight[light], volume;
           background=background)
 end
