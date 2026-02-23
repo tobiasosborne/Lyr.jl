@@ -2,7 +2,51 @@
 
 ---
 
-## Latest Session (2026-02-23) — Distill code review + fix 2 P1 bugs
+## Latest Session (2026-02-23) — Fix 3 P1 issues (6esy, gg2x, m8ub)
+
+**Status**: COMPLETE — 3 P1 issues fixed, 29,082 tests pass
+
+### What Was Done
+
+**1. `path-tracer-6esy` — VolumeEntry without NanoGrid now throws ArgumentError**
+
+Both render paths (`render_volume_preview` and `render_volume_image`) previously silently `continue`d past volumes with `nanogrid === nothing`, producing black images with no error. Now throws `ArgumentError("VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering")`. Added test covering both renderers.
+
+**2. `path-tracer-gg2x` — FieldProtocol closures are now type-stable**
+
+Parametrized 4 field structs on their function type so the compiler can inline closure calls in hot paths:
+- `ScalarField3D{F}`, `VectorField3D{F}`, `ComplexScalarField3D{F}` — `eval_fn::F` instead of `eval_fn::Function`
+- `TimeEvolution{F,G}` — added `G` parameter for `eval_fn`, with convenience constructor `TimeEvolution{F}(...)` preserving existing API
+
+Added `Base.show(::Type{<:T})` methods to keep type display clean (no `{var"#2#3"}`). Verified with `@code_warntype`: `evaluate` now infers `Body::Float64` (was `Any` through abstract `Function`).
+
+**3. `path-tracer-m8ub` — VolumeMaterial uses concrete types instead of Any**
+
+Replaced `transfer_function::Any` with `transfer_function::TransferFunction` (concrete struct — zero dispatch overhead) and `phase_function::Any` with `phase_function::PhaseFunction` (abstract with 2 subtypes — small union). Left `grid::Any` in VolumeEntry for downstream `8mfh` issue.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/VolumeIntegrator.jl` | Lines 184, 299: `continue` → `throw(ArgumentError(...))` |
+| `src/FieldProtocol.jl` | 4 structs parametrized on function type + show methods |
+| `src/Scene.jl` | `VolumeMaterial` fields: `Any` → `TransferFunction`/`PhaseFunction` |
+| `test/test_volume_renderer.jl` | +18 LOC: test VolumeEntry without NanoGrid throws |
+
+### Test Results
+
+```
+29,082 pass, 0 fail, 0 errors (was 29,080)
+```
+
+### Next Priority
+
+Unblocked by this session:
+- `path-tracer-8mfh` — Scene container type erasure (VolumeEntry parametric on Grid type)
+
+---
+
+## Previous Session (2026-02-23) — Distill code review + fix 2 P1 bugs
 
 **Status**: COMPLETE — 27 issues created, 8 dep edges wired, 2 bugs fixed, 29,080 tests pass
 
