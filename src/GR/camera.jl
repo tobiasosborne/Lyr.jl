@@ -105,12 +105,13 @@ function pixel_to_momentum(cam::GRCamera, i::Int, j::Int)::SVec4d
     ny = py / n_norm     # up (polar)
     nz = px / n_norm     # right (azimuthal)
 
-    # Contravariant null 4-momentum: k^μ = -E(u^μ + nⁱ eᵢ^μ)
-    # E is arbitrary for null geodesics; set E = 1
+    # Contravariant null 4-momentum: k^μ = E(u^μ + nⁱ eᵢ^μ)
+    # Future-directed (k^t > 0). With negative step_size, backward tracing
+    # follows the photon path from camera toward the source.
     e = cam.tetrad  # columns: e0, e1, e2, e3
     u_vec = cam.four_velocity
 
-    k_contra = -(u_vec + nx * e[:, 2] + ny * e[:, 3] + nz * e[:, 4])
+    k_contra = u_vec + nx * e[:, 2] + ny * e[:, 3] + nz * e[:, 4]
 
     # Lower index: p_μ = g_{μν} k^ν
     g = metric(cam.metric, cam.position)

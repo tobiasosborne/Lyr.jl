@@ -88,7 +88,7 @@ export VolumetricMatter, ThickDisk, evaluate_density, emission_absorption, disk_
 export horizon_radius, photon_sphere_radius, isco_radius
 
 # Integrator
-export IntegratorConfig, integrate_geodesic, verlet_step, adaptive_step
+export IntegratorConfig, integrate_geodesic, verlet_step, adaptive_step, renormalize_null
 
 # Camera
 export GRCamera, static_observer_tetrad, static_camera, pixel_to_momentum

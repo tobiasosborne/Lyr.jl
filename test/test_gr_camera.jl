@@ -64,10 +64,11 @@
         cam = static_camera(s, 20.0, π/2, 0.0, 60.0, (64, 64))
         p_center = pixel_to_momentum(cam, 32, 32)
 
-        # In Schwarzschild coords, the radial component of k^μ should be negative
-        # (pointing inward) for a camera looking at the BH.
+        # Future-directed: k^r > 0 (outward — the photon was traveling from BH
+        # toward camera). Backward tracing with dl < 0 reverses this.
         ginv = metric_inverse(s, cam.position)
         k_contra = ginv * p_center
-        @test k_contra[2] < 0.0  # radial component: inward
+        @test k_contra[2] > 0.0  # radial component: outward (future-directed)
+        @test k_contra[1] > 0.0  # time component: future-directed
     end
 end

@@ -171,7 +171,8 @@
 
     @testset "ThinDisk path unchanged (regression)" begin
         m = Schwarzschild(1.0)
-        cam = static_camera(m, 50.0, π / 2, 0.0, π / 4, (8, 8))
+        # FOV wide enough to see beyond the BH shadow (~6° radius at r=50)
+        cam = static_camera(m, 50.0, π / 2, 0.0, 30.0, (8, 8))
         config = GRRenderConfig(use_threads=false)
         thin = ThinDisk(6.0, 30.0)
 

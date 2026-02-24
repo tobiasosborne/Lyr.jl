@@ -59,6 +59,10 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         dl = M_val > 0.0 ? adaptive_step(dl_base, x[2], M_val) : dl_base
 
         x_new, p_new = verlet_step(m, x, p, dl)
+
+        # Null-cone re-projection: keep photon exactly on the light cone
+        p_new = renormalize_null(m, x_new, p_new)
+
         curr_state = GeodesicState(x_new, p_new)
 
         # ── Check disk crossing ──
@@ -142,9 +146,7 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
     p0 = pixel_to_momentum(cam, i, j)
     m = cam.metric
     x, p = cam.position, p0
-    # pixel_to_momentum gives past-directed momentum; positive dλ traces
-    # backward in time (camera → source). Negate if step_size is negative.
-    dl_base = abs(config.integrator.step_size)
+    dl_base = config.integrator.step_size
     cfg = config.integrator
     rh = horizon_radius(m)
     M_val = rh / 2.0
@@ -161,6 +163,11 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         r = x[2]
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
         x_new, p_new = verlet_step(m, x, p, dl)
+
+        # Null-cone re-projection every 50 steps to eliminate H-drift
+        if step % 50 == 0
+            p_new = renormalize_null(m, x_new, p_new)
+        end
 
         # ── Accumulate emission/absorption ──
         r_new = x_new[2]
@@ -191,7 +198,7 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         end
 
         if r_new >= cfg.r_max
-            bg = _sky_color(sky, x[3], x[4])
+            bg = _sky_color(sky, x[3], x[4], config.background)
             return _volumetric_final_color(I_acc, τ_acc, bg)
         end
 
@@ -201,20 +208,12 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
 
         H = abs(0.5 * dot(p, metric_inverse(m, x) * p))
         if H > cfg.h_tolerance
-            # Deep in gravitational well → was heading for the horizon
-            r_new <= photon_sphere_radius(m) * 2.0 &&
-                return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
-            bg = _sky_color(sky, x[3], x[4])
+            bg = _sky_color(sky, x[3], x[4], config.background)
             return _volumetric_final_color(I_acc, τ_acc, bg)
         end
     end
 
-    # Max steps: if still deep in well, treat as shadow
-    r_final = x[2]
-    if r_final <= photon_sphere_radius(m) * 2.0
-        return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
-    end
-    bg = _sky_color(sky, x[3], x[4])
+    bg = _sky_color(sky, x[3], x[4], config.background)
     _volumetric_final_color(I_acc, τ_acc, bg)
 end
 
@@ -233,10 +232,13 @@ function _volumetric_final_color(I_acc::Float64, τ_acc::Float64,
      disk_color[3] + bg[3] * transmittance)
 end
 
-"""Look up sky color or fall back to checkerboard."""
+"""Look up sky color, fall back to background color or checkerboard."""
 function _sky_color(sky::Union{CelestialSphere, Nothing},
-                     θ::Float64, φ::Float64)::NTuple{3, Float64}
-    sky !== nothing ? sphere_lookup(sky, θ, φ) : checkerboard_sphere(θ, φ)
+                     θ::Float64, φ::Float64,
+                     bg::NTuple{3, Float64}=(NaN, NaN, NaN))::NTuple{3, Float64}
+    sky !== nothing && return sphere_lookup(sky, θ, φ)
+    isnan(bg[1]) && return checkerboard_sphere(θ, φ)
+    bg
 end
 
 # ─────────────────────────────────────────────────────────────────────

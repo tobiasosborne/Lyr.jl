@@ -87,6 +87,49 @@ function verlet_step(m::MetricSpace{4}, x::SVec4d, p::SVec4d, dl::Float64)::Tupl
 end
 
 """
+    renormalize_null(m, x, p) -> SVec4d
+
+Project covariant momentum p_μ back onto the null cone by adjusting p_t.
+
+Solves H = ½ g^{μν} p_μ p_ν = 0 for p_t while preserving spatial components
+and the sign of p_t. This eliminates accumulated Hamiltonian drift exactly.
+Standard technique in GR ray tracers (GYOTO, GRay2, RAPTOR).
+
+For a general metric, the null condition is quadratic in p_t:
+  A p_t² + B p_t + C = 0
+where A = g^{tt}, B = 2 Σ_{i>0} g^{ti} p_i, C = Σ_{i,j>0} g^{ij} p_i p_j.
+"""
+function renormalize_null(m::MetricSpace{4}, x::SVec4d, p::SVec4d)::SVec4d
+    ginv = metric_inverse(m, x)
+
+    # Spatial contribution: C = Σ_{i,j>0} g^{ij} p_i p_j
+    C = zero(Float64)
+    for i in 2:4, j in 2:4
+        C += ginv[i, j] * p[i] * p[j]
+    end
+
+    # Cross terms: B = 2 Σ_{i>0} g^{ti} p_i
+    B = zero(Float64)
+    for i in 2:4
+        B += 2.0 * ginv[1, i] * p[i]
+    end
+
+    A = ginv[1, 1]  # g^{tt}
+
+    # Solve A p_t² + B p_t + C = 0
+    disc = B * B - 4.0 * A * C
+    disc = max(disc, 0.0)  # numerical safety
+    sqrt_disc = sqrt(disc)
+
+    # Two roots — pick the one with the same sign as the original p_t
+    pt1 = (-B + sqrt_disc) / (2.0 * A)
+    pt2 = (-B - sqrt_disc) / (2.0 * A)
+    pt_new = (sign(p[1]) == sign(pt1)) ? pt1 : pt2
+
+    SVec4d(pt_new, p[2], p[3], p[4])
+end
+
+"""
     integrate_geodesic(m, initial, config) -> GeodesicTrace
 
 Integrate a null geodesic from `initial` state using adaptive Störmer-Verlet.
@@ -114,6 +157,7 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
 
         x, p = verlet_step(m, x, p, dl)
+        p = renormalize_null(m, x, p)
         r = x[2]
 
         # ── Termination checks ──
