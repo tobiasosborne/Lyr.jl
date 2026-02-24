@@ -142,7 +142,9 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
     p0 = pixel_to_momentum(cam, i, j)
     m = cam.metric
     x, p = cam.position, p0
-    dl_base = config.integrator.step_size
+    # pixel_to_momentum gives past-directed momentum; positive dλ traces
+    # backward in time (camera → source). Negate if step_size is negative.
+    dl_base = abs(config.integrator.step_size)
     cfg = config.integrator
     rh = horizon_radius(m)
     M_val = rh / 2.0
@@ -185,39 +187,39 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
 
         # ── Termination ──
         if r_new <= rh * cfg.r_min_factor
-            return _volumetric_final_color(I_acc, (0.0, 0.0, 0.0))
+            return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
         end
 
         if r_new >= cfg.r_max
             bg = _sky_color(sky, x[3], x[4])
-            return _volumetric_final_color(I_acc, bg)
+            return _volumetric_final_color(I_acc, τ_acc, bg)
         end
 
         if is_singular(m, x)
-            return _volumetric_final_color(I_acc, (0.0, 0.0, 0.0))
+            return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
         end
 
         H = abs(0.5 * dot(p, metric_inverse(m, x) * p))
         if H > cfg.h_tolerance
             bg = _sky_color(sky, x[3], x[4])
-            return _volumetric_final_color(I_acc, bg)
+            return _volumetric_final_color(I_acc, τ_acc, bg)
         end
     end
 
     bg = _sky_color(sky, x[3], x[4])
-    _volumetric_final_color(I_acc, bg)
+    _volumetric_final_color(I_acc, τ_acc, bg)
 end
 
-"""Map accumulated intensity to final RGB, blending with background."""
-function _volumetric_final_color(I_acc::Float64,
+"""Map accumulated intensity + optical depth to final RGB, blending with background."""
+function _volumetric_final_color(I_acc::Float64, τ_acc::Float64,
                                   bg::NTuple{3, Float64})::NTuple{3, Float64}
     I_acc <= 0.0 && return bg
     disk_color = blackbody_color(clamp(I_acc * 5.0, 0.0, 2.0))
-    # Blend: disk contribution in front, background attenuated
-    transmittance = exp(-I_acc * 2.0)  # approximate optical attenuation
-    (disk_color[1] + bg[1] * transmittance,
-     disk_color[2] + bg[2] * transmittance,
-     disk_color[3] + bg[3] * transmittance)
+    # Beer-Lambert: background attenuated by accumulated optical depth
+    transmittance = exp(-τ_acc)
+    (clamp(disk_color[1] + bg[1] * transmittance, 0.0, 1.0),
+     clamp(disk_color[2] + bg[2] * transmittance, 0.0, 1.0),
+     clamp(disk_color[3] + bg[3] * transmittance, 0.0, 1.0))
 end
 
 """Look up sky color or fall back to checkerboard."""
