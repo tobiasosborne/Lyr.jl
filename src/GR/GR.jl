@@ -28,6 +28,7 @@ include("metric.jl")
 # ─────────────────────────────────────────────────────────────────────
 include("metrics/minkowski.jl")
 include("metrics/schwarzschild.jl")
+include("metrics/schwarzschild_ks.jl")
 include("metrics/kerr.jl")
 
 # ─────────────────────────────────────────────────────────────────────
@@ -82,6 +83,7 @@ export metric_inverse_partials, hamiltonian, hamiltonian_rhs
 # Metrics
 export Minkowski
 export Schwarzschild, SchwarzschildCoordinates, EddingtonFinkelstein
+export SchwarzschildKS, ks_to_sky_angles
 export Kerr, BoyerLindquist, KerrSchild, ergosphere_radius, isco_prograde
 export WeakField
 export VolumetricMatter, ThickDisk, evaluate_density, emission_absorption, disk_temperature

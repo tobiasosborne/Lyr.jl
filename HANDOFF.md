@@ -2,7 +2,120 @@
 
 ---
 
-## Latest Session (2026-02-24) — VolumetricMatter Bridge (GR Phase 2)
+## Latest Session (2026-02-24) — GR Rendering Fixes (IN PROGRESS, BROKEN)
+
+**Status**: RED — Work in progress, multiple issues. Tests NOT verified. Needs careful continuation.
+
+### What Was Attempted
+
+Rendering a Schwarzschild black hole with volumetric thick accretion disk and ESA Gaia Milky Way background. Session spiraled into debugging cascading issues.
+
+### What Works (committed, on master)
+
+These commits are pushed and tests passed at time of commit:
+
+1. **`feat: VolumetricMatter bridge`** — ThickDisk, emission-absorption, volumetric trace_pixel (39 tests)
+2. **`fix: future-directed momentum + null-cone re-projection`** — The core physics fix. `pixel_to_momentum` now creates future-directed null momentum (removed negation). `renormalize_null()` projects p back onto null cone. 29,513 tests passed at commit time.
+3. **`fix: verlet_step Core.Box elimination`** — Unrolled `ntuple` closures to eliminate 1.5KB/step heap allocation that was killing GC and thread utilization. 0 allocations verified.
+
+### What Is Broken (uncommitted changes on disk)
+
+The working directory has **uncommitted changes** across 7 files that are in a BROKEN state:
+
+| File | Change | Status |
+|------|--------|--------|
+| `src/GR/metrics/schwarzschild_ks.jl` | **NEW** — SchwarzschildKS (Cartesian Kerr-Schild) metric, camera tetrad, sky lookup | **BROKEN** — tetrad orientation wrong, renders garbage |
+| `src/GR/render.jl` | Coordinate dispatch helpers (`_coord_r`, `_to_spherical`, `_sky_color` taking metric), supersampling scaffolding (`samples_per_pixel`, `_trace_one_sub`) | **PARTIALLY BROKEN** — dispatch works but supersampling incomplete, H-drift check removed |
+| `src/GR/camera.jl` | Docstring edit for sub-pixel `pixel_to_momentum(cam, i, j, dx, dy)` | Minor, probably fine |
+| `src/GR/integrator.jl` | Polar regularization in `verlet_step`, fast `renormalize_null` for Schwarzschild (diagonal), every-10-steps renorm in `integrate_geodesic` | Mixed — polar regularization untested, fast renorm works |
+| `src/GR/matter.jl` | `keplerian_four_velocity(m::SchwarzschildKS, r, x)` for Cartesian coords | Untested |
+| `src/GR/redshift.jl` | `volumetric_redshift(m::SchwarzschildKS, ...)` dispatch | Untested |
+| `src/GR/GR.jl` | Include schwarzschild_ks.jl, export SchwarzschildKS | Fine |
+
+### The Rendering Problem That Remains
+
+The rendered image has a **vertical seam/line artifact** running through the CENTER of the image, **from top to bottom of the entire frame** — not just near the shadow. This is the critical unsolved problem.
+
+**Key evidence**: The seam extends uniformly across the full image height, including far-field regions where geodesics are barely deflected. This CANNOT be explained by photon-sphere chaos alone (which only affects a narrow band near the shadow boundary). The artifact has TWO components:
+
+1. **Full-frame vertical seam** — extends top-to-bottom at constant x ≈ center column. This persists in weakly-lensed far-field regions. This points to a **systematic coordinate or texture mapping bug**, NOT chaos. Possible causes:
+   - Boyer-Lindquist φ coordinate wrapping issue in `sphere_lookup` bilinear interpolation at φ=0/2π boundary
+   - The camera at φ=0 looks inward; escaped rays behind the BH end up at φ≈π. Rays at the image center column map to φ values near 0 or 2π (the texture seam). If bilinear interpolation doesn't wrap correctly at this boundary, there's a visible seam.
+   - The 1/sin²θ amplification of φ-velocity near BL coordinate poles (θ→0, θ→π) corrupts φ values for rays that pass near the axis, even if θ itself is moderate at the escape point
+
+2. **Shadow-boundary aliasing** — near the photon sphere, adjacent pixels DO map to wildly different sky locations (φ jumps of ~2π). This is physical chaos. Supersampling is the correct fix for this component only.
+
+**The previous agent incorrectly dismissed the coordinate singularity explanation.** While sinθ ≈ 0.9 at the specific sampled pixels, the full-frame seam proves there is a systematic issue beyond chaos. The next session MUST:
+- Test `sphere_lookup` bilinear interpolation at the φ=0/2π wrap boundary
+- Test the BL integrator's φ accuracy: trace a far-field ray (barely deflected) and check if the final φ matches the expected value
+- Consider whether the Cartesian KS approach (which eliminates ALL φ-related issues) is the correct long-term fix
+
+The Cartesian KS implementation was started but is broken:
+1. The tetrad construction gives wrong ray directions (renders show wrong part of sky)
+2. The non-diagonal metric is ~2× slower per step than BL diagonal
+3. It needs fixing, not abandoning — it's the approach used by all production GR ray tracers
+
+### Recommended Next Steps
+
+1. **REVERT uncommitted changes** or cherry-pick only the good parts:
+   - KEEP: `verlet_step` unrolled ntuple (zero alloc fix)
+   - KEEP: `_sky_color` taking metric+position (coordinate-aware sky lookup)
+   - KEEP: `_coord_r`, `_to_spherical` dispatch helpers
+   - KEEP: Fast `renormalize_null` for Schwarzschild
+   - DISCARD: SchwarzschildKS (broken tetrad, incomplete)
+   - DISCARD: Supersampling scaffolding (incomplete)
+   - DISCARD: Polar regularization in verlet_step (untested, may cause Core.Box return)
+
+2. **Diagnose the full-frame vertical seam** (HIGHEST PRIORITY):
+   - Render a FLAT spacetime (no BH) with the Milky Way texture to isolate: is the seam in `sphere_lookup` itself?
+   - Test `sphere_lookup` bilinear interpolation at φ ≈ 0 and φ ≈ 2π — check for discontinuity
+   - Trace far-field rays (impact parameter >> photon sphere) and verify φ at escape matches expected
+   - If the seam is in BL φ handling, Cartesian KS is the correct fix
+
+3. **Fix SchwarzschildKS** (the right long-term approach):
+   - The tetrad orientation is wrong: e1 outward + negative step = rays go outward (wrong)
+   - Root cause: in BL, future-directed outward photon has dx^r/dλ > 0; in KS it has dx^x/dλ > 0 too BUT the sign convention differs because KS is Cartesian
+   - Need to carefully derive the correct tetrad-to-momentum mapping for KS
+   - Reference: GRay2 paper (arXiv:1706.07062) uses KS throughout — study their camera setup
+
+4. **Supersampling** (for shadow-boundary aliasing only):
+   - Scaffolding exists in render.jl (`samples_per_pixel`, `_trace_one_sub`)
+   - Implement stratified 2×2 or 3×3 jitter per pixel
+   - This fixes the chaos artifact near the photon sphere but NOT the full-frame seam
+
+5. **Thread utilization**:
+   - Dynamic scheduling (`Threads.@threads :dynamic`) was added
+   - Shadow pixels ~675 steps, escape pixels ~4500 steps — uneven work
+   - Profile with `@time` per-row to verify dynamic scheduling helps
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/GR/render.jl` | Both trace_pixel methods (ThinDisk + Volumetric), gr_render_image |
+| `src/GR/integrator.jl` | verlet_step, renormalize_null, integrate_geodesic |
+| `src/GR/camera.jl` | pixel_to_momentum, static_observer_tetrad |
+| `src/GR/volumetric.jl` | VolumetricMatter, ThickDisk, emission_absorption |
+| `src/GR/redshift.jl` | volumetric_redshift, redshift_factor |
+| `src/GR/metrics/schwarzschild.jl` | BL Schwarzschild (working) |
+| `src/GR/metrics/schwarzschild_ks.jl` | Cartesian KS (BROKEN, uncommitted) |
+
+### Performance Profile (from profiling agent)
+
+- `verlet_step`: 596ns/call, 0 allocations (after unroll fix)
+- `renormalize_null` (Schwarzschild fast path): 332ns/call, 0 allocations
+- Per-step overhead from H-drift check: was 400ns (redundant `metric_inverse`), removed in uncommitted changes
+- Render time (BL, 1920×1080, 64 threads): ~33s with correct physics
+
+### References
+
+- [GRay2 paper](https://arxiv.org/abs/1706.07062) — Cartesian KS geodesic integrator
+- [RAPTOR](https://www.aanda.org/articles/aa/full_html/2018/05/aa32149-17/aa32149-17.html) — Modified KS coordinates
+- ESA Gaia EDR3 Milky Way panorama: `/tmp/milkyway_4k.png` (4000×2000, downloaded)
+
+---
+
+## Previous Session (2026-02-24) — VolumetricMatter Bridge (GR Phase 2)
 
 **Status**: COMPLETE — 36,066 tests pass (39 new volumetric + all existing)
 

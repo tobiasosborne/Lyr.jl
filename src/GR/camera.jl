@@ -80,21 +80,19 @@ function static_camera(m::MetricSpace{4}, r::Float64, θ::Float64, φ::Float64,
 end
 
 """
-    pixel_to_momentum(cam::GRCamera, i::Int, j::Int) -> SVec4d
+    pixel_to_momentum(cam, i, j, dx=0.0, dy=0.0) -> SVec4d
 
 Convert pixel (i, j) to initial covariant null momentum p_μ.
-
-Maps pixel coordinates to a direction in the camera's local frame,
-then transforms to coordinate-basis null momentum via the tetrad.
+Optional sub-pixel offsets dx, dy ∈ [-0.5, 0.5] for supersampling.
 """
-function pixel_to_momentum(cam::GRCamera, i::Int, j::Int)::SVec4d
+function pixel_to_momentum(cam::GRCamera, i::Int, j::Int,
+                            dx::Float64=0.0, dy::Float64=0.0)::SVec4d
     width, height = cam.resolution
     aspect = Float64(width) / Float64(height)
     half_fov = tan(deg2rad(cam.fov / 2.0))
 
-    # Pixel → normalized coordinates (matching Render.jl camera_ray pattern)
-    u = (Float64(i) - 0.5) / Float64(width)
-    v = 1.0 - (Float64(j) - 0.5) / Float64(height)
+    u = (Float64(i) - 0.5 + dx) / Float64(width)
+    v = 1.0 - (Float64(j) - 0.5 + dy) / Float64(height)
     px = (2.0 * u - 1.0) * aspect * half_fov
     py = (2.0 * v - 1.0) * half_fov
 

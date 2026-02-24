@@ -49,8 +49,16 @@ Returns 1+z (positive = redshift, < 1 = blueshift).
 function volumetric_redshift(m::Schwarzschild, x::SVec4d, p::SVec4d,
                               p0::SVec4d, u_obs::SVec4d)::Float64
     r = x[2]
-    r <= 3.0 * m.M && return 1.0  # inside photon sphere: no stable orbit
+    r <= 3.0 * m.M && return 1.0
     u_emit = keplerian_four_velocity(m, r)
+    redshift_factor(p, u_emit, p0, u_obs)
+end
+
+function volumetric_redshift(m::SchwarzschildKS, x::SVec4d, p::SVec4d,
+                              p0::SVec4d, u_obs::SVec4d)::Float64
+    r = sqrt(x[2]^2 + x[3]^2 + x[4]^2)
+    r <= 3.0 * m.M && return 1.0
+    u_emit = keplerian_four_velocity(m, r, x)
     redshift_factor(p, u_emit, p0, u_obs)
 end
 

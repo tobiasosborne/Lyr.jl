@@ -68,20 +68,37 @@ end
 One Störmer-Verlet (leapfrog) step of the Hamiltonian system.
 """
 function verlet_step(m::MetricSpace{4}, x::SVec4d, p::SVec4d, dl::Float64)::Tuple{SVec4d, SVec4d}
-    # Half-step in momentum
+    hdl = dl / 2.0
+
+    # Half-step in momentum (unrolled — no closure, no Core.Box)
     partials = metric_inverse_partials(m, x)
-    dp1 = SVec4d(ntuple(μ -> -0.5 * dot(p, partials[μ] * p), 4))
-    p_half = p + (dl / 2.0) * dp1
+    dp1 = SVec4d(-0.5 * dot(p, partials[1] * p),
+                  -0.5 * dot(p, partials[2] * p),
+                  -0.5 * dot(p, partials[3] * p),
+                  -0.5 * dot(p, partials[4] * p))
+    p_half = p + hdl * dp1
 
     # Full step in position
     ginv = metric_inverse(m, x)
-    dxdl = ginv * p_half
-    x_new = x + dl * dxdl
+    x_new = x + dl * (ginv * p_half)
 
-    # Half-step in momentum at new position
+    # Polar regularization: reflect θ at 0 and π to avoid coordinate singularity
+    θ_new = x_new[3]
+    if θ_new < 0.0
+        x_new = SVec4d(x_new[1], x_new[2], -θ_new, x_new[4] + π)
+        p_half = SVec4d(p_half[1], p_half[2], -p_half[3], p_half[4])
+    elseif θ_new > π
+        x_new = SVec4d(x_new[1], x_new[2], 2π - θ_new, x_new[4] + π)
+        p_half = SVec4d(p_half[1], p_half[2], -p_half[3], p_half[4])
+    end
+
+    # Half-step in momentum at new position (unrolled)
     partials2 = metric_inverse_partials(m, x_new)
-    dp2 = SVec4d(ntuple(μ -> -0.5 * dot(p_half, partials2[μ] * p_half), 4))
-    p_new = p_half + (dl / 2.0) * dp2
+    dp2 = SVec4d(-0.5 * dot(p_half, partials2[1] * p_half),
+                  -0.5 * dot(p_half, partials2[2] * p_half),
+                  -0.5 * dot(p_half, partials2[3] * p_half),
+                  -0.5 * dot(p_half, partials2[4] * p_half))
+    p_new = p_half + hdl * dp2
 
     (x_new, p_new)
 end
@@ -94,11 +111,24 @@ Project covariant momentum p_μ back onto the null cone by adjusting p_t.
 Solves H = ½ g^{μν} p_μ p_ν = 0 for p_t while preserving spatial components
 and the sign of p_t. This eliminates accumulated Hamiltonian drift exactly.
 Standard technique in GR ray tracers (GYOTO, GRay2, RAPTOR).
-
-For a general metric, the null condition is quadratic in p_t:
-  A p_t² + B p_t + C = 0
-where A = g^{tt}, B = 2 Σ_{i>0} g^{ti} p_i, C = Σ_{i,j>0} g^{ij} p_i p_j.
 """
+
+# Fast path for Schwarzschild (diagonal metric — no matrix needed)
+function renormalize_null(m::Schwarzschild, x::SVec4d, p::SVec4d)::SVec4d
+    r, θ = x[2], x[3]
+    f = 1.0 - 2.0 * m.M / r
+    inv_r2 = 1.0 / (r * r)
+    sin2θ = max(sin(θ)^2, 1e-10)
+
+    # g^{rr}p_r² + g^{θθ}p_θ² + g^{φφ}p_φ²
+    C = f * p[2]^2 + inv_r2 * p[3]^2 + inv_r2 / sin2θ * p[4]^2
+    # g^{tt} = -1/f, so p_t² = C × f  →  p_t = ±√(C × f)
+    pt_mag = sqrt(max(C * f, 0.0))
+    pt_new = p[1] < 0.0 ? -pt_mag : pt_mag
+    SVec4d(pt_new, p[2], p[3], p[4])
+end
+
+# General fallback for non-diagonal metrics (Kerr, etc.)
 function renormalize_null(m::MetricSpace{4}, x::SVec4d, p::SVec4d)::SVec4d
     ginv = metric_inverse(m, x)
 
@@ -157,7 +187,9 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
 
         x, p = verlet_step(m, x, p, dl)
-        p = renormalize_null(m, x, p)
+        if step % 10 == 0
+            p = renormalize_null(m, x, p)
+        end
         r = x[2]
 
         # ── Termination checks ──

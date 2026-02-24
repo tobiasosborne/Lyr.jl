@@ -47,6 +47,25 @@ function keplerian_four_velocity(m::Schwarzschild, r::Float64)::SVec4d
 end
 
 """
+    keplerian_four_velocity(m::SchwarzschildKS, r, x) -> SVec4d
+
+Keplerian 4-velocity in Cartesian KS coordinates.
+The orbit has angular velocity Ω = √(M/r³) in the plane containing x.
+"""
+function keplerian_four_velocity(m::SchwarzschildKS, r::Float64, x::SVec4d)::SVec4d
+    M = m.M
+    Ω = sqrt(M / r^3)
+    ut = 1.0 / sqrt(1.0 - 3.0 * M / r)
+    # Orbital velocity: v = Ω × r_vec (cross product with z-axis for equatorial)
+    # In the local plane: tangent direction = (-y, x, 0) / r_perp
+    r_perp = sqrt(x[2]^2 + x[3]^2)
+    r_perp = max(r_perp, 1e-15)
+    vx = -x[3] / r_perp * Ω * r_perp  # = -y Ω
+    vy =  x[2] / r_perp * Ω * r_perp  # =  x Ω
+    SVec4d(ut, ut * vx, ut * vy, 0.0)
+end
+
+"""
     check_disk_crossing(prev::GeodesicState, curr::GeodesicState, disk::ThinDisk)
         -> Union{Tuple{Float64, Float64}, Nothing}
 
