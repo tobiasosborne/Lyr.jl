@@ -210,16 +210,19 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
     _volumetric_final_color(I_acc, τ_acc, bg)
 end
 
-"""Map accumulated intensity + optical depth to final RGB, blending with background."""
+"""Map accumulated intensity + optical depth to final HDR RGB, blending with background."""
 function _volumetric_final_color(I_acc::Float64, τ_acc::Float64,
                                   bg::NTuple{3, Float64})::NTuple{3, Float64}
     I_acc <= 0.0 && return bg
-    disk_color = blackbody_color(clamp(I_acc * 5.0, 0.0, 2.0))
+    # HDR blackbody color scaled by accumulated intensity (no clamping — let
+    # external tone mapping handle the dynamic range)
+    bb = blackbody_color(clamp(I_acc, 0.0, 2.0))
+    disk_color = (bb[1] * I_acc, bb[2] * I_acc, bb[3] * I_acc)
     # Beer-Lambert: background attenuated by accumulated optical depth
     transmittance = exp(-τ_acc)
-    (clamp(disk_color[1] + bg[1] * transmittance, 0.0, 1.0),
-     clamp(disk_color[2] + bg[2] * transmittance, 0.0, 1.0),
-     clamp(disk_color[3] + bg[3] * transmittance, 0.0, 1.0))
+    (disk_color[1] + bg[1] * transmittance,
+     disk_color[2] + bg[2] * transmittance,
+     disk_color[3] + bg[3] * transmittance)
 end
 
 """Look up sky color or fall back to checkerboard."""
