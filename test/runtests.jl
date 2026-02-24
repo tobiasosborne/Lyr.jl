@@ -88,4 +88,13 @@ import Lyr:
     include("test_field_protocol.jl")
     include("test_voxelize.jl")
     include("test_visualize.jl")
+    include("test_gr_types.jl")
+    include("test_gr_metric.jl")
+    include("test_gr_schwarzschild.jl")
+    include("test_gr_integrator.jl")
+    include("test_gr_camera.jl")
+    include("test_gr_matter.jl")
+    include("test_gr_redshift.jl")
+    include("test_gr_render.jl")
+    include("test_gr_validation.jl")
 end

@@ -5,6 +5,7 @@ Manifest.toml
 # Test fixtures
 test/fixtures/samples/*.vdb
 test/fixtures/openvdb/
+test/fixtures/starmap_*
 
 # Render/debug artifacts
 *.ppm

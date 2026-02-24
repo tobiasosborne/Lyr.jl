@@ -43,6 +43,9 @@ include("Surface.jl")
 # NanoVDB flat-buffer representation (GPU-ready)
 include("NanoVDB.jl")
 
+# General Relativistic ray tracing
+include("GR/GR.jl")
+
 # TinyVDB parser (test oracle — used by test/test_parser_equivalence.jl)
 include("TinyVDB/TinyVDB.jl")
 
