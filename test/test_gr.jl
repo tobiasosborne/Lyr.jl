@@ -15,5 +15,6 @@ using Lyr.GR
     include("test_gr_matter.jl")
     include("test_gr_redshift.jl")
     include("test_gr_render.jl")
+    include("test_gr_volumetric.jl")
     include("test_gr_validation.jl")
 end

@@ -40,6 +40,21 @@ function blackbody_color(T::Float64)::NTuple{3, Float64}
 end
 
 """
+    volumetric_redshift(m::Schwarzschild, x, p, p0, u_obs) -> Float64
+
+Compute 1+z at a geodesic step for Keplerian-orbiting matter.
+Extracts r from the geodesic position and uses the local Keplerian 4-velocity.
+Returns 1+z (positive = redshift, < 1 = blueshift).
+"""
+function volumetric_redshift(m::Schwarzschild, x::SVec4d, p::SVec4d,
+                              p0::SVec4d, u_obs::SVec4d)::Float64
+    r = x[2]
+    r <= 3.0 * m.M && return 1.0  # inside photon sphere: no stable orbit
+    u_emit = keplerian_four_velocity(m, r)
+    redshift_factor(p, u_emit, p0, u_obs)
+end
+
+"""
     doppler_color(base_color, z) -> NTuple{3, Float64}
 
 Apply redshift/blueshift to a base color.

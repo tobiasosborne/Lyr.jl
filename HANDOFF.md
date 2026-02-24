@@ -2,7 +2,47 @@
 
 ---
 
-## Latest Session (2026-02-24) — GR Ray Tracing Module (Phase 1 Complete)
+## Latest Session (2026-02-24) — VolumetricMatter Bridge (GR Phase 2)
+
+**Status**: COMPLETE — 36,066 tests pass (39 new volumetric + all existing)
+
+### What Was Done
+
+Implemented the VolumetricMatter bridge: the infrastructure connecting the geodesic integrator to volumetric density/emission queries for thick accretion disk rendering through curved spacetime.
+
+| # | File | Lines | What |
+|---|------|-------|------|
+| 1 | `src/GR/volumetric.jl` | 87 | **NEW** — VolumetricMatter struct, ThickDisk analytic density, emission-absorption coefficients |
+| 2 | `src/GR/redshift.jl` | +14 | `volumetric_redshift()` — Keplerian redshift at each geodesic step |
+| 3 | `src/GR/render.jl` | +95 | New `trace_pixel` method for VolumetricMatter, `_volumetric_final_color`, `_sky_color`, updated `gr_render_image` |
+| 4 | `src/GR/GR.jl` | ~8 | Reordered includes, added exports |
+| 5 | `test/test_gr_volumetric.jl` | 198 | **NEW** — 39 tests covering density, emission, redshift, rendering |
+
+### Architecture
+
+- **VolumetricMatter{M, D}** — generic over metric type M and density source D
+- **ThickDisk** — first concrete density source: Gaussian vertical + r^{-2} radial profile
+- **Accumulation loop** — emission-absorption integration along geodesic arcs (deterministic ray marching)
+- **Multiple dispatch** — new `trace_pixel(cam, config, vol::VolumetricMatter, sky, i, j)` keeps ThinDisk path untouched
+- **Analytic first** — no VDB pre-voxelization needed; swap in grid lookup later
+
+### Key Decisions
+
+1. Analytic density evaluation at each geodesic step (no pre-voxelization) — fast enough and avoids the coordinate mapping question
+2. Simplified bremsstrahlung emission (j ∝ ρ²√T) and electron scattering absorption (α ∝ κ_es × ρ)
+3. Shakura-Sunyaev temperature profile T ∝ (r_in/r)^{3/4}
+4. VolumetricMatter takes precedence over ThinDisk when both provided
+
+### Next Steps
+
+- Novikov-Thorne exact temperature profile (Page & Thorne 1974)
+- Spiral density perturbation (m=2 mode with differential rotation)
+- VDB grid bridge (swap analytic density for `sample_world(grid, coords)`)
+- Kerr metric support
+
+---
+
+## Previous Session (2026-02-24) — GR Ray Tracing Module (Phase 1 Complete)
 
 **Status**: 🟢 COMPLETE — 1685 tests pass (313 new GR + 1342 existing)
 

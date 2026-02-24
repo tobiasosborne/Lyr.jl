@@ -51,6 +51,12 @@ include("matter.jl")
 include("redshift.jl")
 
 # ─────────────────────────────────────────────────────────────────────
+# Volumetric matter bridge (ThickDisk, emission-absorption)
+# Must be before render.jl (which dispatches on VolumetricMatter)
+# ─────────────────────────────────────────────────────────────────────
+include("volumetric.jl")
+
+# ─────────────────────────────────────────────────────────────────────
 # Rendering pipeline
 # ─────────────────────────────────────────────────────────────────────
 include("render.jl")
@@ -59,7 +65,6 @@ include("render.jl")
 # Phase 2 stubs (interface only)
 # ─────────────────────────────────────────────────────────────────────
 include("stubs/weak_field.jl")
-include("stubs/volumetric.jl")
 
 # ═════════════════════════════════════════════════════════════════════
 # Exports
@@ -78,7 +83,8 @@ export metric_inverse_partials, hamiltonian, hamiltonian_rhs
 export Minkowski
 export Schwarzschild, SchwarzschildCoordinates, EddingtonFinkelstein
 export Kerr, BoyerLindquist, KerrSchild, ergosphere_radius, isco_prograde
-export WeakField, VolumetricMatter
+export WeakField
+export VolumetricMatter, ThickDisk, evaluate_density, emission_absorption, disk_temperature
 export horizon_radius, photon_sphere_radius, isco_radius
 
 # Integrator
@@ -93,7 +99,7 @@ export disk_emissivity, keplerian_four_velocity, check_disk_crossing
 export sphere_lookup, checkerboard_sphere
 
 # Redshift
-export redshift_factor, temperature_shift, blackbody_color, doppler_color
+export redshift_factor, temperature_shift, blackbody_color, doppler_color, volumetric_redshift
 
 # Render
 export GRRenderConfig, gr_render_image
