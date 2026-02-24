@@ -83,6 +83,57 @@ using StaticArrays
         @test cam isa Camera
     end
 
+    @testset "Auto-camera world-to-index round-trip" begin
+        field = test_field()
+        grid1 = voxelize(field; voxel_size=1.0)
+        grid05 = voxelize(field; voxel_size=0.5)
+        grid025 = voxelize(field; voxel_size=0.25)
+
+        # Auto-camera returns world-space coords; converting to index space
+        # should give the SAME index-space position regardless of voxel_size
+        # (index bboxes are identical due to block alignment)
+        idx1 = Lyr._camera_to_index_space(Lyr._auto_camera(grid1), 1.0)
+        idx05 = Lyr._camera_to_index_space(Lyr._auto_camera(grid05), 0.5)
+        idx025 = Lyr._camera_to_index_space(Lyr._auto_camera(grid025), 0.25)
+
+        for i in 1:3
+            @test idx1.position[i] ≈ idx05.position[i]
+            @test idx1.position[i] ≈ idx025.position[i]
+        end
+    end
+
+    @testset "Camera world-to-index-space transform" begin
+        cam = Camera((10.0, 5.0, 10.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 40.0)
+
+        # voxel_size=1.0: no change
+        cam_idx = Lyr._camera_to_index_space(cam, 1.0)
+        @test cam_idx.position == cam.position
+
+        # voxel_size=0.5: position scaled by 2x
+        cam_idx = Lyr._camera_to_index_space(cam, 0.5)
+        @test cam_idx.position[1] ≈ 20.0
+        @test cam_idx.position[2] ≈ 10.0
+        @test cam_idx.position[3] ≈ 20.0
+        @test cam_idx.fov == cam.fov
+        # Direction vectors preserved under uniform scaling
+        @test cam_idx.forward == cam.forward
+    end
+
+    @testset "visualize with non-unit voxel_size and custom camera" begin
+        field = test_field()
+        # World-space camera: should be outside the domain [-2, 2]
+        cam = Camera((5.0, 3.0, 5.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 45.0)
+        pixels = visualize(field;
+            voxel_size=0.5,
+            width=16, height=16,
+            spp=1,
+            camera=cam)
+        @test size(pixels) == (16, 16)
+        # Should produce non-black pixels (camera properly outside volume)
+        any_nonblack = any(p -> p[1] > 0.01 || p[2] > 0.01 || p[3] > 0.01, pixels)
+        @test any_nonblack
+    end
+
     @testset "visualize — smoke test" begin
         field = test_field()
         # Use large voxel_size for speed

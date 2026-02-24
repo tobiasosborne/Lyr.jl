@@ -144,13 +144,15 @@ function _auto_camera(grid)
     bbox = active_bounding_box(grid.tree)
     bbox === nothing && error("Cannot auto-camera: grid has no active voxels")
 
-    cx = Float64(bbox.min.x + bbox.max.x) / 2.0
-    cy = Float64(bbox.min.y + bbox.max.y) / 2.0
-    cz = Float64(bbox.min.z + bbox.max.z) / 2.0
+    vs = voxel_size(grid.transform)[1]
 
-    ex = Float64(bbox.max.x - bbox.min.x)
-    ey = Float64(bbox.max.y - bbox.min.y)
-    ez = Float64(bbox.max.z - bbox.min.z)
+    cx = Float64(bbox.min.x + bbox.max.x) / 2.0 * vs
+    cy = Float64(bbox.min.y + bbox.max.y) / 2.0 * vs
+    cz = Float64(bbox.min.z + bbox.max.z) / 2.0 * vs
+
+    ex = Float64(bbox.max.x - bbox.min.x) * vs
+    ey = Float64(bbox.max.y - bbox.min.y) * vs
+    ez = Float64(bbox.max.z - bbox.min.z) * vs
     max_ext = max(ex, ey, ez)
     dist = max_ext * 2.0
 
@@ -160,6 +162,19 @@ function _auto_camera(grid)
         (0.0, 1.0, 0.0),
         40.0
     )
+end
+
+"""
+    _camera_to_index_space(cam::Camera, vs::Float64) -> Camera
+
+Transform a world-space camera to index space by scaling its position by 1/voxel_size.
+Direction vectors (forward, right, up) are unchanged under uniform scaling.
+"""
+function _camera_to_index_space(cam::Camera, vs::Float64)
+    vs ≈ 1.0 && return cam
+    inv_vs = 1.0 / vs
+    pos = (cam.position[1] * inv_vs, cam.position[2] * inv_vs, cam.position[3] * inv_vs)
+    Camera(pos, cam.forward, cam.right, cam.up, cam.fov)
 end
 
 # ============================================================================
@@ -299,6 +314,9 @@ function _render_grid(grid, nanogrid;
                       output::Union{String, Nothing})
 
     cam = camera !== nothing ? camera : _auto_camera(grid)
+    # Camera is in world space; renderer operates in index space
+    vs = voxel_size(grid.transform)[1]
+    cam = _camera_to_index_space(cam, vs)
 
     mat = if material !== nothing
         material

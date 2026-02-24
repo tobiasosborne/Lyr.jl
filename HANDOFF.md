@@ -2,7 +2,47 @@
 
 ---
 
-## Latest Session (2026-02-23) — 4 issues: type stability, dedup, bug fix, API cleanup
+## Latest Session (2026-02-24) — Fix camera auto-setup voxel_size bug (0qvn)
+
+**Status**: COMPLETE — 1 issue closed (0qvn), 29,160 tests pass
+
+### What Was Done
+
+**`path-tracer-0qvn` — Camera auto-setup now accounts for voxel_size transform**
+
+The `_auto_camera` function used `active_bounding_box` which returns index-space coordinates. When `voxel_size != 1.0` (e.g., Field Protocol voxelization with `voxel_size=0.2`), user-provided cameras in world space were misinterpreted as index-space coordinates, causing the camera to end up inside the volume.
+
+Fix: Two-part approach maintaining internal index-space rendering while exposing a world-space API:
+1. `_auto_camera` now multiplies bbox coordinates by `voxel_size`, returning a world-space camera
+2. New `_camera_to_index_space(cam, vs)` helper scales camera position by `1/voxel_size`
+3. `_render_grid` converts all cameras (auto or user-provided) from world to index space before creating the Scene
+
+The round-trip is verified: `_auto_camera` → world → `_camera_to_index_space` → index produces identical index-space coordinates regardless of `voxel_size`.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/Visualize.jl` | `_auto_camera` multiplies by voxel_size; new `_camera_to_index_space` helper; `_render_grid` converts camera |
+| `test/test_visualize.jl` | +14 tests: world-to-index round-trip, `_camera_to_index_space`, visualize with non-unit voxel_size + custom camera |
+
+### Test Results
+
+```
+29,160 pass, 0 fail, 0 errors (was 29,146)
+```
+
+### Next Priority
+
+Ready P2 issues (from `bd ready`):
+- `path-tracer-igk8` — No visualize method for TimeEvolution
+- `path-tracer-j3bq` — Hand-rolled NTuple vector math in Render.jl
+- `path-tracer-rcx7` — isdefined(Main, :PNGFiles) antipattern
+- `path-tracer-1uce` — Inconsistent pixel type Float64 vs Float32 across pipeline
+
+---
+
+## Previous Session (2026-02-23) — 4 issues: type stability, dedup, bug fix, API cleanup
 
 **Status**: COMPLETE — 4 issues closed (8mfh, 701w, k250, gt5s), 29,146 tests pass
 
