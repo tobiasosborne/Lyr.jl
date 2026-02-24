@@ -201,11 +201,19 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
 
         H = abs(0.5 * dot(p, metric_inverse(m, x) * p))
         if H > cfg.h_tolerance
+            # Deep in gravitational well → was heading for the horizon
+            r_new <= photon_sphere_radius(m) * 2.0 &&
+                return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
             bg = _sky_color(sky, x[3], x[4])
             return _volumetric_final_color(I_acc, τ_acc, bg)
         end
     end
 
+    # Max steps: if still deep in well, treat as shadow
+    r_final = x[2]
+    if r_final <= photon_sphere_radius(m) * 2.0
+        return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
+    end
     bg = _sky_color(sky, x[3], x[4])
     _volumetric_final_color(I_acc, τ_acc, bg)
 end
