@@ -164,10 +164,8 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
         x_new, p_new = verlet_step(m, x, p, dl)
 
-        # Null-cone re-projection every 50 steps to eliminate H-drift
-        if step % 50 == 0
-            p_new = renormalize_null(m, x_new, p_new)
-        end
+        # Null-cone re-projection: keep photon exactly on the light cone
+        p_new = renormalize_null(m, x_new, p_new)
 
         # ── Accumulate emission/absorption ──
         r_new = x_new[2]
