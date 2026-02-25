@@ -123,12 +123,10 @@ function sphere_lookup(sky::CelestialSphere, θ::Float64, φ::Float64)::NTuple{3
     i1 = clamp(i0 + 1, 1, h)
     fv = v - i0
 
-    # Horizontal: wrap with mod1 for periodic φ.
-    # Keep raw floor for correct interpolation fraction across the wrap boundary.
-    j0_raw = floor(Int, u)
-    j0 = mod1(j0_raw, w)
-    j1 = mod1(j0_raw + 1, w)
-    fu = u - j0_raw
+    j0 = mod1(floor(Int, u), w)   # wrap horizontally (φ is periodic)
+    j1 = mod1(j0 + 1, w)
+    fu = u - floor(u - 0.5) - 0.5
+    fu = clamp(fu, 0.0, 1.0)
 
     c00 = sky.texture[i0, j0]
     c01 = sky.texture[i0, j1]

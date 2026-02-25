@@ -65,8 +65,6 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
     x, p = initial.x, initial.p
     dl_base = config.integrator.step_size
     cfg = config.integrator
-    stepper = cfg.stepper
-    renorm_interval = cfg.renorm_interval
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
@@ -76,10 +74,10 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         # Adaptive step
         dl = M_val > 0.0 ? adaptive_step(dl_base, x[2], M_val) : dl_base
 
-        x_new, p_new = _do_step(m, x, p, dl, stepper)
+        x_new, p_new = verlet_step(m, x, p, dl)
 
-        # Null-cone re-projection
-        if renorm_interval > 0 && step % renorm_interval == 0
+        # Null-cone re-projection every 10 steps (H stays < 1e-7 between)
+        if step % 10 == 0
             p_new = renormalize_null(m, x_new, p_new)
         end
 
@@ -164,8 +162,6 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
     x, p = cam.position, p0
     dl_base = config.integrator.step_size
     cfg = config.integrator
-    stepper = cfg.stepper
-    renorm_interval = cfg.renorm_interval
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
@@ -180,10 +176,10 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
     for step in 1:cfg.max_steps
         r = _coord_r(m, x)
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
-        x_new, p_new = _do_step(m, x, p, dl, stepper)
+        x_new, p_new = verlet_step(m, x, p, dl)
 
-        # Null-cone re-projection
-        if renorm_interval > 0 && step % renorm_interval == 0
+        # Null-cone re-projection every 10 steps
+        if step % 10 == 0
             p_new = renormalize_null(m, x_new, p_new)
         end
 
