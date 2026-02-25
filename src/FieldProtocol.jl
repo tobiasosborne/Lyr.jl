@@ -324,6 +324,15 @@ end
 
 field_eltype(::ParticleField) = SVec3d
 
+function characteristic_scale(f::ParticleField)
+    n = length(f.positions)
+    n <= 1 && return 1.0
+    d = domain(f)
+    extent = d.max - d.min
+    vol = extent[1] * extent[2] * extent[3]
+    cbrt(vol / n)
+end
+
 Base.show(io::IO, f::ParticleField) =
     print(io, "ParticleField($(length(f.positions)) particles)")
 

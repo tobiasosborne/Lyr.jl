@@ -285,16 +285,18 @@ function write_ppm(filename::String, pixels::Matrix{NTuple{3, Float64}})
         println(io, "255")
 
         for y in 1:height
-            row = String[]
             for x in 1:width
                 r, g, b = pixels[y, x]
                 # Clamp and convert to 0-255
                 ri = clamp(round(Int, r * 255), 0, 255)
                 gi = clamp(round(Int, g * 255), 0, 255)
                 bi = clamp(round(Int, b * 255), 0, 255)
-                push!(row, "$ri $gi $bi")
+                if x > 1
+                    write(io, ' ')
+                end
+                print(io, ri, ' ', gi, ' ', bi)
             end
-            println(io, join(row, " "))
+            write(io, '\n')
         end
     end
 end

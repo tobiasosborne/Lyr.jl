@@ -132,7 +132,7 @@ end
     _build_orthonormal_basis(w::SVec3d) -> Tuple{SVec3d, SVec3d}
 
 Construct two vectors (t, b) orthogonal to w, forming a right-handed
-orthonormal basis. Uses the Duff et al. (2017) method for numerical stability.
+orthonormal basis. Uses Gram-Schmidt with least-aligned axis selection for stability.
 """
 function _build_orthonormal_basis(w::SVec3d)::Tuple{SVec3d, SVec3d}
     # Choose the axis with smallest component to avoid catastrophic cancellation

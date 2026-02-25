@@ -9,7 +9,7 @@
 Compute a default voxel size from the field's characteristic scale.
 Uses scale / 5.0 to provide ~5 samples per feature.
 """
-auto_voxel_size(f::AbstractContinuousField) = characteristic_scale(f) / 5.0
+auto_voxel_size(f::AbstractField) = characteristic_scale(f) / 5.0
 
 """
     voxelize(f::ScalarField3D; voxel_size, threshold, normalize) -> Grid{Float32}
@@ -229,7 +229,7 @@ kernel to the density field.
 
 # Arguments
 - `f::ParticleField` — Particle data
-- `voxel_size::Float64` — World-space voxel size (default: `1.0`)
+- `voxel_size::Float64` — World-space voxel size (default: `characteristic_scale / 5`)
 - `sigma::Float64` — Gaussian standard deviation in world units (default: `2.0`)
 - `cutoff_sigma::Float64` — Kernel extent in sigma units (default: `3.0`)
 - `normalize::Bool` — Normalize to [0, 1] (default: `true`)
@@ -243,7 +243,7 @@ grid = voxelize(field; voxel_size=0.5, sigma=1.0)
 ```
 """
 function voxelize(f::ParticleField;
-                  voxel_size::Float64=1.0,
+                  voxel_size::Float64=auto_voxel_size(f),
                   sigma::Float64=2.0,
                   cutoff_sigma::Float64=3.0,
                   normalize::Bool=true,
