@@ -43,7 +43,7 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid, t_enter::Float64,
         density = max(0.0, density)
 
         sigma_real = density * sigma_maj
-        accept_prob = sigma_real / sigma_maj
+        accept_prob = clamp(sigma_real / sigma_maj, 0.0, 1.0)
 
         if rand(rng) < accept_prob
             # Real collision — scatter or absorb
@@ -88,7 +88,7 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid, t0::Float64, t1::Float64,
         density = max(0.0, density)
 
         sigma_real = density * sigma_maj
-        T *= (1.0 - sigma_real / sigma_maj)
+        T *= (1.0 - clamp(sigma_real / sigma_maj, 0.0, 1.0))
 
         if T < 1e-10
             return 0.0

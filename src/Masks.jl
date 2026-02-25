@@ -189,7 +189,8 @@ Iteration order is ascending.
 """
 on_indices(m::Mask{N,W}) where {N,W} = OnIndicesIterator{N,W}(m)
 
-Base.IteratorSize(::Type{OnIndicesIterator{N,W}}) where {N,W} = Base.SizeUnknown()
+Base.IteratorSize(::Type{OnIndicesIterator{N,W}}) where {N,W} = Base.HasLength()
+Base.length(it::OnIndicesIterator) = count_on(it.mask)
 Base.eltype(::Type{OnIndicesIterator{N,W}}) where {N,W} = Int
 
 function Base.iterate(it::OnIndicesIterator{N,W}, state=nothing) where {N,W}
@@ -285,11 +286,14 @@ Parse a mask from bytes. Masks are stored as consecutive 64-bit words in little-
 function read_mask(::Type{Mask{N,W}}, bytes::Vector{UInt8}, pos::Int)::Tuple{Mask{N,W}, Int} where {N,W}
     # A mask requires exactly W * 8 bytes; truncated data means a corrupt file
     @boundscheck checkbounds(bytes, pos:pos + W * 8 - 1)
-    words = Vector{UInt64}(undef, W)
-
-    for i in 1:W
-        words[i], pos = read_u64_le(bytes, pos)
+    p = pos
+    words = ntuple(Val(W)) do i
+        GC.@preserve bytes begin
+            @inbounds val = _unaligned_load(UInt64, pointer(bytes, p + (i - 1) * 8))
+        end
+        ltoh(val)
     end
+    pos += W * 8
 
-    (Mask{N,W}(NTuple{W, UInt64}(words)), pos)
+    (Mask{N,W}(words), pos)
 end

@@ -547,11 +547,11 @@ function _estimate_density_range(nanogrid::NanoGrid{T})::Tuple{Float64, Float64}
     dmin = Inf
     dmax = -Inf
 
-    # Sample every leaf, but only a few values per leaf for speed
+    # Scan all 512 values per leaf to find true min/max
     for i in 0:(lf_count - 1)
-        base = leaf_pos + i * leaf_sz
-        for v in [0, 64, 128, 256, 384, 511]
-            val = Float64(_buf_load(T, buf, base + _LEAF_VALUES_OFF + v * sizeof(T)))
+        base = leaf_pos + i * leaf_sz + _LEAF_VALUES_OFF
+        for v in 0:511
+            val = Float64(_buf_load(T, buf, base + v * sizeof(T)))
             val < dmin && (dmin = val)
             val > dmax && (dmax = val)
         end
@@ -796,6 +796,10 @@ end
 
 CPU fallback for GPU volume marching. Fixed-step emission-absorption
 through NanoGrid with transfer function lookup.
+
+!!! warning "Preview only"
+    Uses biased fixed-step marching, not physically correct delta tracking.
+    Use `gpu_render_volume` for production-quality renders.
 
 # Keywords
 - `background::NTuple{3,Float64}` — Scene background color blended where rays miss (default: black)

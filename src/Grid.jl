@@ -45,6 +45,14 @@ function Base.show(io::IO, g::Grid{T}) where T
 end
 
 """
+    getindex(grid::Grid{T}, x, y, z) -> T
+
+Access voxel value at integer coordinates: `grid[x, y, z]`.
+"""
+Base.getindex(g::Grid{T}, x::Integer, y::Integer, z::Integer) where T =
+    get_value(g.tree, Coord(Int32(x), Int32(y), Int32(z)))
+
+"""
     read_grid(::Type{T}, bytes, pos, codec, mask_compressed, name, grid_class, version; value_size) -> Tuple{Grid{T}, Int}
 
 Parse a complete grid from bytes. Sequential reading — no seeking to offsets.

@@ -23,7 +23,7 @@ struct VDBHeader
     is_compressed::Bool
     half_precision::Bool
     uuid::String
-    data_pos::UInt64  # 1-indexed position after header (redundant with read_header return pos)
+    data_pos::UInt64  # 1-indexed byte position where grid data begins (= read_header return pos)
 end
 
 """

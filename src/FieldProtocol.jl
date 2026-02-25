@@ -369,13 +369,16 @@ struct TimeEvolution{F <: AbstractField, G}
     eval_fn::G
     t_range::Tuple{Float64, Float64}
     dt_hint::Float64
+    _cached_domain::BoxDomain
 end
 
-TimeEvolution{F}(eval_fn, t_range, dt_hint) where {F <: AbstractField} =
-    TimeEvolution{F, typeof(eval_fn)}(eval_fn, t_range, dt_hint)
+function TimeEvolution{F}(eval_fn, t_range, dt_hint) where {F <: AbstractField}
+    f0 = eval_fn(t_range[1])
+    TimeEvolution{F, typeof(eval_fn)}(eval_fn, t_range, dt_hint, domain(f0))
+end
 
-domain(te::TimeEvolution) = domain(te.eval_fn(te.t_range[1]))
-field_eltype(te::TimeEvolution{F}) where F = field_eltype(te.eval_fn(te.t_range[1]))
+domain(te::TimeEvolution) = te._cached_domain
+field_eltype(te::TimeEvolution) = field_eltype(te.eval_fn(te.t_range[1]))
 
 Base.show(io::IO, te::TimeEvolution{F}) where F =
     print(io, "TimeEvolution{$F}(t=$(te.t_range), dt=$(te.dt_hint))")

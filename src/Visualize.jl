@@ -393,3 +393,16 @@ function visualize(field::ParticleField;
                  width=width, height=height, spp=spp, seed=seed,
                  tonemap=tonemap, denoise=denoise, output=output)
 end
+
+"""
+    visualize(te::TimeEvolution; t, kwargs...) -> Matrix{NTuple{3,Float64}}
+
+Render a time-evolving field at time `t` (default: start of t_range).
+All other keyword arguments are forwarded to the underlying field's `visualize`.
+"""
+function visualize(te::TimeEvolution;
+                   t::Float64=te.t_range[1],
+                   kwargs...)
+    field = te.eval_fn(t)
+    visualize(field; kwargs...)
+end

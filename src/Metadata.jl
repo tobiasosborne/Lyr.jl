@@ -50,7 +50,9 @@ function read_grid_metadata(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{String,A
         value_size, pos = read_u32_le(bytes, pos)
 
         if type_name == "string"
-            metadata[key] = String(bytes[pos:pos+value_size-1])
+            GC.@preserve bytes begin
+                metadata[key] = unsafe_string(pointer(bytes, pos), value_size)
+            end
             pos += value_size
         elseif type_name == "int32" && value_size == 4
             val, pos = read_i32_le(bytes, pos)

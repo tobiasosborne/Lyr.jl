@@ -55,7 +55,7 @@ function build_grid(data::Dict{Coord, T}, background::T;
     leaf_nodes = Dict{Coord, LeafNode{T}}()
     for (origin, entries) in leaf_groups
         # Build values array (background-filled, then overwrite active)
-        vals = collect(ntuple(_ -> background, Val(512)))
+        vals = fill(background, 512)
         bit_indices = Int[]
         for (off, v) in entries
             vals[off + 1] = v  # 0-indexed offset → 1-indexed array

@@ -78,8 +78,12 @@ function intersect_bbox(ray::Ray, aabb::AABB)::Union{Tuple{Float64, Float64}, No
     t1 = (aabb.min - ray.origin) .* ray.inv_dir
     t2 = (aabb.max - ray.origin) .* ray.inv_dir
 
+    # Replace NaN with appropriate bounds (NaN arises from 0*Inf when ray is
+    # axis-aligned and origin sits exactly on a slab boundary)
     tmin_v = min.(t1, t2)
     tmax_v = max.(t1, t2)
+    tmin_v = ifelse.(isnan.(tmin_v), -Inf, tmin_v)
+    tmax_v = ifelse.(isnan.(tmax_v),  Inf, tmax_v)
 
     tmin = maximum(tmin_v)
     tmax = minimum(tmax_v)

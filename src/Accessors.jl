@@ -246,10 +246,14 @@ function active_voxel_count(tree::Tree{T})::Int where T
 end
 
 # Tile region sizes for counting active voxels
-# Root tiles cover a full Internal2 region: 32³ × 16³ × 8³ = 4096³ voxels
+# VDB tree hierarchy: Root → Internal2(32³) → Internal1(16³) → Leaf(8³)
+# Each level covers its branching factor cubed × everything below:
+#   Root tile  = 32³ × 16³ × 8³ = (32×16×8)³ = 4096³ voxels
+#   I2 tile    = 16³ × 8³       = (16×8)³    = 128³  voxels
+#   I1 tile    = 8³             =               8³    voxels
 const ROOT_TILE_VOXELS = 4096^3
-const INTERNAL2_TILE_VOXELS = 128^3   # Full Internal1 region: 16³ × 8³
-const INTERNAL1_TILE_VOXELS = 8^3     # Full leaf region: 8³
+const INTERNAL2_TILE_VOXELS = 128^3
+const INTERNAL1_TILE_VOXELS = 8^3
 
 """
     _count_active_tiles(node, tile_voxels::Int) -> Int
