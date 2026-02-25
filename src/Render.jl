@@ -201,7 +201,7 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
     # Gamma correction exponent
     inv_gamma = gamma > 0.0 ? 1.0 / gamma : 1.0
 
-    for y in 1:height
+    Threads.@threads for y in 1:height
         rng = Xoshiro(seed + UInt64(y))
         for x in 1:width
             if actual_spp == 1

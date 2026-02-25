@@ -251,11 +251,17 @@ and transfer function, accumulate. Russian roulette after first bounce.
 function render_volume_image(scene::Scene, width::Int, height::Int;
                              spp::Int=1, seed::UInt64=UInt64(42),
                              max_bounces::Int=1)
+    # Validate all volumes have NanoGrids before entering threaded loop
+    for vol in scene.volumes
+        vol.nanogrid === nothing && throw(ArgumentError(
+            "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
+    end
+
     aspect = Float64(width) / Float64(height)
     pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
     inv_spp = 1.0 / spp
 
-    for y in 1:height
+    Threads.@threads for y in 1:height
         rng = Xoshiro(seed + UInt64(y))
         for x in 1:width
             acc_r = 0.0

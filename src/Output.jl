@@ -3,6 +3,16 @@
 # Supports EXR (via OpenEXR.jl), PNG (via PNGFiles.jl), and PPM.
 # Tone mapping operators: Reinhard, ACES, exposure.
 
+"""Find a loaded package by name, searching all loaded modules (not just Main)."""
+function _find_loaded_module(name::Symbol)
+    for (key, mod) in Base.loaded_modules
+        if key.name == String(name)
+            return mod
+        end
+    end
+    return nothing
+end
+
 # ============================================================================
 # Tone mapping operators
 # ============================================================================
@@ -224,7 +234,8 @@ function write_exr(path::String, pixels::Matrix{NTuple{3, Float64}};
     height, width = size(pixels)
 
     # Try to use OpenEXR.jl
-    if isdefined(Main, :OpenEXR)
+    exr_mod = _find_loaded_module(:OpenEXR)
+    if exr_mod !== nothing
         # Convert to Float32 arrays
         r = Matrix{Float32}(undef, height, width)
         g = Matrix{Float32}(undef, height, width)
@@ -240,7 +251,7 @@ function write_exr(path::String, pixels::Matrix{NTuple{3, Float64}};
             channels["Z"] = Matrix{Float32}(depth)
         end
 
-        Main.OpenEXR.save(path, channels)
+        exr_mod.save(path, channels)
     else
         # Fallback: write as PPM with a warning
         @warn "OpenEXR.jl not loaded, falling back to PPM. Add `using OpenEXR` for EXR output."
@@ -264,7 +275,8 @@ function write_png(path::String, pixels::Matrix{NTuple{3, Float64}};
     height, width = size(pixels)
     inv_gamma = 1.0 / gamma
 
-    if isdefined(Main, :PNGFiles)
+    png_mod = _find_loaded_module(:PNGFiles)
+    if png_mod !== nothing
         # Convert to UInt8 RGB array (height × width × 3)
         img = Array{UInt8}(undef, height, width, 3)
         for j in 1:width, i in 1:height
@@ -274,7 +286,7 @@ function write_png(path::String, pixels::Matrix{NTuple{3, Float64}};
             img[i,j,3] = round(UInt8, clamp(b^inv_gamma, 0.0, 1.0) * 255)
         end
 
-        Main.PNGFiles.save(path, img)
+        png_mod.save(path, img)
     else
         # Fallback: apply gamma and write as PPM
         @warn "PNGFiles.jl not loaded, falling back to PPM. Add `using PNGFiles` for PNG output."
