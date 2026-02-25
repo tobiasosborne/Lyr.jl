@@ -150,10 +150,16 @@ No stochastic sampling — fixed-step front-to-back compositing.
 function render_volume_preview(scene::Scene, width::Int, height::Int;
                                step_size::Float64=0.5,
                                max_steps::Int=2000)
+    # Validate all volumes have NanoGrids before entering threaded loop
+    for vol in scene.volumes
+        vol.nanogrid === nothing && throw(ArgumentError(
+            "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
+    end
+
     aspect = Float64(width) / Float64(height)
     pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
 
-    for y in 1:height
+    Threads.@threads for y in 1:height
         for x in 1:width
             u = (Float64(x) - 0.5) / Float64(width)
             v = 1.0 - (Float64(y) - 0.5) / Float64(height)

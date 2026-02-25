@@ -115,7 +115,8 @@ function denoise_nlm(pixels::Matrix{NTuple{3, T}};
     inv_h2 = one(T) / (h * h)
     patch_area = T((2 * patch_radius + 1)^2)
 
-    for j in 1:width, i in 1:height
+    Threads.@threads for j in 1:width
+      for i in 1:height
         sum_r = zero(T)
         sum_g = zero(T)
         sum_b = zero(T)
@@ -156,6 +157,7 @@ function denoise_nlm(pixels::Matrix{NTuple{3, T}};
 
         inv_w = one(T) / sum_w
         result[i, j] = (sum_r * inv_w, sum_g * inv_w, sum_b * inv_w)
+      end
     end
     result
 end
@@ -183,7 +185,8 @@ function denoise_bilateral(pixels::Matrix{NTuple{3, T}};
     inv_spatial2 = one(T) / (T(2) * spatial_sigma * spatial_sigma)
     inv_range2 = one(T) / (T(2) * range_sigma * range_sigma)
 
-    for j in 1:width, i in 1:height
+    Threads.@threads for j in 1:width
+      for i in 1:height
         cr, cg, cb = pixels[i, j]
         sum_r = zero(T)
         sum_g = zero(T)
@@ -212,6 +215,7 @@ function denoise_bilateral(pixels::Matrix{NTuple{3, T}};
 
         inv_w = one(T) / sum_w
         result[i, j] = (sum_r * inv_w, sum_g * inv_w, sum_b * inv_w)
+      end
     end
     result
 end
