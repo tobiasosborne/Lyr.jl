@@ -2,9 +2,9 @@
 
 ---
 
-## Latest Session (2026-02-25) — GR Architecture Review + P0 Bug Fixes
+## Latest Session (2026-02-25) — GR Architecture Review + 5 Fixes + RK4
 
-**Status**: GREEN — 2 P0 bugs fixed, 378/379 GR tests pass (1 pre-existing flaky H-conservation)
+**Status**: GREEN — 5 beads closed, 387/387 GR tests pass, renders verified
 
 ### What Was Done
 
@@ -22,21 +22,49 @@
    - Bug 2 (matrix layout): SMat4d constructor is column-major, but old code put `(u[1], e1[1], e2[1], e3[1])` as column 1 — the first components of all legs, not all components of one leg. For BL this worked by accident (diagonal metric → legs have single nonzero components). For KS it was fundamentally broken. Fixed to `(u[1], u[2], u[3], u[4])` as column 1.
    - +15 tests: orthonormality at 5 positions (including near-pole), orientation matching BL, off-axis radial direction.
 
+5. **Implemented `path-esr2` [P1]**: RK4 integrator as default geodesic stepper.
+   - New `rk4_step(m, x, p, dl)` using `hamiltonian_rhs` — classic 4th-order Runge-Kutta with 4 evaluations per step. This is the integrator used by GRay2, RAPTOR, GYOTO, Odyssey, and Blacklight.
+   - `IntegratorConfig` gains `stepper::Symbol` (`:rk4` default, `:verlet` option) and `renorm_interval::Int` (50 for RK4, 10 for Verlet).
+   - All 3 step call sites (integrate_geodesic + both trace_pixel variants) dispatch via `_do_step` helper.
+   - +8 tests. Unblocks 4 downstream beads.
+
+6. **Fixed `path-l8dy` [P1]**: Volumetric color double-intensity.
+   - `_volumetric_final_color` was doing `blackbody_color(I_acc) * I_acc` — intensity applied twice, blowing out colors to white. Now uses `blackbody_color(clamp(I_acc, 0, 5))` directly.
+
+7. **Fixed `path-tyrz` [P1]**: Early optical-depth cutoff in volumetric tracer.
+   - Added `if τ_acc > 8.0; return ...; end` after optical depth accumulation. Transmittance at τ=8 is 3.4e-4, well below perceptual limits. Saves unnecessary geodesic steps through optically thick regions.
+
+### Renders Produced
+
+- `schwarzschild_128_rk4.ppm` — 128×128 thin disk + checkerboard sky (17s, 1 thread)
+- `schwarzschild_256_vol.ppm` — 256×256 volumetric thick disk (77s, 1 thread)
+- `schwarzschild_512_vol_mw.ppm` — 512×512 volumetric + ESO Milky Way panorama (61s, 12 threads)
+  - Features: BH shadow, Einstein ring, gravitationally lensed Milky Way, Doppler-beamed thick disk, secondary disk image through lensing
+
+### Performance (laptop, RK4 default)
+
+| Config | Per-pixel | 128×128 (1 thread) | 512×512 (12 threads) |
+|--------|-----------|-------------------|---------------------|
+| Thin disk | ~764 μs | ~17 s | ~est 5 s |
+| Volumetric | ~962 μs | ~est 16 s | ~61 s |
+
+Shadow pixels (~295 μs) are 3× faster than escape pixels (~1015 μs).
+
 ### GR Improvement Plan (10 Beads, Dependency DAG)
 
 ```
-LAYER 0 — No blockers (work immediately, can parallelize)
+LAYER 0 — All complete
 ├── path-xdbh [P0] Fix sphere_lookup φ-wrap seam                    ✅ DONE
 ├── path-6gu3 [P0] Fix CKS tetrad (analytic spatial legs)           ✅ DONE
-├── path-esr2 [P1] Add RK4 integrator as default geodesic stepper
-├── path-l8dy [P1] Fix volumetric double-intensity color mapping
-└── path-tyrz [P1] Add early τ-cutoff in volumetric tracer
+├── path-esr2 [P1] Add RK4 integrator as default geodesic stepper   ✅ DONE
+├── path-l8dy [P1] Fix volumetric double-intensity color mapping     ✅ DONE
+└── path-tyrz [P1] Add early τ-cutoff in volumetric tracer          ✅ DONE
 
-LAYER 1 — Unblocked after Layer 0
-├── path-vsfi [P1] Use outgoing Kerr-Schild for backward tracing    ← depends on path-6gu3
-├── path-a5ze [P1] Angular-velocity adaptive stepping                ← depends on path-esr2
-├── path-bjox [P2] Fuse metric_inverse + partials                   ← depends on path-esr2
-└── path-o9zw [P2] Tile-based rendering for cache locality          ← depends on path-esr2
+LAYER 1 — All unblocked, ready to work
+├── path-vsfi [P1] Use outgoing Kerr-Schild for backward tracing    ← 6gu3 ✅
+├── path-a5ze [P1] Angular-velocity adaptive stepping                ← esr2 ✅
+├── path-bjox [P2] Fuse metric_inverse + partials                   ← esr2 ✅
+└── path-o9zw [P2] Tile-based rendering for cache locality          ← esr2 ✅
 
 LAYER 2 — Unblocked after Layers 0+1
 └── path-837k [P2] GPU via KernelAbstractions.jl                    ← depends on 6gu3, esr2, bjox
@@ -186,14 +214,18 @@ scale = min(scale_r, scale_θ)
 |------|--------|
 | `src/GR/matter.jl` | Fixed sphere_lookup φ-wrap interpolation (3 lines) |
 | `src/GR/metrics/schwarzschild_ks.jl` | Analytic tetrad legs + correct SMat4d column-major layout |
+| `src/GR/integrator.jl` | Added rk4_step, IntegratorConfig stepper/renorm_interval fields, _do_step dispatch |
+| `src/GR/render.jl` | Stepper dispatch in both trace_pixel, fixed _volumetric_final_color, early τ cutoff |
+| `src/GR/GR.jl` | Export rk4_step |
 | `test/test_gr_camera.jl` | +70 lines: KS orthonormality (5 positions), orientation matching BL |
 | `test/test_gr_matter.jl` | +60 lines: φ-wrap continuity, periodic texture smoothness scan |
+| `test/test_gr_integrator.jl` | +55 lines: RK4 flat-space, accuracy vs Verlet, deflected escape, verlet fallback |
 
 ### Test Results
 
 ```
-378 pass, 1 fail (pre-existing flaky H-conservation), 0 errors
-New tests: 26 (11 matter + 15 camera)
+387 pass, 0 fail, 0 errors
+New tests: 34 (11 matter + 15 camera + 8 integrator)
 ```
 
 ---
