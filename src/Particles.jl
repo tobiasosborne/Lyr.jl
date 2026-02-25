@@ -26,21 +26,23 @@ function gaussian_splat(positions::AbstractVector;
                         sigma::Float64=2.0,
                         cutoff_sigma::Float64=3.0,
                         values::Union{Nothing, AbstractVector}=nothing)
-    result = Dict{Coord, Float32}()
     inv_vs = 1.0 / voxel_size
     inv_2sigma2 = 1.0 / (2.0 * sigma * sigma)
     r = ceil(Int, cutoff_sigma * sigma * inv_vs)
 
-    for (pi, pos) in enumerate(positions)
+    # Thread-local dictionaries for parallel accumulation
+    # Use Threads.maxthreadid() to handle Julia's dynamic thread pool
+    nt = Threads.maxthreadid()
+    local_dicts = [Dict{Coord, Float32}() for _ in 1:nt]
+
+    Threads.@threads for pi in 1:length(positions)
+        pos = positions[pi]
+        d = local_dicts[Threads.threadid()]
+
         # Center voxel in index space
         cx = round(Int32, pos[1] * inv_vs)
         cy = round(Int32, pos[2] * inv_vs)
         cz = round(Int32, pos[3] * inv_vs)
-
-        # World-space center of center voxel
-        wx = cx * voxel_size
-        wy = cy * voxel_size
-        wz = cz * voxel_size
 
         w = values === nothing ? 1.0 : Float64(values[pi])
 
@@ -56,7 +58,15 @@ function gaussian_splat(positions::AbstractVector;
             weight = exp(-dist2 * inv_2sigma2)
 
             c = Coord(cx + Int32(dx), cy + Int32(dy), cz + Int32(dz))
-            result[c] = get(result, c, 0f0) + Float32(w * weight)
+            d[c] = get(d, c, 0f0) + Float32(w * weight)
+        end
+    end
+
+    # Merge thread-local dicts
+    result = local_dicts[1]
+    for i in 2:nt
+        for (c, v) in local_dicts[i]
+            result[c] = get(result, c, 0f0) + v
         end
     end
     result

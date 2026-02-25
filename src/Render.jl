@@ -1,6 +1,7 @@
 # Render.jl - Sphere tracing renderer for VDB level sets
 
 using Random: Xoshiro
+using LinearAlgebra: normalize, dot, cross
 
 """
     Camera
@@ -8,17 +9,17 @@ using Random: Xoshiro
 A camera for rendering, defined by position and view parameters.
 
 # Fields
-- `position::NTuple{3, Float64}` - Camera position in world space
-- `forward::NTuple{3, Float64}` - Forward direction (normalized)
-- `right::NTuple{3, Float64}` - Right direction (normalized)
-- `up::NTuple{3, Float64}` - Up direction (normalized)
+- `position::SVec3d` - Camera position in world space
+- `forward::SVec3d` - Forward direction (normalized)
+- `right::SVec3d` - Right direction (normalized)
+- `up::SVec3d` - Up direction (normalized)
 - `fov::Float64` - Field of view in degrees
 """
 struct Camera
-    position::NTuple{3, Float64}
-    forward::NTuple{3, Float64}
-    right::NTuple{3, Float64}
-    up::NTuple{3, Float64}
+    position::SVec3d
+    forward::SVec3d
+    right::SVec3d
+    up::SVec3d
     fov::Float64
 end
 
@@ -28,23 +29,18 @@ end
 Construct a camera looking from `position` toward `target`.
 
 # Arguments
-- `position::NTuple{3, Float64}` - Camera position
-- `target::NTuple{3, Float64}` - Point to look at
-- `up::NTuple{3, Float64}` - World up direction (usually (0, 1, 0))
+- `position` - Camera position (tuple or SVec3d)
+- `target` - Point to look at (tuple or SVec3d)
+- `up` - World up direction, usually (0, 1, 0) (tuple or SVec3d)
 - `fov::Float64` - Field of view in degrees
 """
 function Camera(position::NTuple{3, Float64}, target::NTuple{3, Float64},
                 up::NTuple{3, Float64}, fov::Float64)
-    # Compute forward direction
-    forward = _normalize(_sub(target, position))
-
-    # Compute right = forward × up (then normalize)
-    right = _normalize(_cross(forward, up))
-
-    # Compute true up = right × forward
-    cam_up = _cross(right, forward)
-
-    Camera(position, forward, right, cam_up, fov)
+    p = SVec3d(position...)
+    fwd = normalize(SVec3d(target...) - p)
+    r = normalize(cross(fwd, SVec3d(up...)))
+    u = cross(r, fwd)
+    Camera(p, fwd, r, u, fov)
 end
 
 """
@@ -61,7 +57,7 @@ function camera_ray(cam::Camera, u::Float64, v::Float64, aspect::Float64)::Ray
     py = (2.0 * v - 1.0) * half_fov
 
     # Ray direction in world space
-    dir = _add(_add(cam.forward, _scale(cam.right, px)), _scale(cam.up, py))
+    dir = cam.forward + cam.right * px + cam.up * py
 
     Ray(cam.position, dir)
 end
@@ -143,7 +139,9 @@ function _estimate_normal(grid::Grid{T}, point::NTuple{3, Float64}, h::Float64):
     dz = sample_world(grid, (point[1], point[2], point[3] + h)) -
          sample_world(grid, (point[1], point[2], point[3] - h))
 
-    _normalize((Float64(dx), Float64(dy), Float64(dz)))
+    n = SVec3d(Float64(dx), Float64(dy), Float64(dz))
+    len = sqrt(n[1]^2 + n[2]^2 + n[3]^2)
+    len < 1e-10 ? (0.0, 0.0, 1.0) : Tuple(n / len)
 end
 
 """
@@ -160,7 +158,7 @@ function shade(normal::NTuple{3, Float64}, light_dir::NTuple{3, Float64})::Float
     diffuse = 0.8
 
     # Lambertian: max(0, N · L)
-    n_dot_l = max(0.0, _dot(normal, light_dir))
+    n_dot_l = max(0.0, normal[1]*light_dir[1] + normal[2]*light_dir[2] + normal[3]*light_dir[3])
 
     ambient + diffuse * n_dot_l
 end
@@ -186,7 +184,7 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
     pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
 
     # Normalize light direction
-    light = _normalize(light_dir)
+    light = Tuple(normalize(SVec3d(light_dir...)))
 
     # Compute stratification grid size
     spp = max(1, samples_per_pixel)
@@ -276,7 +274,7 @@ Write an image to a PPM file.
 - `filename` - Output file path
 - `pixels` - height×width matrix of RGB tuples, channels in [0, 1]
 """
-function write_ppm(filename::String, pixels::Matrix{NTuple{3, Float64}})
+function write_ppm(filename::String, pixels::Matrix{NTuple{3, T}}) where T <: AbstractFloat
     height, width = size(pixels)
 
     open(filename, "w") do io
@@ -305,38 +303,3 @@ end
 # Vector utilities (internal)
 # ============================================================================
 
-function _normalize(v::NTuple{3, Float64})::NTuple{3, Float64}
-    len = sqrt(v[1]^2 + v[2]^2 + v[3]^2)
-    if len < 1e-10
-        return (0.0, 0.0, 1.0)  # Default direction for zero vector
-    end
-    (v[1] / len, v[2] / len, v[3] / len)
-end
-
-function _dot(a::NTuple{3, Float64}, b::NTuple{3, Float64})::Float64
-    a[1]*b[1] + a[2]*b[2] + a[3]*b[3]
-end
-
-function _cross(a::NTuple{3, Float64}, b::NTuple{3, Float64})::NTuple{3, Float64}
-    (a[2]*b[3] - a[3]*b[2],
-     a[3]*b[1] - a[1]*b[3],
-     a[1]*b[2] - a[2]*b[1])
-end
-
-function _sub(a::NTuple{3, Float64}, b::NTuple{3, Float64})::NTuple{3, Float64}
-    (a[1] - b[1], a[2] - b[2], a[3] - b[3])
-end
-
-function _add(a::NTuple{3, Float64}, b::NTuple{3, Float64})::NTuple{3, Float64}
-    (a[1] + b[1], a[2] + b[2], a[3] + b[3])
-end
-
-function _scale(v::NTuple{3, Float64}, s::Float64)::NTuple{3, Float64}
-    (v[1] * s, v[2] * s, v[3] * s)
-end
-
-function _ray_at(ray::Ray, t::Float64)::NTuple{3, Float64}
-    (ray.origin[1] + t * ray.direction[1],
-     ray.origin[2] + t * ray.direction[2],
-     ray.origin[3] + t * ray.direction[3])
-end

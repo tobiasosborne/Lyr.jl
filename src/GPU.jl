@@ -344,6 +344,14 @@ end
 # Delta tracking kernel (KernelAbstractions.jl)
 # ============================================================================
 
+"""Element-wise accumulation kernel: acc[i] += src[i]."""
+@kernel function _accumulate_kernel!(acc, src)
+    idx = @index(Global, Linear)
+    old = @inbounds acc[idx]
+    new = @inbounds src[idx]
+    @inbounds acc[idx] = (old[1] + new[1], old[2] + new[2], old[3] + new[3])
+end
+
 """
     delta_tracking_kernel!
 
@@ -671,12 +679,10 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                 ndrange=npixels)
         KernelAbstractions.synchronize(backend)
 
-        # Accumulate
-        for i in 1:npixels
-            old = acc_buf[i]
-            new = output[i]
-            acc_buf[i] = (old[1] + new[1], old[2] + new[2], old[3] + new[3])
-        end
+        # Accumulate on device
+        acc_kernel! = _accumulate_kernel!(backend)
+        acc_kernel!(acc_buf, output; ndrange=npixels)
+        KernelAbstractions.synchronize(backend)
     end
 
     # Average and reshape
@@ -714,7 +720,9 @@ function gpu_sphere_trace_cpu!(output::Matrix{NTuple{3, Float32}},
                                 width::Int, height::Int;
                                 light_dir::NTuple{3, Float64}=(0.577, 0.577, 0.577)) where T
     aspect = Float32(width) / Float32(height)
-    light = _normalize(light_dir)
+    light_v = SVec3d(light_dir...)
+    light_len = sqrt(light_v[1]^2 + light_v[2]^2 + light_v[3]^2)
+    light = light_len > 1e-10 ? Tuple(light_v / light_len) : (0.0, 0.0, 1.0)
 
     for y in 1:height
         for x in 1:width

@@ -173,8 +173,7 @@ Direction vectors (forward, right, up) are unchanged under uniform scaling.
 function _camera_to_index_space(cam::Camera, vs::Float64)
     vs ≈ 1.0 && return cam
     inv_vs = 1.0 / vs
-    pos = (cam.position[1] * inv_vs, cam.position[2] * inv_vs, cam.position[3] * inv_vs)
-    Camera(pos, cam.forward, cam.right, cam.up, cam.fov)
+    Camera(cam.position * inv_vs, cam.forward, cam.right, cam.up, cam.fov)
 end
 
 # ============================================================================

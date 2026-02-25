@@ -18,26 +18,26 @@ end
 # ============================================================================
 
 """
-    tonemap_reinhard(pixels::Matrix{NTuple{3, Float64}}) -> Matrix{NTuple{3, Float64}}
+    tonemap_reinhard(pixels::Matrix{NTuple{3, T}}) -> Matrix{NTuple{3, T}}
 
 Reinhard tone mapping: `x / (1 + x)`. Maps HDR values to [0, 1].
 """
-function tonemap_reinhard(pixels::Matrix{NTuple{3, Float64}})
+function tonemap_reinhard(pixels::Matrix{NTuple{3, T}}) where T <: AbstractFloat
     result = similar(pixels)
     for i in eachindex(pixels)
         r, g, b = pixels[i]
-        result[i] = (r / (1.0 + r), g / (1.0 + g), b / (1.0 + b))
+        result[i] = (r / (one(T) + r), g / (one(T) + g), b / (one(T) + b))
     end
     result
 end
 
 """
-    tonemap_aces(pixels::Matrix{NTuple{3, Float64}}) -> Matrix{NTuple{3, Float64}}
+    tonemap_aces(pixels::Matrix{NTuple{3, T}}) -> Matrix{NTuple{3, T}}
 
 ACES filmic tone mapping curve (Krzysztof Narkowicz approximation).
 `f(x) = (x*(2.51x + 0.03)) / (x*(2.43x + 0.59) + 0.14)`
 """
-function tonemap_aces(pixels::Matrix{NTuple{3, Float64}})
+function tonemap_aces(pixels::Matrix{NTuple{3, T}}) where T <: AbstractFloat
     result = similar(pixels)
     for i in eachindex(pixels)
         r, g, b = pixels[i]
@@ -46,33 +46,34 @@ function tonemap_aces(pixels::Matrix{NTuple{3, Float64}})
     result
 end
 
-function _aces_channel(x::Float64)::Float64
-    x = max(0.0, x)
-    clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0)
+function _aces_channel(x::T) where T <: AbstractFloat
+    x = max(zero(T), x)
+    clamp((x * (T(2.51) * x + T(0.03))) / (x * (T(2.43) * x + T(0.59)) + T(0.14)), zero(T), one(T))
 end
 
 """
-    tonemap_exposure(pixels::Matrix{NTuple{3, Float64}}, exposure::Float64) -> Matrix{NTuple{3, Float64}}
+    tonemap_exposure(pixels::Matrix{NTuple{3, T}}, exposure) -> Matrix{NTuple{3, T}}
 
 Exposure tone mapping: `1 - exp(-x * exposure)`.
 """
-function tonemap_exposure(pixels::Matrix{NTuple{3, Float64}}, exposure::Float64)
+function tonemap_exposure(pixels::Matrix{NTuple{3, T}}, exposure::Real) where T <: AbstractFloat
     result = similar(pixels)
+    e = T(exposure)
     for i in eachindex(pixels)
         r, g, b = pixels[i]
-        result[i] = (1.0 - exp(-r * exposure),
-                     1.0 - exp(-g * exposure),
-                     1.0 - exp(-b * exposure))
+        result[i] = (one(T) - exp(-r * e),
+                     one(T) - exp(-g * e),
+                     one(T) - exp(-b * e))
     end
     result
 end
 
 """
-    auto_exposure(pixels::Matrix{NTuple{3, Float64}}) -> Float64
+    auto_exposure(pixels::Matrix{NTuple{3, T}}) -> Float64
 
 Estimate a good exposure value based on average luminance (log-average).
 """
-function auto_exposure(pixels::Matrix{NTuple{3, Float64}})::Float64
+function auto_exposure(pixels::Matrix{NTuple{3, T}})::Float64 where T <: AbstractFloat
     log_sum = 0.0
     count = 0
     eps = 1e-6
@@ -233,8 +234,8 @@ Falls back to PPM if OpenEXR is not available.
 
 Linear light values are preserved (no gamma applied).
 """
-function write_exr(path::String, pixels::Matrix{NTuple{3, Float64}};
-                   depth::Union{Matrix{Float64}, Nothing}=nothing)
+function write_exr(path::String, pixels::Matrix{NTuple{3, T}};
+                   depth::Union{Matrix{<:AbstractFloat}, Nothing}=nothing) where T <: AbstractFloat
     height, width = size(pixels)
 
     # Try to use OpenEXR.jl
@@ -274,8 +275,8 @@ end
 Write an 8-bit sRGB PNG image. Requires PNGFiles.jl to be loaded.
 Applies gamma correction before quantization.
 """
-function write_png(path::String, pixels::Matrix{NTuple{3, Float64}};
-                   gamma::Float64=2.2)
+function write_png(path::String, pixels::Matrix{NTuple{3, T}};
+                   gamma::Float64=2.2) where T <: AbstractFloat
     height, width = size(pixels)
     inv_gamma = 1.0 / gamma
 

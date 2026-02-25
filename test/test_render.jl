@@ -12,7 +12,7 @@ using Lyr
                 60.0               # fov in degrees
             )
 
-            @test cam.position == (0.0, 0.0, 5.0)
+            @test Tuple(cam.position) == (0.0, 0.0, 5.0)
             @test cam.fov == 60.0
             # Direction should point toward target (negative z)
             @test cam.forward[3] < 0  # pointing into scene
