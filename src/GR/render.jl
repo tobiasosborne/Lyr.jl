@@ -94,8 +94,9 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
 
                 if config.use_redshift
                     u_emit = keplerian_four_velocity(m, r_cross)
-                    f_obs = 1.0 - 2.0 * m.M / cam.position[2]
-                    u_obs = SVec4d(1.0 / sqrt(f_obs), 0.0, 0.0, 0.0)
+                    r_obs = _coord_r(m, cam.position)
+                    f_obs = 1.0 - 2.0 * m.M / r_obs
+                    u_obs = SVec4d(1.0 / sqrt(max(f_obs, 1e-10)), 0.0, 0.0, 0.0)
                     z_plus_1 = redshift_factor(p_new, u_emit, p0, u_obs)
                     intensity = intensity / z_plus_1^3
                 end
@@ -170,8 +171,9 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
     M_val = rh / 2.0
 
     # Observer 4-velocity (static observer at camera position)
-    f_obs = 1.0 - 2.0 * m.M / cam.position[2]
-    u_obs = SVec4d(1.0 / sqrt(f_obs), 0.0, 0.0, 0.0)
+    r_obs = _coord_r(m, cam.position)
+    f_obs = 1.0 - 2.0 * m.M / r_obs
+    u_obs = SVec4d(1.0 / sqrt(max(f_obs, 1e-10)), 0.0, 0.0, 0.0)
 
     I_acc = 0.0   # accumulated intensity
     τ_acc = 0.0   # accumulated optical depth
