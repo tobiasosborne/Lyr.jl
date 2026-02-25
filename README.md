@@ -28,6 +28,24 @@ Lyr is a from-scratch implementation of the [OpenVDB](https://www.openvdb.org/) 
 
 The hydrogen orbital visualizations compute analytical wavefunctions (associated Laguerre polynomials, complex spherical harmonics) and render the probability density |&psi;|&sup2; as volumetric fog. The precession animation solves the full Lindblad master equation with jump operators L<sub>m</sub> = |1s&rang;&lang;2p<sub>m</sub>| — probability is exactly conserved at every frame.
 
+### General Relativistic Ray Tracing
+
+<p align="center">
+  <img src="showcase/black_hole_flyby.mp4" alt="Schwarzschild black hole with volumetric thick accretion disk" width="480"/>
+  <br/>
+  <em>Schwarzschild black hole with volumetric thick disk — geodesic ray tracing in Cartesian Kerr-Schild coordinates, emission-absorption with relativistic redshift and Doppler beaming.</em>
+</p>
+
+<table>
+  <tr>
+    <td align="center"><img src="showcase/11_schwarzschild_volumetric.png" width="280"/><br/><em>Oblique view</em></td>
+    <td align="center"><img src="showcase/12_schwarzschild_faceon.png" width="280"/><br/><em>Face-on (polar)</em></td>
+    <td align="center"><img src="showcase/17_schwarzschild_edgeon.png" width="280"/><br/><em>Edge-on</em></td>
+  </tr>
+</table>
+
+The GR module traces null geodesics backward from camera to source through curved spacetime. Schwarzschild and Cartesian Kerr-Schild metrics are implemented with analytic Christoffel symbols (no automatic differentiation). Thick disk emission uses the Shakura-Sunyaev temperature profile with bremsstrahlung-inspired emissivity. Frequency shift is computed from the ratio of photon 4-momentum contracted with emitter/observer 4-velocities.
+
 ## Why Lyr?
 
 Most scientific visualization tools treat rendering as an afterthought — a black box that turns data into pixels. Lyr takes the opposite approach: the rendering itself is the physics.
@@ -49,7 +67,9 @@ Inspired by [Nils Berglund's](https://www.youtube.com/@NilsBerglund) mathematica
 | **GPU** | NanoVDB flat-buffer with KernelAbstractions.jl delta tracking kernel. Progressive accumulation. CPU fallback. |
 | **Grid Construction** | `build_grid` from sparse `Dict{Coord, T}`. `gaussian_splat` for particle-to-volume conversion. |
 | **Surface Rendering** | DDA hierarchical ray traversal (Amanatides-Woo), level-set sphere tracing, trilinear interpolation. |
+| **General Relativity** | Null geodesic ray tracing (RK4 + Verlet). Schwarzschild (Boyer-Lindquist + Cartesian Kerr-Schild). Thin & thick accretion disk models. Gravitational redshift + Doppler beaming. Volumetric emission-absorption through curved spacetime. |
 | **Quantum Physics** | Hydrogen atom wavefunctions (any n,l,m). Lindblad master equation for open quantum systems. Larmor precession. |
+| **Field Protocol** | `ScalarField3D`, `VectorField3D`, `ComplexScalarField3D`, `ParticleField`, `TimeEvolution` — define physics, get rendered. One-call `visualize()` pipeline. |
 
 ## Quick Start
 
@@ -94,10 +114,23 @@ VDB File ──parse_vdb──▶ Grid{T} ──build_nanogrid──▶ NanoGrid
                                      │
                           render_volume_image (MC delta tracking)
                           render_volume_preview (deterministic)
+                          gpu_render_volume (KernelAbstractions.jl)
                                      │
-                              Matrix{NTuple{3,Float64}}
+                              Matrix{NTuple{3,T}}
                                      │
-                        denoise ──▶ tonemap ──▶ write_png
+                        denoise ──▶ tonemap ──▶ write_png/exr
+
+Field Protocol:
+  ScalarField3D / VectorField3D / ComplexScalarField3D / ParticleField
+                          │
+                     voxelize() ──▶ Grid{Float32} ──▶ visualize()
+
+GR Module:
+  MetricSpace (Schwarzschild, SchwarzschildKS)
+       │
+  GRCamera + IntegratorConfig + MatterSource (ThinDisk, ThickDisk)
+       │
+  gr_render_image() ── null geodesic integration ──▶ pixels
 ```
 
 ## Project Status
@@ -105,12 +138,13 @@ VDB File ──parse_vdb──▶ Grid{T} ──build_nanogrid──▶ NanoGrid
 | Phase | Status | Key Components |
 |-------|--------|----------------|
 | 1. Foundation | **Complete** | VDB read/write, DDA traversal, NanoVDB flat layout |
-| 2. Volume Renderer | **~90%** | Delta/ratio tracking, TF, scene, PNG/EXR output |
+| 2. Volume Renderer | **Complete** | Delta/ratio tracking, TF, scene, PNG/EXR output, multi-threaded |
 | 3. GPU Acceleration | **~80%** | Delta tracking kernel, NLM + bilateral denoising |
-| 4. Creation Tools | Partial | Grid builder, Gaussian splatting. Missing: mesh-to-SDF, CSG |
-| 5. Ecosystem | Started | Hydrogen orbitals, MD demos. Missing: Makie recipe, multi-scatter |
+| 4. Creation Tools | **Complete** | Grid builder, Gaussian splatting, Field Protocol (5 field types) |
+| 5. GR Ray Tracing | **~85%** | Schwarzschild (BL + KS), RK4/Verlet, thin/thick disk, redshift. Missing: Kerr |
+| 6. Ecosystem | Active | Hydrogen orbitals, MD demos, Ising model, showcase suite |
 
-10,410+ tests passing. See [VISION.md](VISION.md) for the full roadmap.
+29,565 tests passing. See [VISION.md](VISION.md) for the full roadmap.
 
 ## Installation
 
@@ -128,7 +162,7 @@ julia --project -e 'using Pkg; Pkg.instantiate()'
 
 ```julia
 julia --project -e 'using Pkg; Pkg.test()'
-# 10,410+ tests, ~3 minutes
+# 29,565 tests, ~3.5 minutes
 ```
 
 ## License

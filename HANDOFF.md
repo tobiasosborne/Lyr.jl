@@ -2,7 +2,56 @@
 
 ---
 
-## Latest Session (2026-02-25) — GR Architecture Review + P0 Bug Fixes
+## Latest Session (2026-02-25 evening) — 34 Issues Closed, P2 Refactors, Showcase Suite
+
+**Status**: GREEN — 29,565 tests pass, 34 issues closed (52 ready → 21 ready), comprehensive showcase rendered
+
+### What Was Done
+
+1. **34 beads issues closed** in one session — mix of bugs, perf, features, false positives:
+   - PPM writer zero-alloc, read_mask zero-alloc, OnIndicesIterator HasLength
+   - GridBuilder fill() optimization, TimeEvolution domain caching
+   - Ray intersect_bbox NaN fix, delta tracking majorant clamping
+   - GPU density estimator full 512-voxel scan, visualize(TimeEvolution)
+   - Grid getindex syntax, multi-threaded render/preview/denoise
+   - PNGFiles/OpenEXR module detection (isdefined → loaded_modules)
+   - ParticleField characteristic_scale, PhaseFunction docstring
+   - 9 false positives closed with explanation
+
+2. **All P2 issues resolved** (4 implemented, 1 deferred):
+   - Camera struct NTuple{3,Float64} → SVec3d, deleted 7 hand-rolled vector math functions (-19 LOC net)
+   - Generic pixel type pipeline: all tonemap/write functions accept NTuple{3,T} where T<:AbstractFloat
+   - gaussian_splat: thread-local Dicts via Threads.maxthreadid() + @threads
+   - GPU accumulation: @kernel _accumulate_kernel! for device-side element-wise add
+   - Deep EXR compositing: deferred (needs per-sample depth data + OpenEXR deep format)
+
+3. **GR bug fix**: `_trace_pixel_with_p0` used `cam.position[2]` (Cartesian x-coordinate) instead of `_coord_r(m, cam.position)` for observer radius in SchwarzschildKS. Caused `sqrt(negative)` DomainError at certain camera angles. Fixed in both volumetric and thin-disk tracers.
+
+4. **Comprehensive showcase** (scripts/showcase.jl):
+   - 17 stills: H orbitals (1s, 3d, 4f), E&M (dipole, magnetic bottle), stat mech (Ising ordered/critical/disordered), particles (FCC, galaxy), GR (volumetric oblique/face-on/edge-on), standing wave, wavepacket, TF comparison, denoising comparison
+   - 4 movies: orbital rotation, wavefunction evolution (1s+2p), Ising cooling quench, black hole volumetric flyby
+   - Process-parallel GR rendering: bh_launch.sh spawns N Julia workers with full internal threading
+
+5. **Threading profiled** with BenchmarkTools (scripts/profile_threading.jl):
+   - Volume renderer: 8.9x speedup at 32 threads
+   - GR renderer: 22.7x speedup at 32 threads
+   - Root cause of "threading doesn't work": Julia defaults to 1 thread, must use `-t auto`
+
+### Key Files Changed
+- `src/Render.jl` — Camera SVec3d, deleted 7 helpers, generic write_ppm
+- `src/Output.jl` — Generic tonemap/write functions, threaded denoisers, module detection
+- `src/VolumeIntegrator.jl` — Threaded render, GPU accumulation kernel, NanoGrid validation
+- `src/GR/render.jl` — _coord_r fix for observer 4-velocity
+- `src/Particles.jl` — Threaded gaussian_splat
+- `src/Masks.jl` — Zero-alloc read_mask, HasLength iterator
+- `src/FieldProtocol.jl` — TimeEvolution caching, ParticleField characteristic_scale
+- `src/GPU.jl` — _accumulate_kernel!, density estimator, module detection
+- `scripts/showcase.jl` — Full showcase generator
+- `scripts/bh_launch.sh` + `scripts/bh_worker.jl` — Process-parallel GR rendering
+
+---
+
+## Previous Session (2026-02-25) — GR Architecture Review + P0 Bug Fixes
 
 **Status**: GREEN — 2 P0 bugs fixed, 378/379 GR tests pass (1 pre-existing flaky H-conservation)
 
