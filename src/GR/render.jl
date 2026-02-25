@@ -65,6 +65,8 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
     x, p = initial.x, initial.p
     dl_base = config.integrator.step_size
     cfg = config.integrator
+    stepper = cfg.stepper
+    renorm_interval = cfg.renorm_interval
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
@@ -74,10 +76,10 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         # Adaptive step
         dl = M_val > 0.0 ? adaptive_step(dl_base, x[2], M_val) : dl_base
 
-        x_new, p_new = verlet_step(m, x, p, dl)
+        x_new, p_new = _do_step(m, x, p, dl, stepper)
 
-        # Null-cone re-projection every 10 steps (H stays < 1e-7 between)
-        if step % 10 == 0
+        # Null-cone re-projection
+        if renorm_interval > 0 && step % renorm_interval == 0
             p_new = renormalize_null(m, x_new, p_new)
         end
 
@@ -162,6 +164,8 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
     x, p = cam.position, p0
     dl_base = config.integrator.step_size
     cfg = config.integrator
+    stepper = cfg.stepper
+    renorm_interval = cfg.renorm_interval
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
@@ -176,10 +180,10 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
     for step in 1:cfg.max_steps
         r = _coord_r(m, x)
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
-        x_new, p_new = verlet_step(m, x, p, dl)
+        x_new, p_new = _do_step(m, x, p, dl, stepper)
 
-        # Null-cone re-projection every 10 steps
-        if step % 10 == 0
+        # Null-cone re-projection
+        if renorm_interval > 0 && step % renorm_interval == 0
             p_new = renormalize_null(m, x_new, p_new)
         end
 
@@ -202,6 +206,11 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
                 dI = j * dl_proper * exp(-τ_acc)
                 τ_acc += dτ
                 I_acc += dI
+
+                # Early exit: optically thick — background fully attenuated
+                if τ_acc > 8.0
+                    return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
+                end
             end
         end
 
@@ -230,10 +239,10 @@ end
 function _volumetric_final_color(I_acc::Float64, τ_acc::Float64,
                                   bg::NTuple{3, Float64})::NTuple{3, Float64}
     I_acc <= 0.0 && return bg
-    # HDR blackbody color scaled by accumulated intensity (no clamping — let
-    # external tone mapping handle the dynamic range)
-    bb = blackbody_color(clamp(I_acc, 0.0, 2.0))
-    disk_color = (bb[1] * I_acc, bb[2] * I_acc, bb[3] * I_acc)
+    # blackbody_color maps intensity to an RGB color ramp (cold→hot).
+    # I_acc already encodes the integrated brightness, so we use it directly
+    # as the color — no additional multiplication by I_acc.
+    disk_color = blackbody_color(clamp(I_acc, 0.0, 5.0))
     # Beer-Lambert: background attenuated by accumulated optical depth
     transmittance = exp(-τ_acc)
     (disk_color[1] + bg[1] * transmittance,

@@ -1,8 +1,8 @@
-# integrator.jl — Geodesic integration with adaptive Störmer-Verlet
+# integrator.jl — Geodesic integration with RK4 and Störmer-Verlet steppers
 #
 # Hamiltonian formulation: H = ½ g^{μν} p_μ p_ν = 0 for null geodesics.
-# The integrator uses adaptive step sizing based on distance from the
-# photon sphere, where geodesics curve most sharply.
+# RK4 (4th-order, default) or Störmer-Verlet (2nd-order symplectic) stepper,
+# with adaptive step sizing based on distance from the photon sphere.
 
 """
     IntegratorConfig(; kwargs...)
@@ -16,6 +16,8 @@ Configuration for geodesic integration.
 - `r_max::Float64` — escape radius: terminate when r > r_max
 - `r_min_factor::Float64` — terminate when r < r_min_factor × r_horizon
 - `record_interval::Int` — record state every N steps (0 = endpoints only)
+- `stepper::Symbol` — `:rk4` (default, 4th-order) or `:verlet` (2nd-order symplectic)
+- `renorm_interval::Int` — null-cone re-projection every N steps (default 50 for RK4, 10 for Verlet)
 """
 struct IntegratorConfig
     step_size::Float64
@@ -24,6 +26,8 @@ struct IntegratorConfig
     r_max::Float64
     r_min_factor::Float64
     record_interval::Int
+    stepper::Symbol
+    renorm_interval::Int
 end
 
 function IntegratorConfig(;
@@ -32,9 +36,12 @@ function IntegratorConfig(;
     h_tolerance::Float64 = 1e-6,
     r_max::Float64 = 200.0,
     r_min_factor::Float64 = 1.01,
-    record_interval::Int = 0
+    record_interval::Int = 0,
+    stepper::Symbol = :rk4,
+    renorm_interval::Int = stepper === :rk4 ? 50 : 10
 )
-    IntegratorConfig(step_size, max_steps, h_tolerance, r_max, r_min_factor, record_interval)
+    IntegratorConfig(step_size, max_steps, h_tolerance, r_max, r_min_factor,
+                     record_interval, stepper, renorm_interval)
 end
 
 # ─────────────────────────────────────────────────────────────────────
@@ -59,7 +66,43 @@ function adaptive_step(dl_base::Float64, r::Float64, M::Float64)::Float64
 end
 
 # ─────────────────────────────────────────────────────────────────────
-# Störmer-Verlet step (one step, shared by integrator and renderer)
+# RK4 step (classic 4th-order Runge-Kutta)
+# ─────────────────────────────────────────────────────────────────────
+
+"""
+    rk4_step(m, x, p, dl) -> Tuple{SVec4d, SVec4d}
+
+One classic RK4 step of the Hamiltonian system.
+4th-order accurate: 4 evaluations of Hamilton's equations per step.
+"""
+function rk4_step(m::MetricSpace{4}, x::SVec4d, p::SVec4d, dl::Float64)::Tuple{SVec4d, SVec4d}
+    # k1
+    dx1, dp1 = hamiltonian_rhs(m, x, p)
+
+    # k2 (half-step)
+    x2 = x + 0.5 * dl * dx1
+    p2 = p + 0.5 * dl * dp1
+    dx2, dp2 = hamiltonian_rhs(m, x2, p2)
+
+    # k3 (half-step with k2 slopes)
+    x3 = x + 0.5 * dl * dx2
+    p3 = p + 0.5 * dl * dp2
+    dx3, dp3 = hamiltonian_rhs(m, x3, p3)
+
+    # k4 (full step with k3 slopes)
+    x4 = x + dl * dx3
+    p4 = p + dl * dp3
+    dx4, dp4 = hamiltonian_rhs(m, x4, p4)
+
+    # Weighted average
+    x_new = x + (dl / 6.0) * (dx1 + 2.0 * dx2 + 2.0 * dx3 + dx4)
+    p_new = p + (dl / 6.0) * (dp1 + 2.0 * dp2 + 2.0 * dp3 + dp4)
+
+    (x_new, p_new)
+end
+
+# ─────────────────────────────────────────────────────────────────────
+# Störmer-Verlet step (2nd-order symplectic, alternative stepper)
 # ─────────────────────────────────────────────────────────────────────
 
 """
@@ -159,16 +202,28 @@ function renormalize_null(m::MetricSpace{4}, x::SVec4d, p::SVec4d)::SVec4d
     SVec4d(pt_new, p[2], p[3], p[4])
 end
 
+# ─────────────────────────────────────────────────────────────────────
+# Stepper dispatch: select RK4 or Verlet based on config
+# ─────────────────────────────────────────────────────────────────────
+
+"""Dispatch a single integration step using the configured stepper."""
+@inline function _do_step(m::MetricSpace{4}, x::SVec4d, p::SVec4d, dl::Float64,
+                           stepper::Symbol)::Tuple{SVec4d, SVec4d}
+    stepper === :rk4 ? rk4_step(m, x, p, dl) : verlet_step(m, x, p, dl)
+end
+
 """
     integrate_geodesic(m, initial, config) -> GeodesicTrace
 
-Integrate a null geodesic from `initial` state using adaptive Störmer-Verlet.
+Integrate a null geodesic from `initial` state using adaptive RK4 or Störmer-Verlet.
 """
 function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
                             config::IntegratorConfig)::GeodesicTrace
     x = initial.x
     p = initial.p
     dl_base = config.step_size
+    stepper = config.stepper
+    renorm_interval = config.renorm_interval
 
     states = GeodesicState[initial]
     if config.record_interval > 0
@@ -186,8 +241,8 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
         M_val = rh / 2.0  # extract M from horizon radius
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
 
-        x, p = verlet_step(m, x, p, dl)
-        if step % 10 == 0
+        x, p = _do_step(m, x, p, dl, stepper)
+        if renorm_interval > 0 && step % renorm_interval == 0
             p = renormalize_null(m, x, p)
         end
         r = x[2]
