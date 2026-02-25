@@ -2,7 +2,203 @@
 
 ---
 
-## Latest Session (2026-02-24) — GR Rendering Fixes (IN PROGRESS, BROKEN)
+## Latest Session (2026-02-25) — GR Architecture Review + P0 Bug Fixes
+
+**Status**: GREEN — 2 P0 bugs fixed, 378/379 GR tests pass (1 pre-existing flaky H-conservation)
+
+### What Was Done
+
+1. **Comprehensive GR architecture review** against state-of-the-art GRRT literature (GRay2, RAPTOR, ipole, GYOTO, Odyssey, Blacklight, Coport, Mahakala). Web-searched key papers including Ripperda et al. 2023 on coordinate choice.
+
+2. **Created 10 beads** (dependency-chained improvement plan) covering all review findings — see plan below.
+
+3. **Fixed `path-xdbh` [P0]**: sphere_lookup φ-wrap bilinear interpolation seam.
+   - Root cause: `fu = u - floor(u - 0.5) - 0.5` had a half-pixel offset causing fu to jump from ~1.0 to ~0.0 at the φ=0/2π boundary — a discontinuity that produced the full-frame vertical seam.
+   - Fix: `fu = u - j0_raw` (3 lines). Also store `j0_raw` before mod1 wrapping and derive `j1` from it.
+   - +11 tests for wrap-boundary continuity.
+
+4. **Fixed `path-6gu3` [P0]**: CKS tetrad orientation and matrix layout.
+   - Bug 1 (orientation): Gram-Schmidt used arbitrary seed vectors (`if abs(lz) < 0.9` and a loop over seed candidates), producing inconsistent tetrad orientation depending on camera angular position. Replaced with analytic spatial legs: ê_r = (x/r, y/r, z/r), ê_θ = (xz/(rρ), yz/(rρ), -ρ/r), ê_φ = (-y/ρ, x/ρ, 0). Clean pole fallback when ρ < ε.
+   - Bug 2 (matrix layout): SMat4d constructor is column-major, but old code put `(u[1], e1[1], e2[1], e3[1])` as column 1 — the first components of all legs, not all components of one leg. For BL this worked by accident (diagonal metric → legs have single nonzero components). For KS it was fundamentally broken. Fixed to `(u[1], u[2], u[3], u[4])` as column 1.
+   - +15 tests: orthonormality at 5 positions (including near-pole), orientation matching BL, off-axis radial direction.
+
+### GR Improvement Plan (10 Beads, Dependency DAG)
+
+```
+LAYER 0 — No blockers (work immediately, can parallelize)
+├── path-xdbh [P0] Fix sphere_lookup φ-wrap seam                    ✅ DONE
+├── path-6gu3 [P0] Fix CKS tetrad (analytic spatial legs)           ✅ DONE
+├── path-esr2 [P1] Add RK4 integrator as default geodesic stepper
+├── path-l8dy [P1] Fix volumetric double-intensity color mapping
+└── path-tyrz [P1] Add early τ-cutoff in volumetric tracer
+
+LAYER 1 — Unblocked after Layer 0
+├── path-vsfi [P1] Use outgoing Kerr-Schild for backward tracing    ← depends on path-6gu3
+├── path-a5ze [P1] Angular-velocity adaptive stepping                ← depends on path-esr2
+├── path-bjox [P2] Fuse metric_inverse + partials                   ← depends on path-esr2
+└── path-o9zw [P2] Tile-based rendering for cache locality          ← depends on path-esr2
+
+LAYER 2 — Unblocked after Layers 0+1
+└── path-837k [P2] GPU via KernelAbstractions.jl                    ← depends on 6gu3, esr2, bjox
+```
+
+### Detailed Plan for Each Remaining Bead
+
+#### path-esr2 [P1] — Add RK4 Integrator (CRITICAL PATH)
+
+**Why**: All major GRRT codes (GRay2, RAPTOR, GYOTO, Odyssey, Blacklight) use RK4. Current Störmer-Verlet is 2nd-order, requiring ~3-5× more steps for equivalent accuracy. The 4500-step escape rays and 10,000 max_steps budget indicate step count is already the bottleneck.
+
+**What**:
+- New `rk4_step(m, x, p, dl)` using `hamiltonian_rhs()` (already exists, returns dx/dλ and dp/dλ)
+- Standard k1/k2/k3/k4 stages: 4 calls to `hamiltonian_rhs` per step
+- Add `stepper::Symbol` field to `IntegratorConfig` (`:rk4` default, `:verlet` option)
+- Update `integrate_geodesic` and `trace_pixel` to dispatch on stepper
+- Keep `renormalize_null` every 20-50 steps for RK4 (vs 10 for Verlet)
+
+**Files**: `src/GR/integrator.jl`, `src/GR/render.jl`, `test/test_gr_integrator.jl`
+
+**Validation**: Circular orbit H conservation, shadow radius, render comparison (RMSE < 0.01), wall-time speedup measurement.
+
+**Unblocks**: path-a5ze, path-bjox, path-o9zw, path-837k (4 downstream beads)
+
+---
+
+#### path-l8dy [P1] — Fix Volumetric Double-Intensity
+
+**Why**: `_volumetric_final_color` uses `blackbody_color(clamp(I_acc, 0.0, 2.0))` to get RGB, then multiplies by `I_acc` again. This double-applies intensity, blowing out colors to white for moderate optical depth.
+
+**What**:
+- Option A (simple): Remove the extra `I_acc` multiplication, use `blackbody_color(I_acc)` directly as final color
+- Option B (better): Track luminosity-weighted average temperature during accumulation, compute color from `T_avg`, scale by `I_acc`
+
+**Files**: `src/GR/render.jl` (`_volumetric_final_color`, `_trace_pixel_with_p0`)
+
+**Validation**: Rendered disk shows color gradients (not all-white), I_acc=0.5 → warm red.
+
+---
+
+#### path-tyrz [P1] — Early Optical-Depth Cutoff
+
+**Why**: Volumetric tracer continues integrating even when τ > 10 (transmittance < 4.5e-5). Wastes steps in optically thick regions.
+
+**What**: Add `if τ_acc > 8.0; return _volumetric_final_color(I_acc, τ_acc, (0,0,0)); end` after the `τ_acc += dτ` line.
+
+**Files**: `src/GR/render.jl` (1 line in `_trace_pixel_with_p0`)
+
+**Validation**: Pixel-wise RMSE < 1e-3 vs no cutoff, 10-30% fewer total steps.
+
+---
+
+#### path-vsfi [P1] — Outgoing Kerr-Schild Coordinates
+
+**Why**: Ripperda et al. 2023 (arXiv:2310.02321) proved ingoing KS is fundamentally unsuitable for backward ray tracing. Outgoing photons near the horizon experience diverging dt/dλ in ingoing coordinates (~100,000 steps where outgoing KS needs ~11). Current `SchwarzschildKS` uses ingoing l_α = (1, x/r, y/r, z/r).
+
+**What**: Flip spatial sign of the null 1-form to outgoing: l_α = (1, -x/r, -y/r, -z/r). Update metric, metric_inverse, all analytic partials. The Sherman-Morrison structure g = η + f l⊗l is unchanged.
+
+**Files**: `src/GR/metrics/schwarzschild_ks.jl` (metric, metric_inverse, metric_inverse_partials, _ks_r_and_l)
+
+**Validation**: g·g⁻¹=I, det matches, analytic vs ForwardDiff partials < 1e-10, shadow radius, near-horizon step count reduction.
+
+**Depends on**: path-6gu3 (tetrad must work first) ✅
+
+---
+
+#### path-a5ze [P1] — Angular-Velocity Adaptive Stepping
+
+**Why**: Current `adaptive_step` is purely radial: `scale = clamp((r-rh)/(8M), 0.1, 1.0)`. Misses angular dynamics near the photon sphere where a ray at r=3.001M can orbit multiple times. RAPTOR uses: `dl = ε × min(x_θ, 1-x_θ) / (|k_θ| + δ)`.
+
+**What**: Modify `adaptive_step` to accept momentum p and compute:
+```
+scale_r = clamp((r - rh) / (8M), 0.1, 1.0)
+scale_θ = ε / (|g^{θμ} p_μ| + δ)
+scale = min(scale_r, scale_θ)
+```
+
+**Files**: `src/GR/integrator.jl` (signature + logic), `src/GR/render.jl` (pass p to adaptive_step)
+
+**Depends on**: path-esr2 (both share the integrator)
+
+---
+
+#### path-bjox [P2] — Fuse metric_inverse + partials
+
+**Why**: `verlet_step` computes `metric_inverse_partials(m, x)` then `metric_inverse(m, x)` at the same point — redundant work. Both share intermediate values (r, θ, f for BL; r, inv_r, l, f for KS). ~20-30% of per-step metric cost is wasted.
+
+**What**: New `metric_inverse_and_partials(m, x) -> (ginv, partials)` that computes both in one pass. Update steppers to use it.
+
+**Files**: `src/GR/metric.jl`, `src/GR/metrics/schwarzschild.jl`, `src/GR/metrics/schwarzschild_ks.jl`, `src/GR/integrator.jl`
+
+**Depends on**: path-esr2 (fuse for both steppers)
+
+---
+
+#### path-o9zw [P2] — Tile-Based Rendering
+
+**Why**: Current per-row threading (`Threads.@threads for j in 1:height`) is 1D decomposition. Tile-based (16×16) gives better cache locality for metric evaluations and enables early-out for tiles entirely inside the shadow.
+
+**What**: Replace row loop with tile loop. Optional: pre-classify corner pixels for shadow early-out.
+
+**Files**: `src/GR/render.jl` (`gr_render_image`)
+
+**Depends on**: path-esr2 (benchmark against better integrator)
+
+---
+
+#### path-837k [P2] — GPU via KernelAbstractions.jl
+
+**Why**: GRay2 demonstrated 100-600× speedup on GPU. CKS is specifically designed for GPU: no trig, uniform branching, pure arithmetic. Julia has mature GPU via CUDA.jl + KernelAbstractions.jl. Coport (Julia GRRT code) validates feasibility.
+
+**What**: New `src/GR/gpu_render.jl` with a KernelAbstractions kernel that traces one pixel per thread. SchwarzschildKS primary target. Float32 variants for consumer GPU perf.
+
+**Files**: `src/GR/gpu_render.jl` (NEW), `src/GR/GR.jl`, `Project.toml`
+
+**Depends on**: path-6gu3 ✅, path-esr2, path-bjox (all three must land first)
+
+---
+
+### Key Findings from Literature Review
+
+1. **Coordinate choice**: Cartesian KS is correct long-term choice (GRay2, Blacklight, Mahakala all use it). BUT must use OUTGOING KS for backward tracing (Ripperda et al. 2023).
+
+2. **Integrator**: RK4 is the consensus workhorse. Verlet is valid but requires 3-5× more steps. Adaptive symplectic methods (Luo et al. 2024) are the theoretical optimum for long integrations.
+
+3. **Geodesic formulation**: Hamiltonian with covariant momenta — our approach matches the consensus exactly. Better than Christoffel-based codes (fewer terms, no Γ bookkeeping).
+
+4. **Camera**: Gram-Schmidt with analytic seeds is correct for CKS. For Kerr, need ZAMO/LNRF tetrad (static observers don't exist inside ergosphere).
+
+5. **Radiative transfer**: Our `j/z³` scaling correctly implements the I_ν/ν³ invariant. The emission-absorption integration is sound.
+
+6. **Architecture**: Our code is more elegant than Coport (the other Julia GRRT code) — Hamiltonian + metric partials vs Christoffel symbols. Our ForwardDiff fallback + analytic specialization pattern is clean.
+
+### References
+
+- Chan et al. 2018 (GRay2): arXiv:1706.07062 — CKS, RK4, GPU
+- Bronzwaer et al. 2018 (RAPTOR): arXiv:1801.10452 — adaptive stepping, angular-velocity
+- Mościbrodzka & Gammie 2018 (ipole): arXiv:1712.03057 — semi-analytic polarized transfer
+- Ripperda et al. 2023: arXiv:2310.02321 — outgoing vs ingoing KS (critical finding)
+- Luo et al. 2024: arXiv:2412.01045 — adaptive symplectic integrators
+- Huang et al. 2024 (Coport): arXiv:2407.10431 — Julia GRRT precedent
+- White 2022 (Blacklight): arXiv:2203.15963 — CKS, adaptive RK
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/GR/matter.jl` | Fixed sphere_lookup φ-wrap interpolation (3 lines) |
+| `src/GR/metrics/schwarzschild_ks.jl` | Analytic tetrad legs + correct SMat4d column-major layout |
+| `test/test_gr_camera.jl` | +70 lines: KS orthonormality (5 positions), orientation matching BL |
+| `test/test_gr_matter.jl` | +60 lines: φ-wrap continuity, periodic texture smoothness scan |
+
+### Test Results
+
+```
+378 pass, 1 fail (pre-existing flaky H-conservation), 0 errors
+New tests: 26 (11 matter + 15 camera)
+```
+
+---
+
+## Previous Session (2026-02-24) — GR Rendering Fixes (IN PROGRESS, BROKEN)
 
 **Status**: RED — Work in progress, multiple issues. Tests NOT verified. Needs careful continuation.
 

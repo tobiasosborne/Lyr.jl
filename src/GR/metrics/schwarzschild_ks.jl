@@ -140,68 +140,74 @@ end
     static_observer_tetrad(m::SchwarzschildKS, x::SVec4d)
 
 Tetrad for a static observer in Cartesian Kerr-Schild coordinates.
-e_0 = time direction (4-velocity), e_1 = radial (toward BH),
-e_2 and e_3 = tangential (orthogonal to radial).
+e_0 = time direction (4-velocity), e_1 = radial outward,
+e_2 = polar (θ, southward), e_3 = azimuthal (φ, eastward).
+
+Uses analytic spatial legs derived from the spherical coordinate tangent
+vectors expressed in Cartesian components, matching the BL tetrad orientation.
+Gram-Schmidt orthonormalization against the KS metric corrects for the
+off-diagonal g_{ti} terms.
 """
 function static_observer_tetrad(m::SchwarzschildKS, x::SVec4d)::Tuple{SVec4d, SMat4d}
     r, inv_r, lx, ly, lz = _ks_r_and_l(x)
     f = 2.0 * m.M * inv_r
     g = metric(m, x)
 
-    # Static observer 4-velocity: u^α with u^i = 0 in the "lab frame"
-    # but we need g_αβ u^α u^β = -1. For KS, u = (u^t, 0, 0, 0):
-    # g_tt (u^t)² = -1 → u^t = 1/√(|g_tt|) = 1/√(1-f)
+    # Static observer 4-velocity: g_tt (u^t)² = -1 → u^t = 1/√(1-f)
     gtt = -1.0 + f
-    ut = 1.0 / sqrt(abs(gtt))  # note: gtt < 0 outside horizon (f < 1)
+    ut = 1.0 / sqrt(abs(gtt))
     u = SVec4d(ut, 0.0, 0.0, 0.0)
-
-    # Radial direction: unit vector AWAY from BH = +(lx, ly, lz)
-    # In Cartesian KS, outward radial gives outward coordinate velocity,
-    # matching the BL convention where e1 produces dx^r/dλ > 0 (outward).
-    # Backward tracing with dl < 0 then sends rays inward.
-
-    # e_1 candidate: purely spatial radial outward
-    e1_raw = SVec4d(0.0, lx, ly, lz)
-    # Gram-Schmidt: e1 = e1_raw - (g(e1_raw, u)/g(u,u)) u
-    g_e1u = _dot_metric(g, e1_raw, u)
     g_uu = _dot_metric(g, u, u)
-    e1_orth = e1_raw - (g_e1u / g_uu) * u
-    norm_e1 = sqrt(abs(_dot_metric(g, e1_orth, e1_orth)))
-    e1 = e1_orth / norm_e1
 
-    # e_2: pick a vector not parallel to radial direction.
-    # Use the "z-axis trick": if radial ≈ z, use x as seed.
-    if abs(lz) < 0.9
-        seed = SVec4d(0.0, 0.0, 0.0, 1.0)  # z direction
+    # Analytic spatial directions matching BL (r, θ, φ) orientation.
+    # These are the spherical basis vectors ê_r, ê_θ, ê_φ written in
+    # Cartesian components, which are orthonormal in flat space.
+    #   ê_r = (x/r, y/r, z/r)
+    #   ê_θ = (xz/(rρ), yz/(rρ), -ρ/r)    "southward"
+    #   ê_φ = (-y/ρ, x/ρ, 0)               "eastward"
+    # where ρ = √(x² + y²).
+    e1_raw = SVec4d(0.0, lx, ly, lz)
+
+    ρ = sqrt(x[2]^2 + x[3]^2)
+    if ρ > 1e-10 * r
+        # General case: well away from z-axis
+        inv_ρ = 1.0 / ρ
+        e2_raw = SVec4d(0.0, x[2]*x[4]*inv_r*inv_ρ, x[3]*x[4]*inv_r*inv_ρ, -ρ*inv_r)
+        e3_raw = SVec4d(0.0, -x[3]*inv_ρ, x[2]*inv_ρ, 0.0)
     else
-        seed = SVec4d(0.0, 1.0, 0.0, 0.0)  # x direction
+        # Pole case (camera on/near z-axis): ê_θ and ê_φ are degenerate.
+        # Use x and y directions as tangential legs.
+        e2_raw = SVec4d(0.0, 1.0, 0.0, 0.0)
+        e3_raw = SVec4d(0.0, 0.0, 1.0, 0.0)
     end
-    # Gram-Schmidt vs u and e1
-    e2_raw = seed - (_dot_metric(g, seed, u) / g_uu) * u -
-              (_dot_metric(g, seed, e1) / _dot_metric(g, e1, e1)) * e1
-    norm_e2 = sqrt(abs(_dot_metric(g, e2_raw, e2_raw)))
-    e2 = e2_raw / norm_e2
 
-    # e_3: cross-product-like (complete the tetrad)
-    e3_raw = SVec4d(0.0, 0.0, 0.0, 0.0)
-    # Use the remaining orthogonal direction
-    for seed2_choice in [SVec4d(0.0, 0.0, 1.0, 0.0), SVec4d(0.0, 1.0, 0.0, 0.0), SVec4d(0.0, 0.0, 0.0, 1.0)]
-        e3_raw = seed2_choice -
-                  (_dot_metric(g, seed2_choice, u) / g_uu) * u -
-                  (_dot_metric(g, seed2_choice, e1) / _dot_metric(g, e1, e1)) * e1 -
-                  (_dot_metric(g, seed2_choice, e2) / _dot_metric(g, e2, e2)) * e2
-        if _dot_metric(g, e3_raw, e3_raw) > 1e-10
-            break
-        end
-    end
-    norm_e3 = sqrt(abs(_dot_metric(g, e3_raw, e3_raw)))
-    e3 = e3_raw / norm_e3
+    # Gram-Schmidt orthonormalization against KS metric g_αβ.
+    # The KS off-diagonal g_{ti} terms make purely spatial vectors
+    # non-orthogonal to u, so this correction is required.
 
+    # e1: orthogonalize against u, then normalize
+    e1_orth = e1_raw - (_dot_metric(g, e1_raw, u) / g_uu) * u
+    e1 = e1_orth / sqrt(abs(_dot_metric(g, e1_orth, e1_orth)))
+
+    # e2: orthogonalize against u and e1, then normalize
+    e2_orth = e2_raw - (_dot_metric(g, e2_raw, u) / g_uu) * u -
+              _dot_metric(g, e2_raw, e1) * e1
+    e2 = e2_orth / sqrt(abs(_dot_metric(g, e2_orth, e2_orth)))
+
+    # e3: orthogonalize against u, e1, e2, then normalize
+    e3_orth = e3_raw - (_dot_metric(g, e3_raw, u) / g_uu) * u -
+              _dot_metric(g, e3_raw, e1) * e1 -
+              _dot_metric(g, e3_raw, e2) * e2
+    e3 = e3_orth / sqrt(abs(_dot_metric(g, e3_orth, e3_orth)))
+
+    # SMat4d constructor is column-major: columns = tetrad legs.
+    # Column 1 = u (e0), Column 2 = e1, Column 3 = e2, Column 4 = e3.
+    # pixel_to_momentum accesses e[:, a] expecting column a = leg a.
     tetrad = SMat4d(
-        u[1], e1[1], e2[1], e3[1],
-        u[2], e1[2], e2[2], e3[2],
-        u[3], e1[3], e2[3], e3[3],
-        u[4], e1[4], e2[4], e3[4]
+        u[1],  u[2],  u[3],  u[4],
+        e1[1], e1[2], e1[3], e1[4],
+        e2[1], e2[2], e2[3], e2[4],
+        e3[1], e3[2], e3[3], e3[4]
     )
 
     (u, tetrad)
