@@ -28,9 +28,13 @@ import Lyr:
     # DDA internals
     DDAState, dda_init, dda_step!, NodeDDA,
     node_dda_init, node_dda_child_index, node_dda_inside, node_dda_voxel_origin,
+    # Binary generic
+    read_le,
     # Exception detail types
     InvalidMagicError, ChunkSizeMismatchError, CompressionBoundsError,
-    DecompressionSizeError, ValueCountError,
+    DecompressionSizeError, ValueCountError, FormatError, UnsupportedVersionError,
+    # Metadata internals
+    read_grid_metadata, skip_file_metadata,
     # Ray internals
     LeafIntersection,
     # Render internals
@@ -60,6 +64,7 @@ import Lyr:
     include("test_staticarrays.jl")
     include("test_grid.jl")
     include("test_file.jl")
+    include("test_parsing_infrastructure.jl")
     include("test_accessors.jl")
     include("test_interpolation.jl")
     include("test_ray.jl")
