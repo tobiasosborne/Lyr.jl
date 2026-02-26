@@ -2,7 +2,50 @@
 
 ---
 
-## Latest Session (2026-02-25 evening) — 34 Issues Closed, P2 Refactors, Showcase Suite
+## Latest Session (2026-02-26) — Elegance Sprint: 10 Issues Closed, -227 LOC
+
+**Status**: GREEN — 29,662 tests pass (+97 new), 10 issues closed (17 → 11 remaining), 96% complete (271/282)
+
+### What Was Done
+
+1. **Typed exceptions** (`49f63d8`): Added `FormatError` and `UnsupportedVersionError` to exception hierarchy. Replaced all bare `error()` calls across 12 files with typed `throw()`. TinyVDB gets self-contained copies (standalone testing).
+
+2. **Parametric tile value dispatch** (`31d0211`): Replaced 18 hand-written `read_tile_value`/`write_tile_value!` specializations (Float32, Float64, Int32, Int64, Vec3f, Vec3d) with 6 parametric methods. Key pattern: `ntuple(Val(N))` for compile-time unrolled NTuple reads — automatically works for any N, not just 3. Added `read_le` generic to Binary.jl. **-41 LOC.**
+
+3. **FileWrite.jl cleanup** (`9c69d4f`): Extracted `_write_vec3d!`, `_write_scale_map_data!`, `_write_scale_translate_data!` helpers. Merged identical ScaleTranslateMap/UniformScaleTranslateMap branches. Collapsed `grid_type_string` to one-liner dispatch table. Used `write_tile_value!` for vec3 metadata. Eliminated O(32768) dense array allocations in topology writers by writing tile values directly. **-124 LOC.**
+
+4. **Dispatch-based tree probe** (`e6bef92`): Replaced 80 lines of duplicated `get_value(tree,c)` and `is_active(tree,c)` traversal with `_probe_node` dispatch chain (I2→I1→Leaf) + shared `_probe_internal` for mask checks. Both become one-liners over `_tree_probe`. Collapsed counting functions to `sum`/`count` one-liners. Unified 4 Transform NTuple wrappers to 2 via `AbstractTransform`. **-93 LOC.**
+
+5. **Parsing infrastructure tests** (`b8a527b`): Single elegant test file closing 5 issues with 97 new tests. Covers: showerror messages for all 7 exception types, binary reader boundaries/edge cases, `read_transform` for all 4 map types, `read_grid_descriptor` with/without offsets, `read_grid_metadata` for all 10 value types.
+
+### Key Patterns Established
+- **Union dispatch**: `where {T <: Union{Float32, Float64, ...}}` — one method replaces N specializations
+- **`ntuple(Val(N))`**: compile-time unrolled tuple construction for any N
+- **Recursive node dispatch**: `_probe_node(::LeafNode)`, `_probe_node(::InternalNode1)`, etc.
+- **Functional counting**: `count(pred, collection)`, `sum(f, iter; init=0)` replacing manual loops
+- **`@testset for` parametric tests**: loop over `(exception, pattern)` pairs for systematic coverage
+
+### Key Files Changed
+- `src/Exceptions.jl` — FormatError, UnsupportedVersionError
+- `src/Binary.jl` — read_le generic
+- `src/Values.jl` — parametric read_tile_value (3 methods replace 9)
+- `src/BinaryWrite.jl` — parametric write_tile_value! (3 methods replace 9)
+- `src/FileWrite.jl` — transform helpers, topology simplification (700→575 LOC)
+- `src/Accessors.jl` — _probe_node dispatch, functional counting
+- `src/Transforms.jl` — AbstractTransform wrappers
+- `src/TinyVDB/*.jl` — typed exceptions (6 files)
+- `test/test_parsing_infrastructure.jl` — 97 new tests (NEW)
+
+### What Remains (11 issues)
+- **Tests (3)**: half-precision values, iterator edge cases, sphere_trace surface hit
+- **Refactor (2)**: TinyVDB dedup (~315 LOC), export reduction (~65→~20 symbols)
+- **Features (3)**: active-voxel gradient, mmap I/O, decompression buffer reuse
+- **Architecture (1)**: extract Render.jl to separate package (P4 backlog)
+- **Robustness (1)**: truncated/corrupted file tests
+
+---
+
+## Previous Session (2026-02-25 evening) — 34 Issues Closed, P2 Refactors, Showcase Suite
 
 **Status**: GREEN — 29,565 tests pass, 34 issues closed (52 ready → 21 ready), comprehensive showcase rendered
 
