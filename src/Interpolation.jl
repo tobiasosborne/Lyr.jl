@@ -1,5 +1,21 @@
 # Interpolation.jl - Sampling and gradient computation
 
+# --- Interpolation method types ---
+
+"""
+    InterpolationMethod
+
+Abstract type for grid sampling strategies.
+Concrete subtypes: [`NearestInterpolation`](@ref), [`TrilinearInterpolation`](@ref).
+"""
+abstract type InterpolationMethod end
+
+"""Nearest-neighbor sampling — snaps to closest voxel center."""
+struct NearestInterpolation  <: InterpolationMethod end
+
+"""Trilinear sampling — linearly interpolates the 8 surrounding voxels."""
+struct TrilinearInterpolation <: InterpolationMethod end
+
 # --- SVec3d primary methods ---
 
 """
@@ -54,26 +70,21 @@ function sample_trilinear(tree::Tree{T}, ijk::SVec3d)::T where T
 end
 
 """
-    sample_world(grid::Grid{T}, xyz::SVec3d; method::Symbol=:trilinear) -> T
+    sample_world(grid, xyz, [method]) -> T
 
-Sample the grid at world coordinates.
-
-# Arguments
-- `grid::Grid{T}` - The grid to sample
-- `xyz::SVec3d` - World coordinates
-- `method::Symbol` - Interpolation method (:nearest or :trilinear)
+Sample the grid at world coordinates using the given [`InterpolationMethod`](@ref).
+Defaults to [`TrilinearInterpolation`](@ref).
 """
-function sample_world(grid::Grid{T}, xyz::SVec3d; method::Symbol=:trilinear)::T where T
-    ijk = world_to_index_float(grid.transform, xyz)
+sample_world(grid::Grid{T}, xyz::SVec3d, ::NearestInterpolation) where T =
+    sample_nearest(grid.tree, world_to_index_float(grid.transform, xyz))
 
-    if method == :nearest
-        sample_nearest(grid.tree, ijk)
-    else
-        sample_trilinear(grid.tree, ijk)
-    end
-end
+sample_world(grid::Grid{T}, xyz::SVec3d, ::TrilinearInterpolation) where T =
+    sample_trilinear(grid.tree, world_to_index_float(grid.transform, xyz))
 
-# --- NTuple wrappers for backward compatibility ---
+sample_world(grid::Grid{T}, xyz::SVec3d) where T =
+    sample_world(grid, xyz, TrilinearInterpolation())
+
+# --- NTuple convenience wrappers ---
 
 sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
     sample_nearest(tree, SVec3d(ijk...))
@@ -81,8 +92,11 @@ sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
 sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
     sample_trilinear(tree, SVec3d(ijk...))
 
-sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}; method::Symbol=:trilinear) where T =
-    sample_world(grid, SVec3d(xyz...); method=method)
+sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}, method::InterpolationMethod) where T =
+    sample_world(grid, SVec3d(xyz...), method)
+
+sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}) where T =
+    sample_world(grid, SVec3d(xyz...), TrilinearInterpolation())
 
 # --- Internal helpers (unchanged) ---
 

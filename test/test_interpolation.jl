@@ -72,10 +72,10 @@
         grid = Grid{Float32}("test", GRID_UNKNOWN, transform, tree)
 
         # World coord (0,0,0) -> index (0,0,0)
-        @test sample_world(grid, (0.0, 0.0, 0.0); method=:nearest) == 1.0f0
+        @test sample_world(grid, (0.0, 0.0, 0.0), NearestInterpolation()) == 1.0f0
 
         # World coord (2,0,0) -> index (1,0,0)
-        @test sample_world(grid, (2.0, 0.0, 0.0); method=:nearest) == 2.0f0
+        @test sample_world(grid, (2.0, 0.0, 0.0), NearestInterpolation()) == 2.0f0
     end
 
     @testset "sample_trilinear boundary fallback" begin

@@ -111,6 +111,7 @@ export get_value, is_active, active_voxel_count, leaf_count, active_bounding_box
 export active_voxels, leaves
 
 # Interpolation
+export InterpolationMethod, NearestInterpolation, TrilinearInterpolation
 export sample_nearest, sample_trilinear, sample_world
 export gradient
 
