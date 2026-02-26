@@ -63,7 +63,7 @@
 
     @testset "read_tile_value unsupported type errors" begin
         bytes = zeros(UInt8, 16)
-        @test_throws ArgumentError read_tile_value(UInt16, bytes, 1)
+        @test_throws MethodError read_tile_value(UInt16, bytes, 1)
     end
 
     # =========================================================================

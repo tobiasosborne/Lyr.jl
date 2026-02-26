@@ -150,37 +150,33 @@ end
 """
     read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int) -> Tuple{T, Int}
 
-Read a single tile value. Specializations exist for all supported VDB value types
-(Float32, Float64, Int32, Int64, Bool, NTuple{3,Float32}, NTuple{3,Float64}).
-
-The generic fallback errors to prevent silent corruption from `ltoh`/`bswap` on
-unsupported types (e.g. NTuple, custom structs).
+Read a single tile value from bytes in little-endian format.
+Uses parametric dispatch: scalars via `read_le`, NTuples via compile-time
+unrolled `ntuple(Val(N))`, Bool as single byte.
 """
-function read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{T, Int} where T
-    throw(ArgumentError("read_tile_value: no specialization for type $T — add one to Values.jl"))
+function read_tile_value end
+
+# Scalar primitives: direct little-endian read
+function read_tile_value(::Type{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{T, Int} where {T <: Union{Float32, Float64, Int32, Int64}}
+    read_le(T, bytes, pos)
 end
 
-# Specializations for all supported VDB value types
-function read_tile_value(::Type{Float32}, bytes::Vector{UInt8}, pos::Int)::Tuple{Float32, Int}
-    read_f32_le(bytes, pos)
-end
-
-function read_tile_value(::Type{Float64}, bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, Int}
-    read_f64_le(bytes, pos)
-end
-
-function read_tile_value(::Type{Int32}, bytes::Vector{UInt8}, pos::Int)::Tuple{Int32, Int}
-    read_i32_le(bytes, pos)
-end
-
-function read_tile_value(::Type{Int64}, bytes::Vector{UInt8}, pos::Int)::Tuple{Int64, Int}
-    read_i64_le(bytes, pos)
-end
-
+# Bool: single byte
 function read_tile_value(::Type{Bool}, bytes::Vector{UInt8}, pos::Int)::Tuple{Bool, Int}
     @boundscheck checkbounds(bytes, pos)
     @inbounds val = bytes[pos] != 0x00
     (val, pos + 1)
+end
+
+# NTuple{N,T}: compile-time unrolled read of N consecutive values
+function read_tile_value(::Type{NTuple{N, T}}, bytes::Vector{UInt8}, pos::Int)::Tuple{NTuple{N, T}, Int} where {N, T}
+    @boundscheck checkbounds(bytes, pos:pos + N * sizeof(T) - 1)
+    GC.@preserve bytes begin
+        vals = ntuple(Val(N)) do i
+            @inbounds ltoh(_unaligned_load(T, pointer(bytes, pos + (i - 1) * sizeof(T))))
+        end
+    end
+    (vals, pos + N * sizeof(T))
 end
 
 """
@@ -194,32 +190,4 @@ function read_active_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, count::In
         vals[i], pos = read_tile_value(T, bytes, pos)
     end
     (vals, pos)
-end
-
-# =============================================================================
-# Vec3 specializations (VDB stores vectors as 3 consecutive floats)
-# =============================================================================
-
-"""
-    read_tile_value(::Type{NTuple{3, Float32}}, bytes, pos) -> Tuple{NTuple{3, Float32}, Int}
-
-Read a Vec3f (3 consecutive Float32 values).
-"""
-function read_tile_value(::Type{NTuple{3, Float32}}, bytes::Vector{UInt8}, pos::Int)::Tuple{NTuple{3, Float32}, Int}
-    x, pos = read_f32_le(bytes, pos)
-    y, pos = read_f32_le(bytes, pos)
-    z, pos = read_f32_le(bytes, pos)
-    ((x, y, z), pos)
-end
-
-"""
-    read_tile_value(::Type{NTuple{3, Float64}}, bytes, pos) -> Tuple{NTuple{3, Float64}, Int}
-
-Read a Vec3d (3 consecutive Float64 values).
-"""
-function read_tile_value(::Type{NTuple{3, Float64}}, bytes::Vector{UInt8}, pos::Int)::Tuple{NTuple{3, Float64}, Int}
-    x, pos = read_f64_le(bytes, pos)
-    y, pos = read_f64_le(bytes, pos)
-    z, pos = read_f64_le(bytes, pos)
-    ((x, y, z), pos)
 end

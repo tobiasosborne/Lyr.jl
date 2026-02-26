@@ -19,6 +19,20 @@ using Base: ltoh
 end
 
 """
+    read_le(::Type{T}, bytes::Vector{UInt8}, pos::Int) -> Tuple{T, Int}
+
+Read any primitive bitstype from bytes in little-endian format.
+Generic over all types supported by `_unaligned_load`.
+"""
+@inline function read_le(::Type{T}, bytes::Vector{UInt8}, pos::Int)::Tuple{T, Int} where T
+    @boundscheck checkbounds(bytes, pos:pos+sizeof(T)-1)
+    GC.@preserve bytes begin
+        @inbounds val = _unaligned_load(T, pointer(bytes, pos))
+    end
+    (ltoh(val), pos + sizeof(T))
+end
+
+"""
     read_u8(bytes::Vector{UInt8}, pos::Int) -> Tuple{UInt8, Int}
 
 Read a single unsigned byte at position `pos`.

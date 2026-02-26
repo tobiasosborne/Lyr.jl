@@ -126,53 +126,29 @@ function write_string_with_size!(io::IO, s::String)::Nothing
 end
 
 """
-    write_tile_value!(io::IO, val::T) -> Nothing
+    write_tile_value!(io::IO, val) -> Nothing
 
-Write a single tile/voxel value. Specializations for all supported VDB value types.
-Generic fallback errors to prevent silent corruption.
+Write a single tile/voxel value in little-endian format.
+Uses parametric dispatch: scalars via `htol`, NTuples via element iteration,
+Bool as single byte. Unsupported types yield `MethodError`.
 """
-function write_tile_value!(io::IO, val::T)::Nothing where T
-    throw(ArgumentError("write_tile_value!: no specialization for type $T — add one to BinaryWrite.jl"))
+function write_tile_value! end
+
+# Scalar primitives: little-endian write
+function write_tile_value!(io::IO, val::T)::Nothing where {T <: Union{Float32, Float64, Int32, Int64}}
+    write(io, htol(val))
+    nothing
 end
 
-function write_tile_value!(io::IO, val::Float32)::Nothing
-    write_f32_le!(io, val)
-end
-
-function write_tile_value!(io::IO, val::Float64)::Nothing
-    write_f64_le!(io, val)
-end
-
-function write_tile_value!(io::IO, val::Int32)::Nothing
-    write_i32_le!(io, val)
-end
-
-function write_tile_value!(io::IO, val::Int64)::Nothing
-    write_i64_le!(io, val)
-end
-
+# Bool: single byte
 function write_tile_value!(io::IO, val::Bool)::Nothing
     write_u8!(io, val ? UInt8(0x01) : UInt8(0x00))
 end
 
-"""
-    write_tile_value!(io::IO, val::NTuple{3, Float32}) -> Nothing
-
-Write a Vec3f (3 consecutive Float32 values).
-"""
-function write_tile_value!(io::IO, val::NTuple{3, Float32})::Nothing
-    write_f32_le!(io, val[1])
-    write_f32_le!(io, val[2])
-    write_f32_le!(io, val[3])
-end
-
-"""
-    write_tile_value!(io::IO, val::NTuple{3, Float64}) -> Nothing
-
-Write a Vec3d (3 consecutive Float64 values).
-"""
-function write_tile_value!(io::IO, val::NTuple{3, Float64})::Nothing
-    write_f64_le!(io, val[1])
-    write_f64_le!(io, val[2])
-    write_f64_le!(io, val[3])
+# NTuple{N,T}: write N consecutive values
+function write_tile_value!(io::IO, val::NTuple{N, T})::Nothing where {N, T}
+    for i in 1:N
+        write_tile_value!(io, val[i])
+    end
+    nothing
 end

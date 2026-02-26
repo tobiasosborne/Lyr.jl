@@ -176,7 +176,7 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
         end
 
         @testset "write_tile_value! unsupported type" begin
-            @test_throws ArgumentError to_bytes(io -> write_tile_value!(io, "not a number"))
+            @test_throws MethodError to_bytes(io -> write_tile_value!(io, "not a number"))
         end
 
         @testset "sequential write then read" begin
