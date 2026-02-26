@@ -20,22 +20,28 @@ function parse_grid_class(s::String)::GridClass
 end
 
 """
-    Grid{T}
+    Grid{T, Tr<:AbstractTransform}
 
 A complete VDB grid containing tree data, transform, and metadata.
+Parametric on both value type `T` and transform type `Tr` so the compiler
+can specialize sampling hot paths without dynamic dispatch.
 
 # Fields
 - `name::String` - Grid name
 - `grid_class::GridClass` - Grid classification
-- `transform::AbstractTransform` - Index to world coordinate transform
+- `transform::Tr` - Index to world coordinate transform
 - `tree::Tree{T}` - The VDB tree containing voxel data
 """
-struct Grid{T}
+struct Grid{T, Tr <: AbstractTransform}
     name::String
     grid_class::GridClass
-    transform::AbstractTransform
+    transform::Tr
     tree::Tree{T}
 end
+
+# Outer constructor: Grid{T}(...) infers Tr from the transform argument
+Grid{T}(name::String, grid_class::GridClass, transform::Tr, tree::Tree{T}) where {T, Tr <: AbstractTransform} =
+    Grid{T, Tr}(name, grid_class, transform, tree)
 
 function Base.show(io::IO, g::Grid{T}) where T
     lc = leaf_count(g.tree)
