@@ -450,13 +450,11 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
             push!(i2_nodes, node2)
             i2_index[objectid(node2)] = length(i2_nodes)
 
-            for (i, _) in enumerate(on_indices(node2.child_mask))
-                node1 = node2.table[i]::InternalNode1{T}
+            for node1 in node2.children
                 push!(i1_nodes, node1)
                 i1_index[objectid(node1)] = length(i1_nodes)
 
-                for (j, _) in enumerate(on_indices(node1.child_mask))
-                    leaf = node1.table[j]::LeafNode{T}
+                for leaf in node1.children
                     push!(leaf_nodes, leaf)
                     leaf_index[objectid(leaf)] = length(leaf_nodes)
                 end
@@ -578,17 +576,14 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
         p += 8
 
         # Child offsets → I1 byte positions
-        for (i, _) in enumerate(on_indices(node2.child_mask))
-            node1 = node2.table[i]::InternalNode1{T}
+        for node1 in node2.children
             idx = i1_index[objectid(node1)]
             _buf_store!(buf, p, UInt32(i1_offsets[idx]))
             p += 4
         end
 
         # Tile values
-        tile_offset = cc
-        for (i, _) in enumerate(on_indices(node2.value_mask))
-            tile = node2.table[tile_offset + i]::Tile{T}
+        for tile in node2.tiles
             _buf_store!(buf, p, tile.value)
             p += sizeof(T)
         end
@@ -609,8 +604,7 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
         p += 8
 
         # Child offsets → Leaf byte positions
-        for (i, _) in enumerate(on_indices(node1.child_mask))
-            leaf = node1.table[i]::LeafNode{T}
+        for leaf in node1.children
             idx = leaf_index[objectid(leaf)]
             leaf_off = leaf_section_pos + (idx - 1) * leaf_sz
             _buf_store!(buf, p, UInt32(leaf_off))
@@ -618,9 +612,7 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
         end
 
         # Tile values
-        tile_offset = cc
-        for (i, _) in enumerate(on_indices(node1.value_mask))
-            tile = node1.table[tile_offset + i]::Tile{T}
+        for tile in node1.tiles
             _buf_store!(buf, p, tile.value)
             p += sizeof(T)
         end

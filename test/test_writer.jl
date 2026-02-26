@@ -451,16 +451,14 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
             i1_child_words = ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 64)  # bit 0 on
             i1_child_mask = Internal1Mask(i1_child_words)
             i1_value_mask = Internal1Mask()  # no tiles
-            i1_table = Union{LeafNode{Float32}, Tile{Float32}}[leaf]
-            i1 = InternalNode1{Float32}(i1_origin, i1_child_mask, i1_value_mask, i1_table)
+            i1 = InternalNode1{Float32}(i1_origin, i1_child_mask, i1_value_mask, [leaf], Tile{Float32}[])
 
             # Build I2 node containing this I1
             i2_origin = coord(0, 0, 0)
             i2_child_words = ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 512)  # bit 0 on
             i2_child_mask = Internal2Mask(i2_child_words)
             i2_value_mask = Internal2Mask()  # no tiles
-            i2_table = Union{InternalNode1{Float32}, Tile{Float32}}[i1]
-            i2 = InternalNode2{Float32}(i2_origin, i2_child_mask, i2_value_mask, i2_table)
+            i2 = InternalNode2{Float32}(i2_origin, i2_child_mask, i2_value_mask, [i1], Tile{Float32}[])
 
             # Build root
             table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}()
@@ -508,16 +506,14 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
             i1_child_words = ntuple(i -> i == 1 ? UInt64(0x03) : UInt64(0), 64)  # bits 0,1 on
             i1_child_mask = Internal1Mask(i1_child_words)
             i1_value_mask = Internal1Mask()
-            i1_table = Union{LeafNode{Float32}, Tile{Float32}}[leaf1, leaf2]
-            i1 = InternalNode1{Float32}(i1_origin, i1_child_mask, i1_value_mask, i1_table)
+            i1 = InternalNode1{Float32}(i1_origin, i1_child_mask, i1_value_mask, [leaf1, leaf2], Tile{Float32}[])
 
             # I2
             i2_origin = coord(0, 0, 0)
             i2_child_words = ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 512)
             i2_child_mask = Internal2Mask(i2_child_words)
             i2_value_mask = Internal2Mask()
-            i2_table = Union{InternalNode1{Float32}, Tile{Float32}}[i1]
-            i2 = InternalNode2{Float32}(i2_origin, i2_child_mask, i2_value_mask, i2_table)
+            i2 = InternalNode2{Float32}(i2_origin, i2_child_mask, i2_value_mask, [i1], Tile{Float32}[])
 
             table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}()
             table[i2_origin] = i2
@@ -549,11 +545,11 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
 
             i1_origin = coord(0, 0, 0)
             i1_child_words = ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 64)
-            i1 = InternalNode1{Float64}(i1_origin, Internal1Mask(i1_child_words), Internal1Mask(), [leaf])
+            i1 = InternalNode1{Float64}(i1_origin, Internal1Mask(i1_child_words), Internal1Mask(), [leaf], Tile{Float64}[])
 
             i2_origin = coord(0, 0, 0)
             i2_child_words = ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 512)
-            i2 = InternalNode2{Float64}(i2_origin, Internal2Mask(i2_child_words), Internal2Mask(), [i1])
+            i2 = InternalNode2{Float64}(i2_origin, Internal2Mask(i2_child_words), Internal2Mask(), [i1], Tile{Float64}[])
 
             table = Dict{Coord, Union{InternalNode2{Float64}, Tile{Float64}}}()
             table[i2_origin] = i2
@@ -583,13 +579,13 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
             i1 = InternalNode1{T}(i1_origin,
                 Internal1Mask(ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 64)),
                 Internal1Mask(),
-                Union{LeafNode{T}, Tile{T}}[leaf])
+                [leaf], Tile{T}[])
 
             i2_origin = coord(0, 0, 0)
             i2 = InternalNode2{T}(i2_origin,
                 Internal2Mask(ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 512)),
                 Internal2Mask(),
-                Union{InternalNode1{T}, Tile{T}}[i1])
+                [i1], Tile{T}[])
 
             table = Dict{Coord, Union{InternalNode2{T}, Tile{T}}}()
             table[i2_origin] = i2
@@ -613,8 +609,8 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
             i1_child_mask = Internal1Mask()  # no children
             i1_value_words = ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 64)  # bit 0 = tile
             i1_value_mask = Internal1Mask(i1_value_words)
-            i1_table = Union{LeafNode{Float32}, Tile{Float32}}[Tile{Float32}(Float32(99.0), true)]
-            i1 = InternalNode1{Float32}(i1_origin, i1_child_mask, i1_value_mask, i1_table)
+            i1 = InternalNode1{Float32}(i1_origin, i1_child_mask, i1_value_mask,
+                LeafNode{Float32}[], [Tile{Float32}(Float32(99.0), true)])
 
             # I2
             i2_origin = coord(0, 0, 0)
@@ -622,7 +618,7 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
             i2 = InternalNode2{Float32}(i2_origin,
                 Internal2Mask(i2_child_words),
                 Internal2Mask(),
-                Union{InternalNode1{Float32}, Tile{Float32}}[i1])
+                [i1], Tile{Float32}[])
 
             table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}()
             table[i2_origin] = i2
@@ -653,12 +649,12 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
         i1 = InternalNode1{Float32}(coord(0,0,0),
             Internal1Mask(ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 64)),
             Internal1Mask(),
-            Union{LeafNode{Float32}, Tile{Float32}}[leaf])
+            [leaf], Tile{Float32}[])
 
         i2 = InternalNode2{Float32}(coord(0,0,0),
             Internal2Mask(ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 512)),
             Internal2Mask(),
-            Union{InternalNode1{Float32}, Tile{Float32}}[i1])
+            [i1], Tile{Float32}[])
 
         table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}()
         table[coord(0,0,0)] = i2
@@ -895,11 +891,11 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
             i1 = InternalNode1{Float32}(coord(0,0,0),
                 Internal1Mask(ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 64)),
                 Internal1Mask(),
-                Union{LeafNode{Float32}, Tile{Float32}}[leaf])
+                [leaf], Tile{Float32}[])
             i2 = InternalNode2{Float32}(coord(0,0,0),
                 Internal2Mask(ntuple(i -> i == 1 ? UInt64(0x01) : UInt64(0), 512)),
                 Internal2Mask(),
-                Union{InternalNode1{Float32}, Tile{Float32}}[i1])
+                [i1], Tile{Float32}[])
 
             table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}()
             table[coord(0,0,0)] = i2

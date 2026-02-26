@@ -445,20 +445,14 @@ function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_le
     # Write I2 embedded values (ReadMaskValues format)
     # Build dense values vector: children get background, tiles get their value
     i2_values = fill(background, 32768)
-    child_count = count_on(i2.child_mask)
-    tile_idx = 0
-    for bit_idx in on_indices(i2.value_mask)
-        tile_idx += 1
-        i2_values[bit_idx + 1] = i2.table[child_count + tile_idx].value
+    for (i, bit_idx) in enumerate(on_indices(i2.value_mask))
+        i2_values[bit_idx + 1] = i2.tiles[i].value
     end
     write_mask_values!(io, T, i2_values, i2.value_mask, background)
 
     # Write I1 children in child_mask order
-    child_i = 0
-    for _ in on_indices(i2.child_mask)
-        child_i += 1
-        i1 = i2.table[child_i]::InternalNode1{T}
-        _write_i1_topology!(io, i1, background, all_leaves)
+    for child in i2.children
+        _write_i1_topology!(io, child, background, all_leaves)
     end
 
     nothing
@@ -476,19 +470,13 @@ function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_le
 
     # Write I1 embedded values (ReadMaskValues format)
     i1_values = fill(background, 4096)
-    child_count = count_on(i1.child_mask)
-    tile_idx = 0
-    for bit_idx in on_indices(i1.value_mask)
-        tile_idx += 1
-        i1_values[bit_idx + 1] = i1.table[child_count + tile_idx].value
+    for (i, bit_idx) in enumerate(on_indices(i1.value_mask))
+        i1_values[bit_idx + 1] = i1.tiles[i].value
     end
     write_mask_values!(io, T, i1_values, i1.value_mask, background)
 
     # Write leaf value_masks and collect leaves for Phase 2
-    child_i = 0
-    for _ in on_indices(i1.child_mask)
-        child_i += 1
-        leaf = i1.table[child_i]::LeafNode{T}
+    for leaf in i1.children
         write_mask!(io, leaf.value_mask)
         push!(all_leaves, leaf)
     end

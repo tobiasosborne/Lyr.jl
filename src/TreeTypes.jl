@@ -54,38 +54,44 @@ end
     InternalNode1{T} <: AbstractNode{T}
 
 Internal node at level 1 (above leaves), containing 16x16x16 = 4096 children.
-Each child is either a LeafNode or a Tile.
+Children (LeafNodes) and active tiles are stored in separate type-stable vectors,
+indexed via popcount on the respective bitmask.
 
 # Fields
 - `origin::Coord` - Origin coordinate of this node (aligned to 128)
 - `child_mask::Internal1Mask` - Bitmask indicating which entries are child nodes
 - `value_mask::Internal1Mask` - Bitmask indicating which entries are active tiles
-- `table::Vector{Union{LeafNode{T}, Tile{T}}}` - Child nodes and tiles (sparse)
+- `children::Vector{LeafNode{T}}` - Child leaf nodes (sparse, indexed by child_mask popcount)
+- `tiles::Vector{Tile{T}}` - Active tiles (sparse, indexed by value_mask popcount)
 """
 struct InternalNode1{T} <: AbstractNode{T}
     origin::Coord
     child_mask::Internal1Mask
     value_mask::Internal1Mask
-    table::Vector{Union{LeafNode{T}, Tile{T}}}
+    children::Vector{LeafNode{T}}
+    tiles::Vector{Tile{T}}
 end
 
 """
     InternalNode2{T} <: AbstractNode{T}
 
 Internal node at level 2 (above InternalNode1), containing 32x32x32 = 32768 children.
-Each child is either an InternalNode1 or a Tile.
+Children (InternalNode1s) and active tiles are stored in separate type-stable vectors,
+indexed via popcount on the respective bitmask.
 
 # Fields
 - `origin::Coord` - Origin coordinate of this node (aligned to 4096)
 - `child_mask::Internal2Mask` - Bitmask indicating which entries are child nodes
 - `value_mask::Internal2Mask` - Bitmask indicating which entries are active tiles
-- `table::Vector{Union{InternalNode1{T}, Tile{T}}}` - Child nodes and tiles (sparse)
+- `children::Vector{InternalNode1{T}}` - Child I1 nodes (sparse, indexed by child_mask popcount)
+- `tiles::Vector{Tile{T}}` - Active tiles (sparse, indexed by value_mask popcount)
 """
 struct InternalNode2{T} <: AbstractNode{T}
     origin::Coord
     child_mask::Internal2Mask
     value_mask::Internal2Mask
-    table::Vector{Union{InternalNode1{T}, Tile{T}}}
+    children::Vector{InternalNode1{T}}
+    tiles::Vector{Tile{T}}
 end
 
 """

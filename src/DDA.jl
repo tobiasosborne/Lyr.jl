@@ -228,9 +228,8 @@ function _dda_internal2!(results::Vector{LeafIntersection{T}}, ray::Ray,
         child_idx = node_dda_child_index(ndda)
 
         if is_on(node.child_mask, child_idx)
-            table_idx = count_on_before(node.child_mask, child_idx) + 1
-            child = node.table[table_idx]::InternalNode1{T}
-            _dda_internal1!(results, ray, child)
+            idx = count_on_before(node.child_mask, child_idx) + 1
+            _dda_internal1!(results, ray, node.children[idx])
         end
 
         dda_step!(ndda.state)
@@ -257,9 +256,8 @@ function _dda_internal1!(results::Vector{LeafIntersection{T}}, ray::Ray,
         child_idx = node_dda_child_index(ndda)
 
         if is_on(node.child_mask, child_idx)
-            table_idx = count_on_before(node.child_mask, child_idx) + 1
-            leaf = node.table[table_idx]::LeafNode{T}
-            _dda_leaf!(results, ray, leaf)
+            idx = count_on_before(node.child_mask, child_idx) + 1
+            _dda_leaf!(results, ray, node.children[idx])
         end
 
         dda_step!(ndda.state)
@@ -370,8 +368,8 @@ function _vri_advance(ray::Ray, state::VRIState{T})::Union{Tuple{LeafIntersectio
             child_idx = node_dda_child_index(ndda)
 
             if is_on(state.i1_node.child_mask, child_idx)
-                table_idx = count_on_before(state.i1_node.child_mask, child_idx) + 1
-                leaf = state.i1_node.table[table_idx]::LeafNode{T}
+                idx = count_on_before(state.i1_node.child_mask, child_idx) + 1
+                leaf = state.i1_node.children[idx]
 
                 o = leaf.origin
                 s = Int32(8)
@@ -397,8 +395,8 @@ function _vri_advance(ray::Ray, state::VRIState{T})::Union{Tuple{LeafIntersectio
             child_idx = node_dda_child_index(ndda)
 
             if is_on(state.i2_node.child_mask, child_idx)
-                table_idx = count_on_before(state.i2_node.child_mask, child_idx) + 1
-                i1_node = state.i2_node.table[table_idx]::InternalNode1{T}
+                idx = count_on_before(state.i2_node.child_mask, child_idx) + 1
+                i1_node = state.i2_node.children[idx]
 
                 o = i1_node.origin
                 aabb = AABB(

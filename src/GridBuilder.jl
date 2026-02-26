@@ -75,13 +75,13 @@ function build_grid(data::Dict{Coord, T}, background::T;
 
     i1_nodes = Dict{Coord, InternalNode1{T}}()
     for (origin, entries) in i1_groups
-        # Sort by child index so table order matches on_indices order
+        # Sort by child index so children order matches on_indices order
         sort!(entries; by=first)
         child_indices = [e.first for e in entries]
         cmask = _build_mask(Internal1Mask, child_indices)
         vmask = Internal1Mask()  # no tile values
-        table = Union{LeafNode{T}, Tile{T}}[e.second for e in entries]
-        i1_nodes[origin] = InternalNode1{T}(origin, cmask, vmask, table)
+        children = LeafNode{T}[e.second for e in entries]
+        i1_nodes[origin] = InternalNode1{T}(origin, cmask, vmask, children, Tile{T}[])
     end
 
     # Step 3: Group I1s by Internal2 origin, build InternalNode2s
@@ -98,8 +98,8 @@ function build_grid(data::Dict{Coord, T}, background::T;
         child_indices = [e.first for e in entries]
         cmask = _build_mask(Internal2Mask, child_indices)
         vmask = Internal2Mask()  # no tile values
-        table = Union{InternalNode1{T}, Tile{T}}[e.second for e in entries]
-        root_table[origin] = InternalNode2{T}(origin, cmask, vmask, table)
+        children = InternalNode1{T}[e.second for e in entries]
+        root_table[origin] = InternalNode2{T}(origin, cmask, vmask, children, Tile{T}[])
     end
 
     # Step 4: Wrap in RootNode and Grid

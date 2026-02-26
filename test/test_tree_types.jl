@@ -23,9 +23,8 @@
         origin = coord(0, 0, 0)
         child_mask = Internal1Mask()
         value_mask = Internal1Mask()
-        table = Union{LeafNode{Float32}, Tile{Float32}}[]
 
-        node = InternalNode1{Float32}(origin, child_mask, value_mask, table)
+        node = InternalNode1{Float32}(origin, child_mask, value_mask, LeafNode{Float32}[], Tile{Float32}[])
         @test node.origin == origin
         @test is_empty(node.child_mask)
     end
@@ -34,9 +33,8 @@
         origin = coord(0, 0, 0)
         child_mask = Internal2Mask()
         value_mask = Internal2Mask()
-        table = Union{InternalNode1{Float32}, Tile{Float32}}[]
 
-        node = InternalNode2{Float32}(origin, child_mask, value_mask, table)
+        node = InternalNode2{Float32}(origin, child_mask, value_mask, InternalNode1{Float32}[], Tile{Float32}[])
         @test node.origin == origin
     end
 

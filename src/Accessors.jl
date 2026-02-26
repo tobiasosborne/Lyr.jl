@@ -87,15 +87,14 @@ function _get_from_i2(acc::ValueAccessor{T}, node2::InternalNode2{T}, c::Coord):
 
     if is_off(node2.child_mask, i1_idx)
         if is_on(node2.value_mask, i1_idx)
-            tile_offset = count_on(node2.child_mask)
             tile_idx = count_on_before(node2.value_mask, i1_idx) + 1
-            return node2.table[tile_offset + tile_idx].value
+            return node2.tiles[tile_idx].value
         end
         return acc.tree.background
     end
 
     child_idx = count_on_before(node2.child_mask, i1_idx) + 1
-    node1 = node2.table[child_idx]::InternalNode1{T}
+    node1 = node2.children[child_idx]
     acc.i1 = node1
     acc.i1_origin = internal1_origin(c)
     return _get_from_i1(acc, node1, c)
@@ -106,15 +105,14 @@ function _get_from_i1(acc::ValueAccessor{T}, node1::InternalNode1{T}, c::Coord):
 
     if is_off(node1.child_mask, leaf_idx)
         if is_on(node1.value_mask, leaf_idx)
-            tile_offset = count_on(node1.child_mask)
             tile_idx = count_on_before(node1.value_mask, leaf_idx) + 1
-            return node1.table[tile_offset + tile_idx].value
+            return node1.tiles[tile_idx].value
         end
         return acc.tree.background
     end
 
     child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
-    leaf = node1.table[child_idx]::LeafNode{T}
+    leaf = node1.children[child_idx]
     acc.leaf = leaf
     acc.leaf_origin = leaf_origin(c)
     offset = leaf_offset(c)
@@ -145,36 +143,29 @@ function get_value(tree::Tree{T}, c::Coord)::T where T
     i1_idx = internal2_child_index(c)
 
     if is_off(node2.child_mask, i1_idx)
-        # Check if it's a tile
         if is_on(node2.value_mask, i1_idx)
-            # O(1) table lookup using popcount
-            tile_offset = count_on(node2.child_mask)
             tile_idx = count_on_before(node2.value_mask, i1_idx) + 1
-            return node2.table[tile_offset + tile_idx].value
+            return node2.tiles[tile_idx].value
         end
         return tree.background
     end
 
-    # O(1) child lookup using popcount
     child_idx = count_on_before(node2.child_mask, i1_idx) + 1
-    node1 = node2.table[child_idx]::InternalNode1{T}
+    node1 = node2.children[child_idx]
 
     # Navigate to Leaf
     leaf_idx = internal1_child_index(c)
 
     if is_off(node1.child_mask, leaf_idx)
         if is_on(node1.value_mask, leaf_idx)
-            # O(1) table lookup using popcount
-            tile_offset = count_on(node1.child_mask)
             tile_idx = count_on_before(node1.value_mask, leaf_idx) + 1
-            return node1.table[tile_offset + tile_idx].value
+            return node1.tiles[tile_idx].value
         end
         return tree.background
     end
 
-    # O(1) child lookup using popcount
     child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
-    leaf = node1.table[child_idx]::LeafNode{T}
+    leaf = node1.children[child_idx]
 
     # Get value from leaf
     offset = leaf_offset(c)
@@ -205,18 +196,16 @@ function is_active(tree::Tree{T}, c::Coord)::Bool where T
         return is_on(node2.value_mask, i1_idx)
     end
 
-    # O(1) child lookup using popcount
     child_idx = count_on_before(node2.child_mask, i1_idx) + 1
-    node1 = node2.table[child_idx]::InternalNode1{T}
+    node1 = node2.children[child_idx]
     leaf_idx = internal1_child_index(c)
 
     if is_off(node1.child_mask, leaf_idx)
         return is_on(node1.value_mask, leaf_idx)
     end
 
-    # O(1) child lookup using popcount
     child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
-    leaf = node1.table[child_idx]::LeafNode{T}
+    leaf = node1.children[child_idx]
     offset = leaf_offset(c)
 
     is_on(leaf.value_mask, offset)
@@ -262,9 +251,7 @@ Count active voxels in an internal node's tiles.
 """
 function _count_active_tiles(node, tile_voxels::Int)::Int
     count = 0
-    tile_offset = count_on(node.child_mask)
-    for (i, _) in enumerate(on_indices(node.value_mask))
-        tile = node.table[tile_offset + i]
+    for tile in node.tiles
         if tile.active
             count += tile_voxels
         end
@@ -274,16 +261,16 @@ end
 
 function _count_active_internal2(node::InternalNode2{T})::Int where T
     count = _count_active_tiles(node, INTERNAL2_TILE_VOXELS)
-    for (i, _) in enumerate(on_indices(node.child_mask))
-        count += _count_active_internal1(node.table[i]::InternalNode1{T})
+    for child in node.children
+        count += _count_active_internal1(child)
     end
     count
 end
 
 function _count_active_internal1(node::InternalNode1{T})::Int where T
     count = _count_active_tiles(node, INTERNAL1_TILE_VOXELS)
-    for (i, _) in enumerate(on_indices(node.child_mask))
-        count += count_on((node.table[i]::LeafNode{T}).value_mask)
+    for child in node.children
+        count += count_on(child.value_mask)
     end
     count
 end
@@ -298,8 +285,7 @@ function leaf_count(tree::Tree{T})::Int where T
 
     for (_, entry) in tree.table
         if entry isa InternalNode2{T}
-            for (i, _) in enumerate(on_indices(entry.child_mask))
-                child = entry.table[i]::InternalNode1{T}
+            for child in entry.children
                 count += count_on(child.child_mask)
             end
         end
@@ -389,14 +375,14 @@ function _advance_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, 
         end
 
         node2 = entry::InternalNode2{T}
-        n_i2_children = count_on(node2.child_mask)
+        n_i2_children = length(node2.children)
 
         while i2_idx <= n_i2_children
-            node1 = node2.table[i2_idx]::InternalNode1{T}
-            n_i1_children = count_on(node1.child_mask)
+            node1 = node2.children[i2_idx]
+            n_i1_children = length(node1.children)
 
             while i1_idx <= n_i1_children
-                leaf = node1.table[i1_idx]::LeafNode{T}
+                leaf = node1.children[i1_idx]
 
                 # Iterate voxels in this leaf
                 leaf_iter = on_indices(leaf.value_mask)
@@ -481,14 +467,14 @@ function _advance_leaves(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, 
         end
 
         node2 = entry::InternalNode2{T}
-        n_i2_children = count_on(node2.child_mask)
+        n_i2_children = length(node2.children)
 
         while i2_idx <= n_i2_children
-            node1 = node2.table[i2_idx]::InternalNode1{T}
-            n_i1_children = count_on(node1.child_mask)
+            node1 = node2.children[i2_idx]
+            n_i1_children = length(node1.children)
 
             if i1_idx <= n_i1_children
-                leaf = node1.table[i1_idx]::LeafNode{T}
+                leaf = node1.children[i1_idx]
                 return (leaf, (root_pairs, root_idx, i2_idx, i1_idx + 1))
             end
 

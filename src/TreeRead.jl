@@ -183,37 +183,15 @@ function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData{T}, bytes::Ve
         end
 
         # Construct I1 node — extract tile values from stored node_values
-        i1_child_count = count_on(i1_topo.child_mask)
-        i1_tile_count = count_on(i1_topo.value_mask)
-        i1_table = Vector{Union{LeafNode{T}, Tile{T}}}(undef, i1_child_count + i1_tile_count)
+        i1_tiles = Tile{T}[Tile{T}(i1_topo.node_values[bit_idx + 1], true) for bit_idx in on_indices(i1_topo.value_mask)]
 
-        for (i, leaf) in enumerate(leaf_nodes)
-            i1_table[i] = leaf
-        end
-        tile_idx = 0
-        for bit_idx in on_indices(i1_topo.value_mask)
-            tile_idx += 1
-            i1_table[i1_child_count + tile_idx] = Tile{T}(i1_topo.node_values[bit_idx + 1], true)
-        end
-
-        push!(i1_nodes, InternalNode1{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, i1_table))
+        push!(i1_nodes, InternalNode1{T}(i1_topo.origin, i1_topo.child_mask, i1_topo.value_mask, leaf_nodes, i1_tiles))
     end
 
     # Construct I2 node — extract tile values from stored node_values
-    i2_child_count = count_on(i2_topo.child_mask)
-    i2_tile_count = count_on(i2_topo.value_mask)
-    i2_table = Vector{Union{InternalNode1{T}, Tile{T}}}(undef, i2_child_count + i2_tile_count)
+    i2_tiles = Tile{T}[Tile{T}(i2_topo.node_values[bit_idx + 1], true) for bit_idx in on_indices(i2_topo.value_mask)]
 
-    for (i, child) in enumerate(i1_nodes)
-        i2_table[i] = child
-    end
-    tile_idx = 0
-    for bit_idx in on_indices(i2_topo.value_mask)
-        tile_idx += 1
-        i2_table[i2_child_count + tile_idx] = Tile{T}(i2_topo.node_values[bit_idx + 1], true)
-    end
-
-    node = InternalNode2{T}(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, i2_table)
+    node = InternalNode2{T}(i2_topo.origin, i2_topo.child_mask, i2_topo.value_mask, i1_nodes, i2_tiles)
     (node, pos)
 end
 
@@ -369,33 +347,15 @@ function materialize_i2_values_v220(::Type{T}, topo::I2TopoDataV220{T}, bytes::V
             push!(leaf_nodes, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 
-        i1_child_count = count_on(i1_child_mask)
-        i1_tile_count = count_on(i1_value_mask)
-        i1_table = Vector{Union{LeafNode{T}, Tile{T}}}(undef, i1_child_count + i1_tile_count)
+        i1_tiles = Tile{T}[Tile{T}(val, true) for val in i1_active_vals]
 
-        for (i, leaf) in enumerate(leaf_nodes)
-            i1_table[i] = leaf
-        end
-        for (i, val) in enumerate(i1_active_vals)
-            i1_table[i1_child_count + i] = Tile{T}(val, true)
-        end
-
-        push!(i1_nodes, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, i1_table))
+        push!(i1_nodes, InternalNode1{T}(i1_origin, i1_child_mask, i1_value_mask, leaf_nodes, i1_tiles))
     end
 
     # Construct Internal2 Node
-    i2_child_count = count_on(topo.child_mask)
-    i2_tile_count = count_on(topo.value_mask)
-    i2_table = Vector{Union{InternalNode1{T}, Tile{T}}}(undef, i2_child_count + i2_tile_count)
+    i2_tiles = Tile{T}[Tile{T}(val, true) for val in topo.active_vals]
 
-    for (i, child) in enumerate(i1_nodes)
-        i2_table[i] = child
-    end
-    for (i, val) in enumerate(topo.active_vals)
-        i2_table[i2_child_count + i] = Tile{T}(val, true)
-    end
-
-    node = InternalNode2{T}(topo.origin, topo.child_mask, topo.value_mask, i2_table)
+    node = InternalNode2{T}(topo.origin, topo.child_mask, topo.value_mask, i1_nodes, i2_tiles)
     (node, pos)
 end
 

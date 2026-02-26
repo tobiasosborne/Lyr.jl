@@ -151,12 +151,12 @@
         @test count_on(i2_node.child_mask) == 1
 
         # Get I1 node
-        i1_node = i2_node.table[1]
+        i1_node = i2_node.children[1]
         @test i1_node isa InternalNode1{Float32}
         @test count_on(i1_node.child_mask) == 1
 
         # Get leaf node
-        leaf = i1_node.table[1]
+        leaf = i1_node.children[1]
         @test leaf isa LeafNode{Float32}
         @test leaf.values[1] == 42.0f0  # bit 0 active
         @test leaf.values[2] == 43.0f0  # bit 1 active
@@ -191,7 +191,7 @@
 
         tree, _ = Lyr.read_tree(Float32, buf, 1, codec, true, background, GRID_FOG_VOLUME, UInt32(224))
         i2 = tree.table[coord(Int32(0), Int32(0), Int32(0))]
-        leaf = i2.table[1].table[1]
+        leaf = i2.children[1].children[1]
         @test leaf.values[1] == 7.0f0
     end
 

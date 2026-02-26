@@ -10,14 +10,12 @@
         # Create Internal1 containing the leaf
         i1_child_mask = Internal1Mask((UInt64(1), ntuple(_ -> UInt64(0), 63)...))
         i1_value_mask = Internal1Mask()
-        i1_table = Union{LeafNode{Float32}, Tile{Float32}}[leaf]
-        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, i1_table)
+        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, [leaf], Tile{Float32}[])
 
         # Create Internal2 containing Internal1
         i2_child_mask = Internal2Mask((UInt64(1), ntuple(_ -> UInt64(0), 511)...))
         i2_value_mask = Internal2Mask()
-        i2_table = Union{InternalNode1{Float32}, Tile{Float32}}[internal1]
-        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, i2_table)
+        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, [internal1], Tile{Float32}[])
 
         # Create root
         background = -1.0f0

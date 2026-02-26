@@ -21,11 +21,11 @@
         # Build tree structure
         i1_child_mask = Internal1Mask((UInt64(1), ntuple(_ -> UInt64(0), 63)...))
         i1_value_mask = Internal1Mask()
-        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, [leaf])
+        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, [leaf], Tile{Float32}[])
 
         i2_child_mask = Internal2Mask((UInt64(1), ntuple(_ -> UInt64(0), 511)...))
         i2_value_mask = Internal2Mask()
-        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, [internal1])
+        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, [internal1], Tile{Float32}[])
 
         table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}(coord(0, 0, 0) => internal2)
         RootNode{Float32}(0.0f0, table)
@@ -91,11 +91,11 @@
 
         i1_child_mask = Internal1Mask((UInt64(1), ntuple(_ -> UInt64(0), 63)...))
         i1_value_mask = Internal1Mask()
-        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, [leaf])
+        internal1 = InternalNode1{Float32}(coord(0, 0, 0), i1_child_mask, i1_value_mask, [leaf], Tile{Float32}[])
 
         i2_child_mask = Internal2Mask((UInt64(1), ntuple(_ -> UInt64(0), 511)...))
         i2_value_mask = Internal2Mask()
-        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, [internal1])
+        internal2 = InternalNode2{Float32}(coord(0, 0, 0), i2_child_mask, i2_value_mask, [internal1], Tile{Float32}[])
 
         table = Dict{Coord, Union{InternalNode2{Float32}, Tile{Float32}}}(coord(0, 0, 0) => internal2)
         tree = RootNode{Float32}(3.0f0, table)  # background = 3.0
