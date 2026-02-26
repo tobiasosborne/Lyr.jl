@@ -79,31 +79,6 @@ function sphere_trace(ray::Ray, grid::Grid{T}, max_steps::Int;
     (Tuple(hit.position), Tuple(hit.normal))
 end
 
-"""
-    _intersect_float_bbox(ray::Ray, bmin::NTuple{3,Float64}, bmax::NTuple{3,Float64}) -> Tuple{Float64, Float64}
-
-Ray-box intersection for float bounding box. Returns (t_enter, t_exit).
-If no intersection, t_enter > t_exit.
-"""
-function _intersect_float_bbox(ray::Ray, bmin::NTuple{3,Float64}, bmax::NTuple{3,Float64})
-    t1 = (bmin[1] - ray.origin[1]) * ray.inv_dir[1]
-    t2 = (bmax[1] - ray.origin[1]) * ray.inv_dir[1]
-    tmin = min(t1, t2)
-    tmax = max(t1, t2)
-
-    t1 = (bmin[2] - ray.origin[2]) * ray.inv_dir[2]
-    t2 = (bmax[2] - ray.origin[2]) * ray.inv_dir[2]
-    tmin = max(tmin, min(t1, t2))
-    tmax = min(tmax, max(t1, t2))
-
-    t1 = (bmin[3] - ray.origin[3]) * ray.inv_dir[3]
-    t2 = (bmax[3] - ray.origin[3]) * ray.inv_dir[3]
-    tmin = max(tmin, min(t1, t2))
-    tmax = min(tmax, max(t1, t2))
-
-    (tmin, tmax)
-end
-
 
 """
     _safe_sample(grid::Grid{T}, point::NTuple{3,Float64}, fallback::Float64) -> Float64

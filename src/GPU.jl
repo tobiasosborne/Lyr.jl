@@ -832,14 +832,15 @@ function gpu_volume_march_cpu!(output::Matrix{NTuple{3, Float32}},
             v = 1.0 - (Float64(y) - 0.5) / Float64(height)
             ray = camera_ray(camera, u, v, aspect)
 
-            t_enter, t_exit = _ray_box_intersect(ray, bmin, bmax)
+            hit = intersect_bbox(ray, bmin, bmax)
 
             acc_r = 0.0
             acc_g = 0.0
             acc_b = 0.0
             transmittance = 1.0
 
-            if t_enter < t_exit
+            if hit !== nothing
+                t_enter, t_exit = hit
                 t = t_enter
                 while t < t_exit && transmittance > 1e-4
                     pos = ray.origin + t * ray.direction

@@ -103,6 +103,13 @@ Convenience overload that converts integer `BBox` to `AABB`.
 intersect_bbox(ray::Ray, bbox::BBox) = intersect_bbox(ray, AABB(bbox))
 
 """
+    intersect_bbox(ray::Ray, bmin::SVec3d, bmax::SVec3d) -> Union{Tuple{Float64, Float64}, Nothing}
+
+Convenience overload that constructs an `AABB` from min/max corners.
+"""
+intersect_bbox(ray::Ray, bmin::SVec3d, bmax::SVec3d) = intersect_bbox(ray, AABB(bmin, bmax))
+
+"""
     LeafIntersection{T}
 
 Result of a ray-leaf intersection.

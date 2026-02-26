@@ -112,29 +112,6 @@ function _volume_bounds(nanogrid::NanoGrid)
     (bmin, bmax)
 end
 
-"""
-    _ray_box_intersect(ray, bmin, bmax) -> Tuple{Float64, Float64}
-
-Ray-AABB intersection. Returns (t_enter, t_exit). If no hit, t_enter > t_exit.
-"""
-function _ray_box_intersect(ray::Ray, bmin::SVec3d, bmax::SVec3d)
-    t1 = (bmin[1] - ray.origin[1]) * ray.inv_dir[1]
-    t2 = (bmax[1] - ray.origin[1]) * ray.inv_dir[1]
-    tmin = min(t1, t2)
-    tmax = max(t1, t2)
-
-    t1 = (bmin[2] - ray.origin[2]) * ray.inv_dir[2]
-    t2 = (bmax[2] - ray.origin[2]) * ray.inv_dir[2]
-    tmin = max(tmin, min(t1, t2))
-    tmax = min(tmax, max(t1, t2))
-
-    t1 = (bmin[3] - ray.origin[3]) * ray.inv_dir[3]
-    t2 = (bmax[3] - ray.origin[3]) * ray.inv_dir[3]
-    tmin = max(tmin, min(t1, t2))
-    tmax = min(tmax, max(t1, t2))
-
-    (max(tmin, 0.0), tmax)
-end
 
 # ============================================================================
 # Emission-absorption preview renderer (V7)
@@ -191,8 +168,9 @@ function _march_emission_absorption(ray::Ray, scene::Scene,
             "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
 
         bmin, bmax = _volume_bounds(nanogrid)
-        t_enter, t_exit = _ray_box_intersect(ray, bmin, bmax)
-        t_enter >= t_exit && continue
+        hit = intersect_bbox(ray, bmin, bmax)
+        hit === nothing && continue
+        t_enter, t_exit = hit
 
         tf = vol.material.transfer_function
         sigma_scale = vol.material.sigma_scale
@@ -313,8 +291,9 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
             "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
 
         bmin, bmax = _volume_bounds(nanogrid)
-        t_enter, t_exit = _ray_box_intersect(ray, bmin, bmax)
-        t_enter >= t_exit && continue
+        hit = intersect_bbox(ray, bmin, bmax)
+        hit === nothing && continue
+        t_enter, t_exit = hit
 
         tf = vol.material.transfer_function
         sigma_scale = vol.material.sigma_scale
@@ -350,10 +329,11 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
 
             # Shadow ray transmittance via ratio tracking
             shadow_ray = Ray(hit_pos + 0.01 * light_dir, light_dir)
-            shadow_t_enter, shadow_t_exit = _ray_box_intersect(shadow_ray, bmin, bmax)
-            shadow_t_exit = min(shadow_t_exit, light_dist)
+            shadow_hit = intersect_bbox(shadow_ray, bmin, bmax)
 
-            transmittance = if shadow_t_enter < shadow_t_exit
+            transmittance = if shadow_hit !== nothing
+                shadow_t_enter, shadow_t_exit = shadow_hit
+                shadow_t_exit = min(shadow_t_exit, light_dist)
                 ratio_tracking(shadow_ray, nanogrid, shadow_t_enter, shadow_t_exit,
                               sigma_maj, rng)
             else
