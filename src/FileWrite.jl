@@ -108,21 +108,15 @@ function write_metadata!(io::IO, metadata::Dict{String,Any})::Nothing
         elseif val isa NTuple{3, Int32}
             write_string_with_size!(io, "vec3i")
             write_u32_le!(io, UInt32(12))
-            write_i32_le!(io, val[1])
-            write_i32_le!(io, val[2])
-            write_i32_le!(io, val[3])
+            write_tile_value!(io, val)
         elseif val isa NTuple{3, Float32}
             write_string_with_size!(io, "vec3s")
             write_u32_le!(io, UInt32(12))
-            write_f32_le!(io, val[1])
-            write_f32_le!(io, val[2])
-            write_f32_le!(io, val[3])
+            write_tile_value!(io, val)
         elseif val isa NTuple{3, Float64}
             write_string_with_size!(io, "vec3d")
             write_u32_le!(io, UInt32(24))
-            write_f64_le!(io, val[1])
-            write_f64_le!(io, val[2])
-            write_f64_le!(io, val[3])
+            write_tile_value!(io, val)
         else
             # Skip unknown types — they were stored as `nothing` during read
         end
@@ -151,127 +145,56 @@ end
 # Transform writing
 # =============================================================================
 
-"""
-    write_transform!(io::IO, transform::AbstractTransform) -> Nothing
+"""Write 3 consecutive Float64 values (a Vec3d)."""
+@inline function _write_vec3d!(io::IO, x::Float64, y::Float64, z::Float64)
+    write_f64_le!(io, x); write_f64_le!(io, y); write_f64_le!(io, z)
+end
 
-Write a transform section. Writes the type string followed by format-specific data.
-"""
+"""Write the 5 Vec3d fields (15 doubles) for ScaleMap / UniformScaleMap."""
+function _write_scale_map_data!(io::IO, sx::Float64, sy::Float64, sz::Float64)
+    _write_vec3d!(io, sx, sy, sz)                                          # Scale
+    _write_vec3d!(io, 1.0/sx, 1.0/sy, 1.0/sz)                            # InvScale
+    _write_vec3d!(io, 1.0/(sx*sx), 1.0/(sy*sy), 1.0/(sz*sz))             # InvScaleSqr
+    _write_vec3d!(io, sx, sy, sz)                                          # VoxelSize
+    _write_vec3d!(io, sx, sy, sz)                                          # VoxelSize
+end
+
+"""Write Translation(3) + 5 Vec3d scale fields (18 doubles) for ScaleTranslateMap."""
+function _write_scale_translate_data!(io::IO, tx::Float64, ty::Float64, tz::Float64,
+                                       sx::Float64, sy::Float64, sz::Float64)
+    _write_vec3d!(io, tx, ty, tz)                                          # Translation
+    _write_vec3d!(io, sx, sy, sz)                                          # Scale
+    _write_vec3d!(io, 1.0/sx, 1.0/sy, 1.0/sz)                            # InvScale
+    _write_vec3d!(io, 1.0/(sx*sx), 1.0/(sy*sy), 1.0/(sz*sz))             # InvScaleSqr
+    _write_vec3d!(io, 1.0/(2.0*sx), 1.0/(2.0*sy), 1.0/(2.0*sz))         # InvTwiceScale
+    _write_vec3d!(io, sx, sy, sz)                                          # VoxelSize
+end
+
 function write_transform!(io::IO, transform::UniformScaleTransform)::Nothing
     write_string_with_size!(io, "UniformScaleMap")
-
     s = transform.scale
-    inv_s = 1.0 / s
-    inv_s2 = inv_s * inv_s
-
-    # UniformScaleMap: 5 Vec3d = 15 doubles
-    # scale (3), voxelSize (3), scaleInv (3), scaleInvSqr (3), voxelSize (3)
-    for _ in 1:3; write_f64_le!(io, s); end        # scale
-    for _ in 1:3; write_f64_le!(io, inv_s); end     # scaleInv
-    for _ in 1:3; write_f64_le!(io, inv_s2); end    # scaleInvSqr
-    for _ in 1:3; write_f64_le!(io, s); end          # voxelSize (same as scale)
-    for _ in 1:3; write_f64_le!(io, s); end          # voxelSize (same as scale)
-
+    _write_scale_map_data!(io, s, s, s)
     nothing
 end
 
 function write_transform!(io::IO, transform::LinearTransform)::Nothing
-    # Determine if this is a ScaleTranslateMap or a generic map
     m = transform.mat
-    has_translation = any(x -> x != 0.0, transform.trans)
+    has_translation = any(!iszero, transform.trans)
     is_diagonal = m[1,2] == 0.0 && m[1,3] == 0.0 &&
                   m[2,1] == 0.0 && m[2,3] == 0.0 &&
                   m[3,1] == 0.0 && m[3,2] == 0.0
 
-    if is_diagonal && m[1,1] == m[2,2] == m[3,3] && has_translation
-        # UniformScaleTranslateMap
-        write_string_with_size!(io, "UniformScaleTranslateMap")
+    is_diagonal || throw(ArgumentError("write_transform!: non-diagonal LinearTransform not yet supported — only scale/translate maps"))
 
-        tx, ty, tz = transform.trans[1], transform.trans[2], transform.trans[3]
-        sx, sy, sz = m[1,1], m[2,2], m[3,3]
+    sx, sy, sz = m[1,1], m[2,2], m[3,3]
 
-        # Translation (3 doubles)
-        write_f64_le!(io, tx)
-        write_f64_le!(io, ty)
-        write_f64_le!(io, tz)
-        # Scale (3 doubles)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
-        # InvScale (3)
-        write_f64_le!(io, 1.0 / sx)
-        write_f64_le!(io, 1.0 / sy)
-        write_f64_le!(io, 1.0 / sz)
-        # InvScaleSqr (3)
-        write_f64_le!(io, 1.0 / (sx * sx))
-        write_f64_le!(io, 1.0 / (sy * sy))
-        write_f64_le!(io, 1.0 / (sz * sz))
-        # InvTwiceScale (3)
-        write_f64_le!(io, 1.0 / (2.0 * sx))
-        write_f64_le!(io, 1.0 / (2.0 * sy))
-        write_f64_le!(io, 1.0 / (2.0 * sz))
-        # VoxelSize (3)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
-    elseif is_diagonal && has_translation
-        # ScaleTranslateMap
-        write_string_with_size!(io, "ScaleTranslateMap")
-
-        tx, ty, tz = transform.trans[1], transform.trans[2], transform.trans[3]
-        sx, sy, sz = m[1,1], m[2,2], m[3,3]
-
-        # Translation (3)
-        write_f64_le!(io, tx)
-        write_f64_le!(io, ty)
-        write_f64_le!(io, tz)
-        # Scale (3)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
-        # InvScale (3)
-        write_f64_le!(io, 1.0 / sx)
-        write_f64_le!(io, 1.0 / sy)
-        write_f64_le!(io, 1.0 / sz)
-        # InvScaleSqr (3)
-        write_f64_le!(io, 1.0 / (sx * sx))
-        write_f64_le!(io, 1.0 / (sy * sy))
-        write_f64_le!(io, 1.0 / (sz * sz))
-        # InvTwiceScale (3)
-        write_f64_le!(io, 1.0 / (2.0 * sx))
-        write_f64_le!(io, 1.0 / (2.0 * sy))
-        write_f64_le!(io, 1.0 / (2.0 * sz))
-        # VoxelSize (3)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
-    elseif is_diagonal && !has_translation
-        # ScaleMap
-        write_string_with_size!(io, "ScaleMap")
-
-        sx, sy, sz = m[1,1], m[2,2], m[3,3]
-
-        # Scale (3)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
-        # InvScale (3)
-        write_f64_le!(io, 1.0 / sx)
-        write_f64_le!(io, 1.0 / sy)
-        write_f64_le!(io, 1.0 / sz)
-        # InvScaleSqr (3)
-        write_f64_le!(io, 1.0 / (sx * sx))
-        write_f64_le!(io, 1.0 / (sy * sy))
-        write_f64_le!(io, 1.0 / (sz * sz))
-        # VoxelSize (3)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
-        # VoxelSize again (3)
-        write_f64_le!(io, sx)
-        write_f64_le!(io, sy)
-        write_f64_le!(io, sz)
+    if has_translation
+        is_uniform = sx == sy == sz
+        write_string_with_size!(io, is_uniform ? "UniformScaleTranslateMap" : "ScaleTranslateMap")
+        _write_scale_translate_data!(io, transform.trans[1], transform.trans[2], transform.trans[3], sx, sy, sz)
     else
-        throw(ArgumentError("write_transform!: non-diagonal LinearTransform not yet supported — only scale/translate maps"))
+        write_string_with_size!(io, "ScaleMap")
+        _write_scale_map_data!(io, sx, sy, sz)
     end
 
     nothing
@@ -281,38 +204,14 @@ end
 # Grid type string construction
 # =============================================================================
 
-"""
-    grid_type_string(::Type{T}) -> String
-
-Return the VDB grid type string for a given Julia type.
-"""
-function grid_type_string(::Type{Float32})::String
-    "Tree_float_5_4_3"
-end
-
-function grid_type_string(::Type{Float64})::String
-    "Tree_double_5_4_3"
-end
-
-function grid_type_string(::Type{NTuple{3, Float32}})::String
-    "Tree_vec3s_5_4_3"
-end
-
-function grid_type_string(::Type{NTuple{3, Float64}})::String
-    "Tree_vec3d_5_4_3"
-end
-
-function grid_type_string(::Type{Int32})::String
-    "Tree_int32_5_4_3"
-end
-
-function grid_type_string(::Type{Int64})::String
-    "Tree_int64_5_4_3"
-end
-
-function grid_type_string(::Type{Bool})::String
-    "Tree_bool_5_4_3"
-end
+"""Return the VDB grid type string for a given Julia value type."""
+grid_type_string(::Type{Float32})            = "Tree_float_5_4_3"
+grid_type_string(::Type{Float64})            = "Tree_double_5_4_3"
+grid_type_string(::Type{NTuple{3, Float32}}) = "Tree_vec3s_5_4_3"
+grid_type_string(::Type{NTuple{3, Float64}}) = "Tree_vec3d_5_4_3"
+grid_type_string(::Type{Int32})              = "Tree_int32_5_4_3"
+grid_type_string(::Type{Int64})              = "Tree_int64_5_4_3"
+grid_type_string(::Type{Bool})               = "Tree_bool_5_4_3"
 
 """
     grid_class_string(gc::GridClass) -> String
@@ -432,55 +331,32 @@ function write_tree!(io::IO, tree::RootNode{T}) where T
     nothing
 end
 
-"""
-    _write_i2_topology!(io, i2::InternalNode2{T}, background::T, all_leaves) -> Nothing
-
-Write Internal2 node topology: masks, ReadMaskValues for node values, then recurse into I1 children.
-"""
-function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}) where T
-    # Write I2 masks
-    write_mask!(io, i2.child_mask)
-    write_mask!(io, i2.value_mask)
-
-    # Write I2 embedded values (ReadMaskValues format)
-    # Build dense values vector: children get background, tiles get their value
-    i2_values = fill(background, 32768)
-    for (i, bit_idx) in enumerate(on_indices(i2.value_mask))
-        i2_values[bit_idx + 1] = i2.tiles[i].value
+"""Write masks + tile values for an internal node (shared by I2 and I1)."""
+function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}) where T
+    write_mask!(io, node.child_mask)
+    write_mask!(io, node.value_mask)
+    # metadata=0 (NO_MASK_OR_INACTIVE_VALS), then active tile values directly
+    # — tiles are already stored in on_indices order, no dense array needed
+    write_u8!(io, UInt8(0x00))
+    for tile in node.tiles
+        write_tile_value!(io, tile.value)
     end
-    write_mask_values!(io, T, i2_values, i2.value_mask, background)
+end
 
-    # Write I1 children in child_mask order
+function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}) where T
+    _write_node_masks_and_tiles!(io, i2, T)
     for child in i2.children
         _write_i1_topology!(io, child, background, all_leaves)
     end
-
     nothing
 end
 
-"""
-    _write_i1_topology!(io, i1::InternalNode1{T}, background::T, all_leaves) -> Nothing
-
-Write Internal1 node topology: masks, ReadMaskValues for node values, then leaf masks.
-"""
 function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_leaves::Vector{LeafNode{T}}) where T
-    # Write I1 masks
-    write_mask!(io, i1.child_mask)
-    write_mask!(io, i1.value_mask)
-
-    # Write I1 embedded values (ReadMaskValues format)
-    i1_values = fill(background, 4096)
-    for (i, bit_idx) in enumerate(on_indices(i1.value_mask))
-        i1_values[bit_idx + 1] = i1.tiles[i].value
-    end
-    write_mask_values!(io, T, i1_values, i1.value_mask, background)
-
-    # Write leaf value_masks and collect leaves for Phase 2
+    _write_node_masks_and_tiles!(io, i1, T)
     for leaf in i1.children
         write_mask!(io, leaf.value_mask)
         push!(all_leaves, leaf)
     end
-
     nothing
 end
 
