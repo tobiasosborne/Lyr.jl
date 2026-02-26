@@ -119,97 +119,76 @@ function _get_from_i1(acc::ValueAccessor{T}, node1::InternalNode1{T}, c::Coord):
     return leaf.values[offset + 1]
 end
 
+# =============================================================================
+# Dispatch-based tree probe — shared by get_value and is_active
+# =============================================================================
+
+"""Shared mask-check logic for internal nodes. Returns (value, is_active) or descends."""
+@inline function _probe_internal(node, idx::Int, c::Coord, background::T) where T
+    if is_off(node.child_mask, idx)
+        if is_on(node.value_mask, idx)
+            tile_idx = count_on_before(node.value_mask, idx) + 1
+            return (node.tiles[tile_idx].value, true)
+        end
+        return (background, false)
+    end
+    child_idx = count_on_before(node.child_mask, idx) + 1
+    _probe_node(node.children[child_idx], c, background)
+end
+
+"""Leaf base case: return value and active flag."""
+@inline function _probe_node(leaf::LeafNode{T}, c::Coord, ::T) where T
+    offset = leaf_offset(c)
+    (leaf.values[offset + 1], is_on(leaf.value_mask, offset))
+end
+
+"""I1 dispatch: compute child index, then shared probe."""
+@inline function _probe_node(node::InternalNode1{T}, c::Coord, bg::T) where T
+    _probe_internal(node, internal1_child_index(c), c, bg)
+end
+
+"""I2 dispatch: compute child index, then shared probe."""
+@inline function _probe_node(node::InternalNode2{T}, c::Coord, bg::T) where T
+    _probe_internal(node, internal2_child_index(c), c, bg)
+end
+
+"""Navigate tree from root, returning (value, is_active)."""
+function _tree_probe(tree::Tree{T}, c::Coord) where T
+    entry = get(tree.table, internal2_origin(c), nothing)
+    entry === nothing && return (tree.background, false)
+    entry isa Tile{T} && return (entry.value, entry.active)
+    _probe_node(entry::InternalNode2{T}, c, tree.background)
+end
+
 """
     get_value(tree::Tree{T}, c::Coord) -> T
 
 Get the value at coordinate `c`. Returns the background value if the coordinate
 is not stored in the tree.
 """
-function get_value(tree::Tree{T}, c::Coord)::T where T
-    # Find the Internal2 origin
-    i2_origin = internal2_origin(c)
-
-    entry = get(tree.table, i2_origin, nothing)
-    if entry === nothing
-        return tree.background
-    end
-
-    if entry isa Tile{T}
-        return entry.value
-    end
-
-    # Navigate to Internal1
-    node2 = entry::InternalNode2{T}
-    i1_idx = internal2_child_index(c)
-
-    if is_off(node2.child_mask, i1_idx)
-        if is_on(node2.value_mask, i1_idx)
-            tile_idx = count_on_before(node2.value_mask, i1_idx) + 1
-            return node2.tiles[tile_idx].value
-        end
-        return tree.background
-    end
-
-    child_idx = count_on_before(node2.child_mask, i1_idx) + 1
-    node1 = node2.children[child_idx]
-
-    # Navigate to Leaf
-    leaf_idx = internal1_child_index(c)
-
-    if is_off(node1.child_mask, leaf_idx)
-        if is_on(node1.value_mask, leaf_idx)
-            tile_idx = count_on_before(node1.value_mask, leaf_idx) + 1
-            return node1.tiles[tile_idx].value
-        end
-        return tree.background
-    end
-
-    child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
-    leaf = node1.children[child_idx]
-
-    # Get value from leaf
-    offset = leaf_offset(c)
-    leaf.values[offset + 1]  # 1-indexed
-end
+get_value(tree::Tree{T}, c::Coord) where T = _tree_probe(tree, c)[1]
 
 """
     is_active(tree::Tree{T}, c::Coord) -> Bool
 
 Check if the voxel at coordinate `c` is active.
 """
-function is_active(tree::Tree{T}, c::Coord)::Bool where T
-    i2_origin = internal2_origin(c)
+is_active(tree::Tree{T}, c::Coord) where T = _tree_probe(tree, c)[2]
 
-    entry = get(tree.table, i2_origin, nothing)
-    if entry === nothing
-        return false
-    end
+# Tile region sizes for counting active voxels
+# VDB tree hierarchy: Root → Internal2(32³) → Internal1(16³) → Leaf(8³)
+const ROOT_TILE_VOXELS = 4096^3
+const INTERNAL2_TILE_VOXELS = 128^3
+const INTERNAL1_TILE_VOXELS = 8^3
 
-    if entry isa Tile{T}
-        return entry.active
-    end
+"""Count active tile voxels in an internal node."""
+_count_active_tiles(node, tile_voxels::Int) = count(t -> t.active, node.tiles) * tile_voxels
 
-    node2 = entry::InternalNode2{T}
-    i1_idx = internal2_child_index(c)
+_count_active(node::InternalNode1{T}) where T =
+    _count_active_tiles(node, INTERNAL1_TILE_VOXELS) + sum(c -> count_on(c.value_mask), node.children; init=0)
 
-    if is_off(node2.child_mask, i1_idx)
-        return is_on(node2.value_mask, i1_idx)
-    end
-
-    child_idx = count_on_before(node2.child_mask, i1_idx) + 1
-    node1 = node2.children[child_idx]
-    leaf_idx = internal1_child_index(c)
-
-    if is_off(node1.child_mask, leaf_idx)
-        return is_on(node1.value_mask, leaf_idx)
-    end
-
-    child_idx = count_on_before(node1.child_mask, leaf_idx) + 1
-    leaf = node1.children[child_idx]
-    offset = leaf_offset(c)
-
-    is_on(leaf.value_mask, offset)
-end
+_count_active(node::InternalNode2{T}) where T =
+    _count_active_tiles(node, INTERNAL2_TILE_VOXELS) + sum(_count_active, node.children; init=0)
 
 """
     active_voxel_count(tree::Tree{T}) -> Int
@@ -217,62 +196,11 @@ end
 Count the total number of active voxels in the tree.
 """
 function active_voxel_count(tree::Tree{T})::Int where T
-    count = 0
-
+    total = 0
     for (_, entry) in tree.table
-        if entry isa Tile{T}
-            if entry.active
-                # A tile represents a large number of active voxels
-                count += ROOT_TILE_VOXELS
-            end
-        else
-            node2 = entry::InternalNode2{T}
-            count += _count_active_internal2(node2)
-        end
+        total += entry isa Tile{T} ? (entry.active ? ROOT_TILE_VOXELS : 0) : _count_active(entry::InternalNode2{T})
     end
-
-    count
-end
-
-# Tile region sizes for counting active voxels
-# VDB tree hierarchy: Root → Internal2(32³) → Internal1(16³) → Leaf(8³)
-# Each level covers its branching factor cubed × everything below:
-#   Root tile  = 32³ × 16³ × 8³ = (32×16×8)³ = 4096³ voxels
-#   I2 tile    = 16³ × 8³       = (16×8)³    = 128³  voxels
-#   I1 tile    = 8³             =               8³    voxels
-const ROOT_TILE_VOXELS = 4096^3
-const INTERNAL2_TILE_VOXELS = 128^3
-const INTERNAL1_TILE_VOXELS = 8^3
-
-"""
-    _count_active_tiles(node, tile_voxels::Int) -> Int
-
-Count active voxels in an internal node's tiles.
-"""
-function _count_active_tiles(node, tile_voxels::Int)::Int
-    count = 0
-    for tile in node.tiles
-        if tile.active
-            count += tile_voxels
-        end
-    end
-    count
-end
-
-function _count_active_internal2(node::InternalNode2{T})::Int where T
-    count = _count_active_tiles(node, INTERNAL2_TILE_VOXELS)
-    for child in node.children
-        count += _count_active_internal1(child)
-    end
-    count
-end
-
-function _count_active_internal1(node::InternalNode1{T})::Int where T
-    count = _count_active_tiles(node, INTERNAL1_TILE_VOXELS)
-    for child in node.children
-        count += count_on(child.value_mask)
-    end
-    count
+    total
 end
 
 """
@@ -281,17 +209,11 @@ end
 Count the number of leaf nodes in the tree.
 """
 function leaf_count(tree::Tree{T})::Int where T
-    count = 0
-
+    total = 0
     for (_, entry) in tree.table
-        if entry isa InternalNode2{T}
-            for child in entry.children
-                count += count_on(child.child_mask)
-            end
-        end
+        entry isa InternalNode2{T} && (total += sum(c -> count_on(c.child_mask), entry.children; init=0))
     end
-
-    count
+    total
 end
 
 """
