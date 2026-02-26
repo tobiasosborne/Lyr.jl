@@ -16,6 +16,23 @@
 module TinyVDB
 
 # =============================================================================
+# Exception types (self-contained for standalone testing)
+# =============================================================================
+
+"""Generic parse/format error for VDB data."""
+struct FormatError <: Exception
+    message::String
+end
+Base.showerror(io::IO, e::FormatError) = print(io, "FormatError: ", e.message)
+
+"""Thrown when VDB file version is not supported."""
+struct UnsupportedVersionError <: Exception
+    version::UInt32
+    min_version::UInt32
+end
+Base.showerror(io::IO, e::UnsupportedVersionError) = print(io, "UnsupportedVersionError: version $(e.version) not supported (minimum: $(e.min_version))")
+
+# =============================================================================
 # Includes (order matters - dependencies first)
 # =============================================================================
 

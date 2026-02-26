@@ -35,12 +35,12 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     pos += 8
 
     if magic_bytes != VDB_MAGIC_BYTES
-        error("Invalid VDB magic bytes: expected $(VDB_MAGIC_BYTES), got $(magic_bytes)")
+        throw(FormatError("Invalid VDB magic bytes: expected $(VDB_MAGIC_BYTES), got $(magic_bytes)"))
     end
 
     # Read file version
     file_version, pos = read_u32(bytes, pos)
-    file_version < 220 && error("VDB version $file_version not supported (minimum: 220)")
+    file_version < 220 && throw(UnsupportedVersionError(file_version, UInt32(220)))
 
     # Read library versions
     major_version, pos = read_u32(bytes, pos)
@@ -48,7 +48,7 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
 
     # Read has_grid_offsets flag
     has_offsets, pos = read_u8(bytes, pos)
-    has_offsets == 0 && error("VDB files without grid offsets are not supported")
+    has_offsets == 0 && throw(FormatError("VDB files without grid offsets are not supported"))
 
     # Read compression flag (only v220-221)
     is_compressed = false

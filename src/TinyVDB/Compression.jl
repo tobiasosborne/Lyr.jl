@@ -86,7 +86,7 @@ function read_compressed_data(bytes::Vector{UInt8}, pos::Int, count::Int, elemen
     total_bytes = count * element_size
 
     if (compression_flags & COMPRESS_BLOSC) != 0
-        error("Blosc compression is not supported in TinyVDB")
+        throw(FormatError("Blosc compression is not supported in TinyVDB"))
     end
 
     if (compression_flags & COMPRESS_ZIP) != 0
@@ -100,7 +100,7 @@ function read_compressed_data(bytes::Vector{UInt8}, pos::Int, count::Int, elemen
             # Uncompressed data, abs(num_zipped_bytes) is the byte count
             raw_bytes = Int(-num_zipped_bytes)
             if raw_bytes != total_bytes
-                error("Uncompressed chunk size mismatch: abs(chunk_size)=$raw_bytes, expected=$total_bytes")
+                throw(FormatError("Uncompressed chunk size mismatch: abs(chunk_size)=$raw_bytes, expected=$total_bytes"))
             end
             data = bytes[pos:pos+raw_bytes-1]
             return (data, pos + raw_bytes)
@@ -113,7 +113,7 @@ function read_compressed_data(bytes::Vector{UInt8}, pos::Int, count::Int, elemen
             decompressed = transcode(ZlibDecompressor, compressed)
 
             if length(decompressed) != total_bytes
-                error("Decompressed size mismatch: expected $total_bytes, got $(length(decompressed))")
+                throw(FormatError("Decompressed size mismatch: expected $total_bytes, got $(length(decompressed))"))
             end
 
             return (decompressed, pos)

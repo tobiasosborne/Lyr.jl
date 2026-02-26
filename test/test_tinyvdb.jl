@@ -553,7 +553,7 @@ end
         bytes = UInt8[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         append!(bytes, zeros(UInt8, 50))  # padding
 
-        @test_throws ErrorException read_header(bytes, 1)
+        @test_throws TinyVDB.FormatError read_header(bytes, 1)
     end
 
     @testset "read_header - version too old" begin
@@ -565,7 +565,7 @@ end
         append!(bytes, reinterpret(UInt8, [file_version]))
         append!(bytes, zeros(UInt8, 50))  # padding
 
-        @test_throws ErrorException read_header(bytes, 1)
+        @test_throws TinyVDB.UnsupportedVersionError read_header(bytes, 1)
     end
 
     @testset "read_header - no grid offsets" begin
@@ -583,7 +583,7 @@ end
         push!(bytes, has_offsets)
         append!(bytes, zeros(UInt8, 40))  # padding
 
-        @test_throws ErrorException read_header(bytes, 1)
+        @test_throws TinyVDB.FormatError read_header(bytes, 1)
     end
 
 end
@@ -781,8 +781,8 @@ end
         raw_bytes = reinterpret(UInt8, values)
 
         bytes = UInt8[]
-        # numZippedBytes = -1 (indicates uncompressed)
-        append!(bytes, reinterpret(UInt8, [Int64(-1)]))
+        # numZippedBytes = -16 (negative of byte count indicates uncompressed)
+        append!(bytes, reinterpret(UInt8, [Int64(-16)]))
         append!(bytes, raw_bytes)
 
         result, pos = read_compressed_data(bytes, 1, 4, 4, COMPRESS_ZIP)

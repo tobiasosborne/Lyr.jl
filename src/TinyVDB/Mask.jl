@@ -107,7 +107,7 @@ function read_mask(bytes::Vector{UInt8}, pos::Int, log2dim::Int32)::Tuple{NodeMa
     # Bounds check before reading
     bytes_needed = word_count * 8
     if pos + bytes_needed - 1 > length(bytes)
-        error("read_mask: bounds error at pos=$pos, need $bytes_needed bytes, have $(length(bytes) - pos + 1)")
+        throw(BoundsError(bytes, pos:pos+bytes_needed-1))
     end
 
     for i in 1:word_count

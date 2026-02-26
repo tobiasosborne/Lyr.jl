@@ -121,6 +121,7 @@ export intersect_leaves_dda, VolumeRayIntersector
 
 # Exceptions (base types only — detail types are internal)
 export LyrError, ParseError, CompressionError
+export FormatError, UnsupportedVersionError
 
 # NanoVDB
 export NanoGrid, NanoLeafView, NanoI1View, NanoI2View

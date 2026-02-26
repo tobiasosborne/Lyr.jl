@@ -150,7 +150,7 @@ function read_transform(bytes::Vector{UInt8}, pos::Int)::Tuple{Float64, NTuple{3
         end
         return (scale_x, (tx, ty, tz), pos)
     else
-        error("Unsupported transform type: $transform_type")
+        throw(FormatError("Unsupported transform type: $transform_type"))
     end
 end
 
@@ -235,7 +235,7 @@ function parse_tinyvdb(filepath::String)::TinyVDBFile
 
     # Check version
     if header.file_version < 220
-        error("Unsupported VDB version: $(header.file_version). TinyVDB requires version 220+")
+        throw(UnsupportedVersionError(header.file_version, UInt32(220)))
     end
 
     # Read and skip file-level metadata
@@ -271,7 +271,7 @@ function parse_tinyvdb(bytes::Vector{UInt8})::TinyVDBFile
 
     # Check version
     if header.file_version < 220
-        error("Unsupported VDB version: $(header.file_version). TinyVDB requires version 220+")
+        throw(UnsupportedVersionError(header.file_version, UInt32(220)))
     end
 
     # Read and skip file-level metadata

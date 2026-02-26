@@ -162,7 +162,7 @@ function read_grid_descriptors(bytes::Vector{UInt8}, pos::Int)::Tuple{Dict{Strin
     count, pos = read_u32(bytes, pos)
 
     if count > 10000
-        error("Invalid grid descriptor count: $count")
+        throw(FormatError("Invalid grid descriptor count: $count"))
     end
 
     descriptors = Dict{String, GridDescriptor}()

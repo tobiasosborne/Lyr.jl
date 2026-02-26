@@ -142,7 +142,7 @@ light_dramatic() = AbstractLight[
 
 function _auto_camera(grid)
     bbox = active_bounding_box(grid.tree)
-    bbox === nothing && error("Cannot auto-camera: grid has no active voxels")
+    bbox === nothing && throw(ArgumentError("Cannot auto-camera: grid has no active voxels"))
 
     vs = voxel_size(grid.transform)[1]
 

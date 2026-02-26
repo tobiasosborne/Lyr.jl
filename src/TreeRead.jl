@@ -31,7 +31,7 @@ function _decode_values(::Type{T}, data::Vector{UInt8}, count::Int, value_size::
         ET = T.parameters[1]
         return [ntuple(j -> ET(halfs[(i-1)*n + j]), n) for i in 1:count]
     else
-        error("unsupported half-precision type: $T")
+        throw(ArgumentError("unsupported half-precision type: $T"))
     end
 end
 

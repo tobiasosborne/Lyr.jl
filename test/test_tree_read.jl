@@ -52,7 +52,7 @@
 
     @testset "_decode_values: unsupported half type errors" begin
         data = UInt8[0x00, 0x00]
-        @test_throws ErrorException Lyr._decode_values(Int32, data, 1, 2)
+        @test_throws ArgumentError Lyr._decode_values(Int32, data, 1, 2)
     end
 
     # =========================================================================

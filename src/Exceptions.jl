@@ -94,6 +94,37 @@ end
 # =============================================================================
 
 """
+    FormatError <: ParseError
+
+Generic parse/format error for VDB data that doesn't match expected structure.
+"""
+struct FormatError <: ParseError
+    message::String
+end
+
+function Base.showerror(io::IO, e::FormatError)
+    print(io, "FormatError: ", e.message)
+end
+
+"""
+    UnsupportedVersionError <: ParseError
+
+Thrown when the VDB file version is not supported.
+"""
+struct UnsupportedVersionError <: ParseError
+    version::UInt32
+    min_version::UInt32
+end
+
+function Base.showerror(io::IO, e::UnsupportedVersionError)
+    print(io, "UnsupportedVersionError: version $(e.version) not supported (minimum: $(e.min_version))")
+end
+
+# =============================================================================
+# Value Errors
+# =============================================================================
+
+"""
     ValueCountError <: LyrError
 
 Thrown when decompressed values have unexpected count.
