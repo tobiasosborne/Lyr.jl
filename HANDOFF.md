@@ -2,7 +2,66 @@
 
 ---
 
-## Latest Session (2026-02-26) — Elegance Sprint: 10 Issues Closed, -227 LOC
+## Latest Session (2026-02-27) — Elegance Sprint Part 2: 7 Issues (5 Done, 2 In Progress)
+
+**Status**: GREEN — 29,778 tests pass (+116 new), Phase 1 & 2 complete, Phase 3 not started
+
+### What Was Done
+
+1. **Test coverage file** (`test/test_elegance_sprint.jl`, 528 LOC, 116 new tests):
+   - **Float16 half-precision** (issue `51qa`): `read_f16_le` roundtrip, `_read_value` half→Float32 widening, special values (Inf, NaN), offset positions
+   - **Iterator edge cases** (issue `6bjk`): empty tree, root-tile-only tree, single-voxel tree, multi-voxel coord reconstruction, all-inactive leaf, Float64 tree, iterator protocol (`IteratorSize`, `eltype`), reusability
+   - **Vec3f gradient** (issue `ch41`): return type verification, uniform field → zero gradient, linear x-gradient, component independence, background boundary behavior
+   - **sphere_trace surface hit** (issue `yynz`): hit from all 6 axis directions, diagonal hit, normal unit length, anti-parallel to ray, world_bounds kwarg compatibility, miss case
+   - **Robustness/truncation** (issue `htbz`): empty bytes, wrong magic, off-by-one magic, truncated at various header stages, real file truncated at 8 fractions (1%-99%), valid zero-grid file parses OK
+
+2. **Export reduction** (issue `z3ms`): ~164 → ~40 exported symbols.
+   - Kept only user-facing API: `parse_vdb`, `write_vdb`, `Grid`, `Coord`, `coord`, query functions, rendering pipeline, Field Protocol, visualize presets
+   - Moved ~124 symbols to internal (accessible via `Lyr.X` or `import Lyr: X`)
+   - Test suite updated: all removed symbols added to `import Lyr:` block in `test/runtests.jl`
+   - **All 29,778 tests pass with the reduced export set**
+
+### What Remains (NOT YET DONE — next agent must complete)
+
+3. **TinyVDB dedup** (issue `s56k`) — **IN PROGRESS, NOT STARTED**:
+   - Plan: Create `src/VDBConstants.jl` with shared magic number, min version, format constants
+   - Include from both `src/Lyr.jl` (before Header.jl) and `src/TinyVDB/TinyVDB.jl`
+   - Replace hardcoded `VDB_MAGIC` and version constants in both parsers
+   - **Key insight from analysis**: The "315 LOC duplication" is mostly intentional design divergence (immutable vs mutable types). Only ~30 LOC of actual constants can be safely shared. Close issue with this principled rationale.
+   - TinyVDB must remain standalone for `test/test_tinyvdb.jl`
+   - After implementation, run: `julia --project -e 'using Pkg; Pkg.test()'` AND `julia --project test/test_tinyvdb.jl`
+
+### Beads Issue Status
+- `path-tracer-51qa` — **DONE** (close it): Float16 tests written
+- `path-tracer-6bjk` — **DONE** (close it): Iterator edge case tests written
+- `path-tracer-ch41` — **DONE** (close it): Vec3f gradient tests written
+- `path-tracer-yynz` — **DONE** (close it): sphere_trace surface hit tests written
+- `path-tracer-htbz` — **DONE** (close it): Robustness/truncation tests written
+- `path-tracer-z3ms` — **DONE** (close it): Export reduction complete
+- `path-tracer-s56k` — **IN PROGRESS**: TinyVDB dedup not yet implemented
+
+**Next agent should**:
+```bash
+# 1. Close the 6 completed issues
+bd close path-tracer-51qa path-tracer-6bjk path-tracer-ch41 path-tracer-yynz path-tracer-htbz path-tracer-z3ms
+
+# 2. Implement TinyVDB dedup (issue s56k) — see plan above
+
+# 3. After that, 4 issues remain:
+#    - path-tracer-czn: Active-voxel gradient feature
+#    - path-tracer-sq2m: Decompression buffer reuse
+#    - path-tracer-nkdl: Memory-mapped I/O
+#    - path-tracer-ntau: Extract Render.jl (P4 backlog)
+```
+
+### Key Files Changed
+- `test/test_elegance_sprint.jl` — 528 LOC, 116 tests covering 5 issues (NEW)
+- `test/runtests.jl` — expanded import block for non-exported symbols, registered new test file
+- `src/Lyr.jl` — export block reduced from ~90 lines to ~35 lines (~40 symbols)
+
+---
+
+## Previous Session (2026-02-26) — Elegance Sprint: 10 Issues Closed, -227 LOC
 
 **Status**: GREEN — 29,662 tests pass (+97 new), 10 issues closed (17 → 11 remaining), 96% complete (271/282)
 

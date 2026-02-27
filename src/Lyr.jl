@@ -71,120 +71,50 @@ include("Voxelize.jl")
 include("Visualize.jl")
 
 # ============================================================================
-# Public API — only user-facing symbols are exported.
-# Internal symbols (binary readers, parser functions, DDA primitives, etc.)
-# are accessible via Lyr.symbol_name or import Lyr: symbol_name.
+# Public API — only symbols users type in their code are exported.
+# All other symbols are accessible via Lyr.symbol_name or import Lyr: symbol_name.
 # ============================================================================
 
-# Masks
-export Mask, LeafMask, Internal1Mask, Internal2Mask
-export is_on, is_off, is_empty, is_full
-export count_on, count_off, count_on_before
-export on_indices, off_indices
+# --- Core I/O ---
+export parse_vdb, write_vdb
 
-# Coordinates
-export Coord, coord
-export BBox, contains, intersects, volume
+# --- Types users construct ---
+export Grid, Coord, coord, SVec3f, SVec3d, Ray, Camera
 
-# Compression (types only — functions are internal)
-export NoCompression, BloscCodec, ZipCodec
+# --- Query API ---
+export get_value, is_active, active_voxels, leaves
+export active_voxel_count, leaf_count
 
-# Tree types
-export AbstractNode, LeafNode, Tile
-export InternalNode1, InternalNode2, RootNode, Tree
-export GridClass, GRID_LEVEL_SET, GRID_FOG_VOLUME, GRID_STAGGERED, GRID_UNKNOWN
+# --- Interpolation & gradient ---
+export sample_world, sample_trilinear, gradient
 
-# Transforms
-export AbstractTransform, LinearTransform, UniformScaleTransform
-export index_to_world, world_to_index, world_to_index_float, voxel_size
+# --- Surface finding ---
+export find_surface, SurfaceHit
 
-# Grid
-export Grid
+# --- Rendering pipeline ---
+export render_volume_image, render_volume_preview
+export write_ppm, write_png, write_exr
 
-# File
-export VDBHeader, GridDescriptor, VDBFile
-export parse_vdb
+# --- Scene setup ---
+export PointLight, DirectionalLight, VolumeMaterial, VolumeEntry, Scene
 
-# Accessors
-export ValueAccessor
-export get_value, is_active, active_voxel_count, leaf_count, active_bounding_box
-export active_voxels, leaves
-
-# Interpolation
-export InterpolationMethod, NearestInterpolation, TrilinearInterpolation
-export sample_nearest, sample_trilinear, sample_world
-export gradient
-
-# Ray & DDA (high-level only)
-export AABB, Ray, intersect_bbox, intersect_leaves
-export intersect_leaves_dda, VolumeRayIntersector
-
-# Exceptions (base types only — detail types are internal)
-export LyrError, ParseError, CompressionError
-export FormatError, UnsupportedVersionError
-
-# NanoVDB
-export NanoGrid, NanoLeafView, NanoI1View, NanoI2View
-export NanoValueAccessor, NanoLeafHit, NanoVolumeRayIntersector
-export build_nanogrid
-export nano_origin, nano_is_active, nano_get_value
-export nano_child_count, nano_tile_count, nano_has_child, nano_has_tile
-export nano_child_offset, nano_tile_value
-export nano_background, nano_bbox, nano_root_count, nano_i2_count, nano_i1_count, nano_leaf_count
-
-# Static Arrays
-export SVec3f, SVec3d, SMat3d
-
-# Render
-export Camera, write_ppm
-
-# Surface
-export SurfaceHit, find_surface
-
-# Grid Builder
-export build_grid, gaussian_splat
-
-# VDB Writer (high-level only)
-export write_vdb, write_vdb_to_buffer
-
-# Transfer Functions
-export ControlPoint, TransferFunction, evaluate
+# --- Transfer functions ---
+export TransferFunction, ControlPoint, evaluate
 export tf_blackbody, tf_cool_warm, tf_smoke, tf_viridis
 
-# Phase Functions
-export PhaseFunction, IsotropicPhase, HenyeyGreensteinPhase
-export sample_phase
+# --- Grid building ---
+export build_grid, voxelize
 
-# Scene
-export PointLight, DirectionalLight
-export VolumeMaterial, VolumeEntry, Scene
+# --- NanoVDB (high-level) ---
+export NanoGrid, build_nanogrid
 
-# Volume Integrator (high-level only)
-export render_volume_image, render_volume_preview
-
-# Output
-export tonemap_reinhard, tonemap_aces, tonemap_exposure, auto_exposure
-export denoise_nlm, denoise_bilateral
-export write_exr, write_png
-
-# GPU
-export GPUNanoGrid, adapt_nanogrid
-export gpu_render_volume
-export ProgressiveAccumulator, accumulate!, resolve
-
-# Field Protocol
-export AbstractDomain, BoxDomain, center, extent
-export AbstractField, AbstractContinuousField, AbstractDiscreteField
+# --- Field Protocol ---
 export ScalarField3D, VectorField3D, ComplexScalarField3D
 export ParticleField, TimeEvolution
-export field_eltype, domain, characteristic_scale
-# Note: evaluate is already exported from TransferFunction.jl
-
-# Voxelize
-export voxelize
-
-# Visualize
+export BoxDomain, domain, field_eltype, characteristic_scale
 export visualize
+
+# --- Visualize presets ---
 export camera_orbit, camera_front, camera_iso
 export material_emission, material_cloud, material_fire
 export light_studio, light_natural, light_dramatic
