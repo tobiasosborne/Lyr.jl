@@ -761,6 +761,41 @@ function get_value(acc::NanoValueAccessor{T}, c::Coord)::T where T
     return _nano_get_from_root(acc, c)
 end
 
+"""
+    get_value_trilinear(acc::NanoValueAccessor{T}, pos::SVec3d) -> Float64
+
+Trilinear interpolation through a NanoGrid. Samples the 8 surrounding
+voxels and lerps based on fractional position.
+"""
+@inline function get_value_trilinear(acc::NanoValueAccessor{T}, pos::SVec3d)::Float64 where T
+    x0 = floor(Int32, pos[1])
+    y0 = floor(Int32, pos[2])
+    z0 = floor(Int32, pos[3])
+
+    u = pos[1] - Float64(x0)
+    v = pos[2] - Float64(y0)
+    w = pos[3] - Float64(z0)
+
+    c000 = Float64(get_value(acc, coord(x0,     y0,     z0)))
+    c100 = Float64(get_value(acc, coord(x0 + 1, y0,     z0)))
+    c010 = Float64(get_value(acc, coord(x0,     y0 + 1, z0)))
+    c110 = Float64(get_value(acc, coord(x0 + 1, y0 + 1, z0)))
+    c001 = Float64(get_value(acc, coord(x0,     y0,     z0 + 1)))
+    c101 = Float64(get_value(acc, coord(x0 + 1, y0,     z0 + 1)))
+    c011 = Float64(get_value(acc, coord(x0,     y0 + 1, z0 + 1)))
+    c111 = Float64(get_value(acc, coord(x0 + 1, y0 + 1, z0 + 1)))
+
+    c00 = c000 * (1.0 - u) + c100 * u
+    c10 = c010 * (1.0 - u) + c110 * u
+    c01 = c001 * (1.0 - u) + c101 * u
+    c11 = c011 * (1.0 - u) + c111 * u
+
+    c0 = c00 * (1.0 - v) + c10 * v
+    c1 = c01 * (1.0 - v) + c11 * v
+
+    c0 * (1.0 - w) + c1 * w
+end
+
 function _nano_get_from_root(acc::NanoValueAccessor{T}, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)

@@ -38,8 +38,7 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid, t_enter::Float64,
             t >= span_end && break
 
             pos = ray.origin + t * ray.direction
-            density = Float64(get_value(acc,
-                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+            density = get_value_trilinear(acc, pos)
             density = max(0.0, density)
 
             sigma_real = density * sigma_maj
@@ -87,8 +86,7 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid, t0::Float64, t1::Float64,
             t >= span_end && break
 
             pos = ray.origin + t * ray.direction
-            density = Float64(get_value(acc,
-                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+            density = get_value_trilinear(acc, pos)
             density = max(0.0, density)
 
             sigma_real = density * sigma_maj
@@ -188,8 +186,7 @@ function _march_emission_absorption(ray::Ray, scene::Scene,
             t = span.t0
             while t < span.t1 && transmittance > 1e-4 && steps_remaining > 0
                 pos = ray.origin + t * ray.direction
-                density = Float64(get_value(nacc,
-                    coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+                density = get_value_trilinear(nacc, pos)
                 density = max(0.0, density)
 
                 if density > 1e-6
@@ -320,10 +317,7 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
         # Sample density and evaluate transfer function at hit point
         hit_pos = ray.origin + t_hit * ray.direction
         hit_acc = NanoValueAccessor(nanogrid)
-        density = Float64(get_value(hit_acc,
-            coord(round(Int32, hit_pos[1]), round(Int32, hit_pos[2]),
-            round(Int32, hit_pos[3]))))
-        density = max(0.0, density)
+        density = max(0.0, get_value_trilinear(hit_acc, hit_pos))
 
         rgba = evaluate(tf, density)
         emit_r, emit_g, emit_b, _ = rgba
