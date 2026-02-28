@@ -129,7 +129,7 @@ export TransferFunction, ControlPoint, evaluate
 export tf_blackbody, tf_cool_warm, tf_smoke, tf_viridis
 
 # --- Grid building ---
-export build_grid, voxelize
+export build_grid, voxelize, particles_to_sdf
 export create_level_set_sphere, create_level_set_box
 
 # --- Grid operations ---
