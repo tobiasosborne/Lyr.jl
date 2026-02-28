@@ -14,7 +14,12 @@
    - `src/VolumeHDDA.jl` (175 LOC) — `NanoVolumeHDDA{T}` iterator, three-phase state machine (I1 DDA → I2 DDA → root advance)
    - All three renderers updated: `delta_tracking_step`, `ratio_tracking`, `_march_emission_absorption`
    - 76 new HDDA-specific tests (span merging, gap detection, coverage equivalence vs `NanoVolumeRayIntersector`)
-   - 3 showcase renders: `hdda_smoke.png`, `hdda_particles.png`, `hdda_smoke_production.png`
+
+2. **Trilinear interpolation in volume renderer**
+   - Replaced nearest-neighbor (`round(Int32, pos)`) density sampling with trilinear interpolation across all 4 sampling sites
+   - `src/NanoVDB.jl` — `get_value_trilinear(acc::NanoValueAccessor, pos::SVec3d)`: samples 8 surrounding voxels, trilinear lerp in Float64
+   - Eliminates visible voxel edges — smoke renders smooth, particles lose blocky silhouettes
+   - 3 showcase renders updated: `hdda_smoke.png`, `hdda_particles.png`, `hdda_smoke_production.png`
 
 ### Why the Previous Attempt Failed (and How This Fixes It)
 
@@ -31,6 +36,7 @@ The fix: **span merging**. `NanoVolumeHDDA` DDA-steps through I1/I2 cells and tr
 - **`node_dda_cell_time(ndda)` = `minimum(ndda.state.tmax)`** — exit time of current DDA cell, used for span boundary tracking
 - **Existing `NanoVolumeRayIntersector` preserved** — still used for surface intersection (level-set zero-crossing) where individual leaf hits are needed
 - **`t` carried continuously across spans** in delta/ratio tracking (no reset). For emission-absorption, `t` resets per span (correct: empty gaps contribute nothing)
+- **Trilinear interpolation for all density samples** — `get_value_trilinear` on `NanoValueAccessor` lerps 8 corners in Float64. Leverages the accessor's 3-level cache (adjacent corners almost always hit the cached leaf)
 
 ### Performance
 
@@ -73,7 +79,8 @@ The fix: **span merging**. `NanoVolumeHDDA` DDA-steps through I1/I2 cells and tr
 ### Key Files Changed This Session
 - `src/VolumeHDDA.jl` (NEW — span-merging HDDA iterator)
 - `src/DDA.jl` (+8 lines: `node_dda_cell_time` helper)
-- `src/VolumeIntegrator.jl` (all 3 renderers use HDDA spans)
+- `src/NanoVDB.jl` (+35 lines: `get_value_trilinear` on NanoValueAccessor)
+- `src/VolumeIntegrator.jl` (HDDA spans + trilinear sampling in all 4 sites)
 - `src/Lyr.jl` (+1 include)
 - `test/test_volume_hdda.jl` (NEW — 76 tests)
 - `showcase/hdda_smoke.png`, `showcase/hdda_particles.png`, `showcase/hdda_smoke_production.png`
