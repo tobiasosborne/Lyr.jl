@@ -69,7 +69,7 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     # See tinyvdbio.h:2896 — is_compressed: nonzero=ZIP, zero=NONE
     # This was removed in version 222+ (compression moved to per-grid metadata)
     is_compressed_byte = UInt8(0)
-    if format_version >= 220 && format_version < 222
+    if format_version >= 220 && format_version < VDB_FILE_VERSION_NODE_MASK_COMPRESSION
         is_compressed_byte, pos = read_u8(bytes, pos)
     end
 
@@ -80,27 +80,27 @@ function read_header(bytes::Vector{UInt8}, pos::Int)::Tuple{VDBHeader, Int}
     # Compression handling differs by version:
     # - v220-221: Global compression flag in header (read above)
     # - v222+: Compression is per-grid, NOT in header. Read at start of each grid.
-    compression_flags = if format_version < 222
-        flags = UInt32(0x2)  # ACTIVE_MASK always set for v220-221
+    compression_flags = if format_version < VDB_FILE_VERSION_NODE_MASK_COMPRESSION
+        flags = VDB_COMPRESS_ACTIVE_MASK  # ACTIVE_MASK always set for v220-221
         if is_compressed_byte != 0
-            flags |= UInt32(0x1)  # ZIP flag
+            flags |= VDB_COMPRESS_ZIP
         end
         flags
     else
-        UInt32(0x0)  # Placeholder for v222+; overridden per-grid
+        VDB_COMPRESS_NONE  # Placeholder for v222+; overridden per-grid
     end
 
     # Determine codec from flags (for v220-221; v222+ overrides per-grid)
-    compression = if (compression_flags & 0x4) != 0
+    compression = if (compression_flags & VDB_COMPRESS_BLOSC) != 0
         BloscCodec()
-    elseif (compression_flags & 0x1) != 0
+    elseif (compression_flags & VDB_COMPRESS_ZIP) != 0
         ZipCodec()
     else
         NoCompression()
     end
 
-    # Check COMPRESS_ACTIVE_MASK flag (0x2)
-    active_mask_compression = (compression_flags & 0x2) != 0
+    # Check COMPRESS_ACTIVE_MASK flag
+    active_mask_compression = (compression_flags & VDB_COMPRESS_ACTIVE_MASK) != 0
 
     header = VDBHeader(format_version, library_major, library_minor, has_grid_offsets, compression, active_mask_compression, uuid)
     (header, pos)

@@ -201,7 +201,7 @@ All keyword arguments are forwarded to the scalar `voxelize`.
 function voxelize(f::VectorField3D; kwargs...)
     mag_fn = (x, y, z) -> begin
         v = evaluate(f, x, y, z)
-        sqrt(v[1]^2 + v[2]^2 + v[3]^2)
+        norm(v)
     end
     scalar_f = ScalarField3D(mag_fn, domain(f), characteristic_scale(f))
     voxelize(scalar_f; kwargs...)

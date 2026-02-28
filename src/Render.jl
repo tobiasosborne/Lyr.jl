@@ -1,7 +1,6 @@
 # Render.jl - Sphere tracing renderer for VDB level sets
 
 using Random: Xoshiro
-using LinearAlgebra: normalize, dot, cross
 
 """
     Camera
@@ -115,7 +114,7 @@ function _estimate_normal(grid::Grid{T}, point::NTuple{3, Float64}, h::Float64):
          sample_world(grid, (point[1], point[2], point[3] - h))
 
     n = SVec3d(Float64(dx), Float64(dy), Float64(dz))
-    len = sqrt(n[1]^2 + n[2]^2 + n[3]^2)
+    len = norm(n)
     len < 1e-10 ? (0.0, 0.0, 1.0) : Tuple(n / len)
 end
 
@@ -133,7 +132,7 @@ function shade(normal::NTuple{3, Float64}, light_dir::NTuple{3, Float64})::Float
     diffuse = 0.8
 
     # Lambertian: max(0, N · L)
-    n_dot_l = max(0.0, normal[1]*light_dir[1] + normal[2]*light_dir[2] + normal[3]*light_dir[3])
+    n_dot_l = max(0.0, dot(normal, light_dir))
 
     ambient + diffuse * n_dot_l
 end

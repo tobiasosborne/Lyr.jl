@@ -59,16 +59,16 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
 
         # For v222+, read per-grid compression flags (4 bytes)
         # Flags: 0x1=ZIP, 0x2=ACTIVE_MASK, 0x4=BLOSC
-        grid_codec, grid_mask_compressed = if header.format_version >= 222
+        grid_codec, grid_mask_compressed = if header.format_version >= VDB_FILE_VERSION_NODE_MASK_COMPRESSION
             compression_flags, pos = read_u32_le(bytes, pos)
-            codec = if (compression_flags & 0x4) != 0
+            codec = if (compression_flags & VDB_COMPRESS_BLOSC) != 0
                 BloscCodec()
-            elseif (compression_flags & 0x1) != 0
+            elseif (compression_flags & VDB_COMPRESS_ZIP) != 0
                 ZipCodec()
             else
                 NoCompression()
             end
-            mask_compressed = (compression_flags & 0x2) != 0
+            mask_compressed = (compression_flags & VDB_COMPRESS_ACTIVE_MASK) != 0
             (codec, mask_compressed)
         else
             (header.compression, header.active_mask_compression)
@@ -120,12 +120,22 @@ function parse_vdb(bytes::Vector{UInt8})::VDBFile
     VDBFile(header, grids_temp)
 end
 
+using Mmap
+
 """
-    parse_vdb(path::String) -> VDBFile
+    parse_vdb(path::String; mmap::Bool=false) -> VDBFile
 
 Parse a VDB file from a file path.
+
+When `mmap=true`, the file is memory-mapped instead of loaded into memory,
+which avoids copying for large VDB files. Default is `false` for safety
+(mmap'd memory invalidates if the file is modified during parse).
 """
-function parse_vdb(path::String)::VDBFile
-    bytes = read(path)
+function parse_vdb(path::String; mmap::Bool=false)::VDBFile
+    bytes = if mmap
+        Mmap.mmap(path)
+    else
+        read(path)
+    end
     parse_vdb(bytes)
 end

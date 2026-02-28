@@ -59,7 +59,7 @@ end
 Construct a ray from origin and direction. Direction is normalized.
 """
 function Ray(origin::SVec3d, direction::SVec3d)
-    len = sqrt(direction[1]^2 + direction[2]^2 + direction[3]^2)
+    len = norm(direction)
     dir = direction / len
     Ray(origin, dir, _safe_inv_dir(dir))
 end

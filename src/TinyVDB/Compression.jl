@@ -14,20 +14,12 @@ using CodecZlib
 # Constants
 # =============================================================================
 
-"""No compression."""
-const COMPRESS_NONE = UInt32(0x00)
-
-"""Zlib compression."""
-const COMPRESS_ZIP = UInt32(0x01)
-
-"""Active mask compression (reduces stored values to active voxels only)."""
-const COMPRESS_ACTIVE_MASK = UInt32(0x02)
-
-"""Blosc compression (not supported)."""
-const COMPRESS_BLOSC = UInt32(0x04)
-
-"""File version where per-grid compression was introduced."""
-const FILE_VERSION_NODE_MASK_COMPRESSION = UInt32(222)
+# Aliases for shared constants (defined in VDBConstants.jl)
+const COMPRESS_NONE = VDB_COMPRESS_NONE
+const COMPRESS_ZIP = VDB_COMPRESS_ZIP
+const COMPRESS_ACTIVE_MASK = VDB_COMPRESS_ACTIVE_MASK
+const COMPRESS_BLOSC = VDB_COMPRESS_BLOSC
+const FILE_VERSION_NODE_MASK_COMPRESSION = VDB_FILE_VERSION_NODE_MASK_COMPRESSION
 
 # =============================================================================
 # Compression Reading Functions

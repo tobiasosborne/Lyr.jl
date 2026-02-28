@@ -175,6 +175,13 @@ Check if the voxel at coordinate `c` is active.
 """
 is_active(tree::Tree{T}, c::Coord) where T = _tree_probe(tree, c)[2]
 
+"""
+    is_active(acc::ValueAccessor{T}, c::Coord) -> Bool
+
+Check if the voxel at coordinate `c` is active, using the accessor's tree.
+"""
+is_active(acc::ValueAccessor{T}, c::Coord) where T = _tree_probe(acc.tree, c)[2]
+
 # Tile region sizes for counting active voxels
 # VDB tree hierarchy: Root → Internal2(32³) → Internal1(16³) → Leaf(8³)
 const ROOT_TILE_VOXELS = 4096^3

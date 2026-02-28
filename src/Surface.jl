@@ -67,7 +67,7 @@ Projects the voxel center onto the ray via dot product.
 function _coord_t(ray::Ray, ijk::Coord)::Float64
     center = SVec3d(Float64(ijk.x) + 0.5, Float64(ijk.y) + 0.5, Float64(ijk.z) + 0.5)
     delta = center - ray.origin
-    delta[1] * ray.direction[1] + delta[2] * ray.direction[2] + delta[3] * ray.direction[3]
+    dot(delta, ray.direction)
 end
 
 """
@@ -105,37 +105,37 @@ end
     _surface_normal(acc::ValueAccessor{T}, point::SVec3d, bg::T) -> SVec3d
 
 Compute surface normal at `point` (index-space) via central differences with
-band-edge fallback. Returns a unit vector.
+active-voxel-aware fallback. Uses the tree's active mask (ground truth for
+narrow band membership) instead of threshold heuristics. Returns a unit vector.
 """
 function _surface_normal(acc::ValueAccessor{T}, point::SVec3d, bg::T)::SVec3d where T
     c = coord(round(Int32, point[1]), round(Int32, point[2]), round(Int32, point[3]))
     cv = Float64(get_value(acc, c))
-    bg_f = Float64(abs(bg)) - 1e-6
 
-    dx = _gradient_axis(acc, c, Int32(1), Int32(0), Int32(0), cv, bg_f)
-    dy = _gradient_axis(acc, c, Int32(0), Int32(1), Int32(0), cv, bg_f)
-    dz = _gradient_axis(acc, c, Int32(0), Int32(0), Int32(1), cv, bg_f)
+    dx = _gradient_axis(acc, c, Int32(1), Int32(0), Int32(0), cv)
+    dy = _gradient_axis(acc, c, Int32(0), Int32(1), Int32(0), cv)
+    dz = _gradient_axis(acc, c, Int32(0), Int32(0), Int32(1), cv)
 
-    len = sqrt(dx^2 + dy^2 + dz^2)
-    if len < 1e-10
-        return SVec3d(0.0, 0.0, 1.0)
-    end
-    SVec3d(dx / len, dy / len, dz / len)
+    len = hypot(dx, dy, dz)
+    len < 1e-10 ? SVec3d(0.0, 0.0, 1.0) : SVec3d(dx / len, dy / len, dz / len)
 end
 
 """
-    _gradient_axis(acc, c, di, dj, dk, center, bg_threshold) -> Float64
+    _gradient_axis(acc, c, di, dj, dk, center) -> Float64
 
-Compute one axis of the gradient with fallback for band-edge voxels.
-Uses central differences when both neighbors are in-band, forward/backward
+Compute one axis of the gradient with active-voxel-aware fallback.
+Uses `is_active` to determine if neighbors are in the narrow band,
+then central differences when both are active, forward/backward
 difference when only one is, and 0 when neither is.
 """
 function _gradient_axis(acc::ValueAccessor{T}, c::Coord, di::Int32, dj::Int32, dk::Int32,
-                         center::Float64, bg_threshold::Float64)::Float64 where T
-    vp = Float64(get_value(acc, Coord(c.x + di, c.y + dj, c.z + dk)))
-    vm = Float64(get_value(acc, Coord(c.x - di, c.y - dj, c.z - dk)))
-    p_ok = abs(vp) < bg_threshold
-    m_ok = abs(vm) < bg_threshold
+                         center::Float64)::Float64 where T
+    cp = Coord(c.x + di, c.y + dj, c.z + dk)
+    cm = Coord(c.x - di, c.y - dj, c.z - dk)
+    vp = Float64(get_value(acc, cp))
+    vm = Float64(get_value(acc, cm))
+    p_ok = is_active(acc, cp)
+    m_ok = is_active(acc, cm)
     if p_ok && m_ok
         (vp - vm) * 0.5
     elseif p_ok
@@ -162,7 +162,7 @@ function _transform_normal(transform::LinearTransform, normal::SVec3d)::SVec3d
     # Normal transforms by inverse-transpose of the upper 3x3
     # inv_mat is already stored; transpose it
     world_n = transpose(transform.inv_mat) * normal
-    len = sqrt(world_n[1]^2 + world_n[2]^2 + world_n[3]^2)
+    len = norm(world_n)
     if len < 1e-10
         return SVec3d(0.0, 0.0, 1.0)
     end

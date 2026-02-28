@@ -12,7 +12,7 @@ function _build_mask(::Type{Mask{N,W}}, indices) where {N,W}
         bit_i = idx % 64
         words[word_i] |= UInt64(1) << bit_i
     end
-    Mask{N,W}(NTuple{W,UInt64}(words))
+    Mask{N,W}(ntuple(i -> @inbounds(words[i]), Val(W)))
 end
 
 """

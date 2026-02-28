@@ -341,9 +341,7 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
             end
 
             # Phase function
-            cos_theta = -(ray.direction[1] * light_dir[1] +
-                         ray.direction[2] * light_dir[2] +
-                         ray.direction[3] * light_dir[3])
+            cos_theta = -dot(ray.direction, light_dir)
             phase = evaluate(pf, cos_theta)
 
             # Accumulate
@@ -371,7 +369,7 @@ Returns (direction_to_light, intensity, distance).
 """
 function _light_contribution(light::PointLight, point::SVec3d)
     delta = light.position - point
-    dist = sqrt(delta[1]^2 + delta[2]^2 + delta[3]^2)
+    dist = norm(delta)
     if dist < 1e-10
         return (SVec3d(0.0, 0.0, 1.0), SVec3d(0.0, 0.0, 0.0), 0.0)
     end

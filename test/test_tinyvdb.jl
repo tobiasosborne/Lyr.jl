@@ -23,8 +23,11 @@ import .TinyVDB:
     read_grid_compression, read_compressed_data,
     # Topology
     read_leaf_topology, read_internal_topology, read_root_topology,
-    # Values
+    # Values / topology flags
     NO_MASK_OR_INACTIVE_VALS, NO_MASK_AND_MINUS_BG,
+    NO_MASK_AND_ONE_INACTIVE_VAL, MASK_AND_NO_INACTIVE_VALS,
+    MASK_AND_ONE_INACTIVE_VAL, MASK_AND_TWO_INACTIVE_VALS,
+    NO_MASK_AND_ALL_VALS,
     read_leaf_values, read_tree_values,
     # Parser
     read_metadata, read_transform

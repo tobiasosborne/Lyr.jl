@@ -125,7 +125,7 @@ function sample_phase(pf::HenyeyGreensteinPhase, incoming::SVec3d, rng::Abstract
     dir = sin_theta * cos(phi) * t + sin_theta * sin(phi) * b + cos_theta * w
 
     # Normalize to counteract floating-point drift
-    dir / sqrt(dir[1]^2 + dir[2]^2 + dir[3]^2)
+    dir / norm(dir)
 end
 
 """
@@ -152,16 +152,12 @@ function _build_orthonormal_basis(w::SVec3d)::Tuple{SVec3d, SVec3d}
     end
 
     # Gram-Schmidt: t = normalize(helper - (helper . w) * w)
-    t_raw = helper - (helper[1] * w[1] + helper[2] * w[2] + helper[3] * w[3]) * w
-    t_len = sqrt(t_raw[1]^2 + t_raw[2]^2 + t_raw[3]^2)
+    t_raw = helper - dot(helper, w) * w
+    t_len = norm(t_raw)
     t = t_raw / t_len
 
-    # b = w x t (already unit length since w and t are orthonormal)
-    b = SVec3d(
-        w[2] * t[3] - w[3] * t[2],
-        w[3] * t[1] - w[1] * t[3],
-        w[1] * t[2] - w[2] * t[1]
-    )
+    # b = w × t (already unit length since w and t are orthonormal)
+    b = cross(w, t)
 
     (t, b)
 end

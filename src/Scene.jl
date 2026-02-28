@@ -49,8 +49,8 @@ struct DirectionalLight <: AbstractLight
 end
 
 function DirectionalLight(dir::NTuple{3,Float64}, intensity::NTuple{3,Float64})
-    len = sqrt(dir[1]^2 + dir[2]^2 + dir[3]^2)
-    d = len > 1e-10 ? SVec3d(dir[1]/len, dir[2]/len, dir[3]/len) : SVec3d(0.0, 0.0, 1.0)
+    d = SVec3d(dir...)
+    d = norm(d) > 1e-10 ? normalize(d) : SVec3d(0.0, 0.0, 1.0)
     DirectionalLight(d, SVec3d(intensity...))
 end
 

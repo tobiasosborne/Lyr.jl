@@ -33,6 +33,12 @@ end
 Base.showerror(io::IO, e::UnsupportedVersionError) = print(io, "UnsupportedVersionError: version $(e.version) not supported (minimum: $(e.min_version))")
 
 # =============================================================================
+# Shared format constants (from parent Lyr module)
+# =============================================================================
+
+include(joinpath(@__DIR__, "..", "VDBConstants.jl"))
+
+# =============================================================================
 # Includes (order matters - dependencies first)
 # =============================================================================
 
