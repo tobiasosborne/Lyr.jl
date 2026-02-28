@@ -63,6 +63,7 @@ include("LevelSetPrimitives.jl")
 include("CSG.jl")
 include("LevelSetOps.jl")
 include("Filtering.jl")
+include("Morphology.jl")
 include("Particles.jl")
 
 # Phase 2: VDB Writer
@@ -108,6 +109,9 @@ export gradient_grid, divergence, curl_grid, mean_curvature, magnitude_grid, nor
 
 # --- Filtering ---
 export filter_mean, filter_gaussian
+
+# --- Morphology ---
+export dilate, erode
 
 # --- Surface finding ---
 export find_surface, SurfaceHit

@@ -119,6 +119,7 @@ import Lyr:
     include("test_differential_ops.jl")
     include("test_level_set_ops.jl")
     include("test_filtering.jl")
+    include("test_morphology.jl")
     include("test_ray.jl")
     include("test_dda.jl")
     include("test_node_dda.jl")
