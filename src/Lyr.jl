@@ -61,6 +61,7 @@ include("GridOps.jl")
 include("Pruning.jl")
 include("LevelSetPrimitives.jl")
 include("CSG.jl")
+include("LevelSetOps.jl")
 include("Particles.jl")
 
 # Phase 2: VDB Writer
@@ -129,6 +130,11 @@ export comp_max, comp_min, comp_sum, comp_mul, comp_replace
 export clip
 export prune
 export csg_union, csg_intersection, csg_difference
+
+# --- Level set operations ---
+export sdf_to_fog, sdf_interior_mask, extract_isosurface_mask
+export level_set_area, level_set_volume
+export check_level_set, LevelSetDiagnostic
 
 # --- NanoVDB (high-level) ---
 export NanoGrid, build_nanogrid
