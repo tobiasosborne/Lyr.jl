@@ -2,7 +2,85 @@
 
 ---
 
-## Latest Session (2026-02-28) — Phases 4-7 Complete + Renderer Investigation (19 Issues Closed)
+## Latest Session (2026-02-28b) — HDDA Volume Rendering (1 P1 Issue Closed)
+
+**Status**: GREEN — 72,197 tests pass, 312/326 total closed (95.7%)
+
+### What Was Done
+
+1. **HDDA-accelerated volume rendering** (`path-tracer-tp4g` — P1 CLOSED)
+   - Researched OpenVDB's `VolumeHDDA` (openvdb/math/DDA.h) and NanoVDB's `TreeMarcher` (nanovdb/math/HDDA.h) in local clone at `~/Projects/OpenVDB`
+   - Implemented span-merging HDDA following OpenVDB pattern: adjacent active leaves and tiles are coalesced into continuous `TimeSpan(t0, t1)` intervals
+   - `src/VolumeHDDA.jl` (175 LOC) — `NanoVolumeHDDA{T}` iterator, three-phase state machine (I1 DDA → I2 DDA → root advance)
+   - All three renderers updated: `delta_tracking_step`, `ratio_tracking`, `_march_emission_absorption`
+   - 76 new HDDA-specific tests (span merging, gap detection, coverage equivalence vs `NanoVolumeRayIntersector`)
+   - 3 showcase renders: `hdda_smoke.png`, `hdda_particles.png`, `hdda_smoke_production.png`
+
+### Why the Previous Attempt Failed (and How This Fixes It)
+
+The reverted commit `0e654f9` used `NanoVolumeRayIntersector` which yields individual `NanoLeafHit` per leaf. Three bugs:
+1. **Independent `intersect_bbox` per leaf** — adjacent 8³ boxes produce different shared-boundary times due to FP rounding
+2. **`t` reset per leaf** — `t = max(t_enter, leaf_hit.t_enter)` used the volume-level `t_enter`, not the running `t`
+3. **Step alignment** — fixed-step march restarted at each leaf's `t_enter`
+
+The fix: **span merging**. `NanoVolumeHDDA` DDA-steps through I1/I2 cells and tracks an open span. Active cells extend the span; the first inactive cell closes it and yields the merged `TimeSpan`. The integrator never sees leaf boundaries. Key insight from OpenVDB's `VolumeHDDA::march()` (DDA.h:224-241): it returns `TimeSpan` covering potentially many adjacent leaves, not individual hits.
+
+### Key Architecture Decisions
+
+- **Span merging at I1/I2 level, not voxel level** — the integrator samples at its own step size within spans; no need to DDA individual voxels
+- **`node_dda_cell_time(ndda)` = `minimum(ndda.state.tmax)`** — exit time of current DDA cell, used for span boundary tracking
+- **Existing `NanoVolumeRayIntersector` preserved** — still used for surface intersection (level-set zero-crossing) where individual leaf hits are needed
+- **`t` carried continuously across spans** in delta/ratio tracking (no reset). For emission-absorption, `t` resets per span (correct: empty gaps contribute nothing)
+
+### Performance
+
+- Sparse particles (50 spheres in 200³): **97% empty space skipped**, ~30x theoretical speedup
+- Dense smoke: 28% skip ratio (less sparse, less benefit)
+- All three renderers benefit: preview, production, shadow rays
+
+### Issues Closed This Session
+
+| ID | Title |
+|----|-------|
+| path-tracer-tp4g | HDDA-accelerated volume rendering |
+
+### What Remains (14 open issues)
+
+**P2 implementable features (4 issues):**
+- `path-tracer-x3q3` — [P1.2] Half-precision write support (small, self-contained)
+- `path-tracer-3k88` — [P2.2] particle_trails_to_sdf
+- `path-tracer-lo3u` — [P2.3] Enhanced ParticleField in Field Protocol
+- `path-tracer-123f` — [P2.4] Point advection utility
+
+**P2-P3 deferred/investigation (10 issues):**
+- `path-tracer-2ijw` — [P6.1] volume_to_mesh — DEFERRED, integrate with Meshing.jl
+- `path-tracer-f2bw` — [P6.2] mesh_to_level_set (investigation, high value)
+- `path-tracer-61q5` — [P5.2] fog_to_sdf
+- `path-tracer-6h6l` — [P5.8] FastSweeping Eikonal solver
+- `path-tracer-52l4` — [P2.5] PointDataGrid support
+- `path-tracer-w83o` — [P7.5] Node-level iteration + parallel ranges
+- `path-tracer-jwmp` — [P7.4] Segmentation
+- `path-tracer-iy3d` — [P5.9] LevelSetAdvection/Morphing/Fracture
+- `path-tracer-rh5q` — [P7.7] VolumeAdvection/LevelSetTracker
+- `path-tracer-z1ns` — [P7.6] MultiResGrid
+
+### Next Session Priorities
+
+1. **P6.2 mesh_to_level_set** — highest-value remaining feature (meshes → voxels pipeline)
+2. **P1.2 half-precision write** — completes Phase 1
+3. **API review** — OpenVDB reference is cloned at `~/Projects/OpenVDB`. Send review subagents to compare API "slices" against Lyr.jl.
+
+### Key Files Changed This Session
+- `src/VolumeHDDA.jl` (NEW — span-merging HDDA iterator)
+- `src/DDA.jl` (+8 lines: `node_dda_cell_time` helper)
+- `src/VolumeIntegrator.jl` (all 3 renderers use HDDA spans)
+- `src/Lyr.jl` (+1 include)
+- `test/test_volume_hdda.jl` (NEW — 76 tests)
+- `showcase/hdda_smoke.png`, `showcase/hdda_particles.png`, `showcase/hdda_smoke_production.png`
+
+---
+
+## Previous Session (2026-02-28) — Phases 4-7 Complete + Renderer Investigation (19 Issues Closed)
 
 **Status**: GREEN — 72,121 tests pass, 311/326 total closed (95.4%)
 
