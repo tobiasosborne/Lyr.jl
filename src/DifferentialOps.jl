@@ -119,6 +119,64 @@ end
 # Vector → Vector: normalize
 # ============================================================================
 
+# ============================================================================
+# Scalar → Scalar: mean curvature
+# ============================================================================
+
+"""
+    mean_curvature(grid::Grid{T}) -> Grid{T}
+
+Compute the mean curvature κ = div(∇f / |∇f|) at every active voxel.
+Uses a single BoxStencil pass — no intermediate grids. For a sphere of
+radius R, κ = 2/R at the surface.
+"""
+function mean_curvature(grid::Grid{T}) where {T <: AbstractFloat}
+    s = BoxStencil(grid.tree)
+    data = Dict{Coord, T}()
+    half = T(0.5)
+    quarter = T(0.25)
+    two = T(2)
+    for (c, _) in active_voxels(grid.tree)
+        move_to!(s, c)
+        ctr = center_value(s)
+
+        # First derivatives
+        fx = (value_at(s, 1, 0, 0) - value_at(s, -1, 0, 0)) * half
+        fy = (value_at(s, 0, 1, 0) - value_at(s, 0, -1, 0)) * half
+        fz = (value_at(s, 0, 0, 1) - value_at(s, 0, 0, -1)) * half
+
+        grad_sq = fx * fx + fy * fy + fz * fz
+        if grad_sq < eps(T)
+            data[c] = zero(T)
+            continue
+        end
+
+        # Second derivatives (diagonal)
+        fxx = value_at(s, 1, 0, 0) + value_at(s, -1, 0, 0) - two * ctr
+        fyy = value_at(s, 0, 1, 0) + value_at(s, 0, -1, 0) - two * ctr
+        fzz = value_at(s, 0, 0, 1) + value_at(s, 0, 0, -1) - two * ctr
+
+        # Cross derivatives
+        fxy = (value_at(s, 1, 1, 0) - value_at(s, -1, 1, 0) -
+               value_at(s, 1, -1, 0) + value_at(s, -1, -1, 0)) * quarter
+        fxz = (value_at(s, 1, 0, 1) - value_at(s, -1, 0, 1) -
+               value_at(s, 1, 0, -1) + value_at(s, -1, 0, -1)) * quarter
+        fyz = (value_at(s, 0, 1, 1) - value_at(s, 0, -1, 1) -
+               value_at(s, 0, 1, -1) + value_at(s, 0, -1, -1)) * quarter
+
+        # κ = [fx²(fyy+fzz) + fy²(fxx+fzz) + fz²(fxx+fyy) - 2(fx·fy·fxy + fx·fz·fxz + fy·fz·fyz)] / |∇f|³
+        numer = fx*fx*(fyy+fzz) + fy*fy*(fxx+fzz) + fz*fz*(fxx+fyy) -
+                two * (fx*fy*fxy + fx*fz*fxz + fy*fz*fyz)
+        data[c] = numer / (grad_sq * sqrt(grad_sq))
+    end
+    build_grid(data, zero(T); name=grid.name, grid_class=GRID_FOG_VOLUME,
+               voxel_size=_grid_voxel_size(grid))
+end
+
+# ============================================================================
+# Vector → Vector: normalize
+# ============================================================================
+
 @inline function _vec_normalize(v::NTuple{3, T})::NTuple{3, T} where {T <: AbstractFloat}
     n = T(norm(v))
     n < eps(T) ? (zero(T), zero(T), zero(T)) : (v[1] / n, v[2] / n, v[3] / n)

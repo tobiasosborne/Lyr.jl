@@ -102,7 +102,7 @@ export sample_world, sample_trilinear, gradient
 export GradStencil, BoxStencil, move_to!, center_value, laplacian, value_at, mean_value
 
 # --- Differential operators ---
-export gradient_grid, divergence, curl_grid, magnitude_grid, normalize_grid
+export gradient_grid, divergence, curl_grid, mean_curvature, magnitude_grid, normalize_grid
 
 # --- Surface finding ---
 export find_surface, SurfaceHit

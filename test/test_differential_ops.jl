@@ -233,6 +233,47 @@
     end
 
     # ========================================================================
+    # mean_curvature
+    # ========================================================================
+
+    @testset "mean_curvature: sphere" begin
+        # Sphere SDF radius=10: κ = div(∇f/|∇f|) = 2/R = 0.2
+        sphere = create_level_set_sphere(center=(0.0, 0.0, 0.0), radius=10.0,
+                                          voxel_size=1.0, half_width=3.0)
+        mc = mean_curvature(sphere)
+
+        @test mc isa Grid{Float32}
+        # Test at surface along each axis
+        for c in [coord(10, 0, 0), coord(0, 10, 0), coord(0, 0, 10),
+                  coord(-10, 0, 0), coord(0, -10, 0), coord(0, 0, -10)]
+            κ = get_value(mc.tree, c)
+            @test κ ≈ 0.2f0 atol=0.05f0  # 2/R with discrete error tolerance
+        end
+    end
+
+    @testset "mean_curvature: planar field" begin
+        # f = x → flat level sets → zero curvature
+        grid = _scalar_grid((x, y, z) -> x)
+        mc = mean_curvature(grid)
+        for c in _INTERIOR
+            @test abs(get_value(mc.tree, c)) < 1f-5
+        end
+    end
+
+    @testset "mean_curvature: larger sphere has less curvature" begin
+        small = create_level_set_sphere(center=(0.0, 0.0, 0.0), radius=5.0,
+                                         voxel_size=1.0, half_width=3.0)
+        large = create_level_set_sphere(center=(0.0, 0.0, 0.0), radius=15.0,
+                                         voxel_size=1.0, half_width=3.0)
+        mc_small = mean_curvature(small)
+        mc_large = mean_curvature(large)
+        κ_small = abs(get_value(mc_small.tree, coord(5, 0, 0)))
+        κ_large = abs(get_value(mc_large.tree, coord(15, 0, 0)))
+        # κ = 2/R → smaller sphere has larger curvature
+        @test κ_small > κ_large
+    end
+
+    # ========================================================================
     # Edge cases
     # ========================================================================
 
