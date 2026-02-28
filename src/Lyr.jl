@@ -49,6 +49,9 @@ include("Surface.jl")
 # NanoVDB flat-buffer representation (GPU-ready)
 include("NanoVDB.jl")
 
+# Volume HDDA — span-merging hierarchical DDA for volume rendering
+include("VolumeHDDA.jl")
+
 # General Relativistic ray tracing
 include("GR/GR.jl")
 

@@ -28,33 +28,35 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid, t_enter::Float64,
     t = t_enter
     acc = NanoValueAccessor(nanogrid)
 
-    while true
-        # Sample free-flight distance
-        t += -log(rand(rng)) / sigma_maj
+    for span in NanoVolumeHDDA(nanogrid, ray)
+        span.t0 >= t_exit && break
+        t = max(t, span.t0)
+        span_end = min(span.t1, t_exit)
 
-        if t >= t_exit
-            return (t_exit, :escaped)
-        end
+        while true
+            t += -log(rand(rng)) / sigma_maj
+            t >= span_end && break
 
-        # Sample density at current position
-        pos = ray.origin + t * ray.direction
-        density = Float64(get_value(acc,
-            coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
-        density = max(0.0, density)
+            pos = ray.origin + t * ray.direction
+            density = Float64(get_value(acc,
+                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+            density = max(0.0, density)
 
-        sigma_real = density * sigma_maj
-        accept_prob = clamp(sigma_real / sigma_maj, 0.0, 1.0)
+            sigma_real = density * sigma_maj
+            accept_prob = clamp(sigma_real / sigma_maj, 0.0, 1.0)
 
-        if rand(rng) < accept_prob
-            # Real collision — scatter or absorb
-            if rand(rng) < albedo
-                return (t, :scattered)
-            else
-                return (t, :absorbed)
+            if rand(rng) < accept_prob
+                if rand(rng) < albedo
+                    return (t, :scattered)
+                else
+                    return (t, :absorbed)
+                end
             end
         end
-        # Null collision — continue
+        # t carries forward — no reset
     end
+
+    return (t_exit, :escaped)
 end
 
 # ============================================================================
@@ -71,29 +73,35 @@ just accumulates transmittance weights.
 """
 function ratio_tracking(ray::Ray, nanogrid::NanoGrid, t0::Float64, t1::Float64,
                         sigma_maj::Float64, rng)::Float64
-    T = 1.0
+    T_acc = 1.0
     t = t0
     acc = NanoValueAccessor(nanogrid)
 
-    while true
-        t += -log(rand(rng)) / sigma_maj
+    for span in NanoVolumeHDDA(nanogrid, ray)
+        span.t0 >= t1 && break
+        t = max(t, span.t0)
+        span_end = min(span.t1, t1)
 
-        if t >= t1
-            return T
+        while true
+            t += -log(rand(rng)) / sigma_maj
+            t >= span_end && break
+
+            pos = ray.origin + t * ray.direction
+            density = Float64(get_value(acc,
+                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+            density = max(0.0, density)
+
+            sigma_real = density * sigma_maj
+            T_acc *= (1.0 - clamp(sigma_real / sigma_maj, 0.0, 1.0))
+
+            if T_acc < 1e-10
+                return 0.0
+            end
         end
-
-        pos = ray.origin + t * ray.direction
-        density = Float64(get_value(acc,
-            coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
-        density = max(0.0, density)
-
-        sigma_real = density * sigma_maj
-        T *= (1.0 - clamp(sigma_real / sigma_maj, 0.0, 1.0))
-
-        if T < 1e-10
-            return 0.0
-        end
+        # t carries forward — no reset
     end
+
+    T_acc
 end
 
 # ============================================================================
@@ -167,44 +175,41 @@ function _march_emission_absorption(ray::Ray, scene::Scene,
         nanogrid === nothing && throw(ArgumentError(
             "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
 
-        bmin, bmax = _volume_bounds(nanogrid)
-        hit = intersect_bbox(ray, bmin, bmax)
-        hit === nothing && continue
-        t_enter, t_exit = hit
-
         tf = vol.material.transfer_function
         sigma_scale = vol.material.sigma_scale
         emission_scale = vol.material.emission_scale
         nacc = NanoValueAccessor(nanogrid)
 
-        t = t_enter
-        for _ in 1:max_steps
-            t >= t_exit && break
+        steps_remaining = max_steps
+        for span in NanoVolumeHDDA(nanogrid, ray)
             transmittance < 1e-4 && break
+            steps_remaining <= 0 && break
 
-            pos = ray.origin + t * ray.direction
-            density = Float64(get_value(nacc,
-                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
-            density = max(0.0, density)
+            t = span.t0
+            while t < span.t1 && transmittance > 1e-4 && steps_remaining > 0
+                pos = ray.origin + t * ray.direction
+                density = Float64(get_value(nacc,
+                    coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+                density = max(0.0, density)
 
-            if density > 1e-6
-                rgba = evaluate(tf, density)
-                r, g, b, a = rgba
+                if density > 1e-6
+                    rgba = evaluate(tf, density)
+                    r, g, b, a = rgba
 
-                # Extinction for this step
-                sigma_t = a * sigma_scale * step_size
-                step_transmittance = exp(-sigma_t)
+                    sigma_t = a * sigma_scale * step_size
+                    step_transmittance = exp(-sigma_t)
 
-                # Emission contribution
-                emit = (1.0 - step_transmittance) * emission_scale
-                acc_r += transmittance * r * emit
-                acc_g += transmittance * g * emit
-                acc_b += transmittance * b * emit
+                    emit = (1.0 - step_transmittance) * emission_scale
+                    acc_r += transmittance * r * emit
+                    acc_g += transmittance * g * emit
+                    acc_b += transmittance * b * emit
 
-                transmittance *= step_transmittance
+                    transmittance *= step_transmittance
+                end
+
+                t += step_size
+                steps_remaining -= 1
             end
-
-            t += step_size
         end
     end
 

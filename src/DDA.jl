@@ -184,6 +184,14 @@ function node_dda_voxel_origin(ndda::NodeDDA)::Coord
     Coord(ndda.state.ijk[1] * cs, ndda.state.ijk[2] * cs, ndda.state.ijk[3] * cs)
 end
 
+"""
+    node_dda_cell_time(ndda::NodeDDA) -> Float64
+
+Ray parameter at the next boundary crossing of the current cell.
+This is the exit time of the current cell / entry time of the next.
+"""
+@inline node_dda_cell_time(ndda::NodeDDA)::Float64 = minimum(ndda.state.tmax)
+
 # --- Hierarchical DDA ---
 
 """
