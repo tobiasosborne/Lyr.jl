@@ -63,12 +63,14 @@ function decompress(::ZipCodec, bytes::Vector{UInt8})::Vector{UInt8}
 end
 
 """
-    read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int) -> Tuple{Vector{UInt8}, Int}
+    read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int)
 
-Read uncompressed data directly (no size prefix).
+Read uncompressed data directly (no size prefix). Returns a view into the
+original bytes to avoid copying.
 """
-function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int)::Tuple{Vector{UInt8}, Int}
-    read_bytes(bytes, pos, expected_size)
+function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int)
+    @boundscheck checkbounds(bytes, pos:pos+expected_size-1)
+    (@view(bytes[pos:pos+expected_size-1]), pos + expected_size)
 end
 
 """
@@ -84,7 +86,7 @@ Per VDB format spec (Section 10):
 
 For NoCompression codec, no size prefix is used (handled by separate method).
 """
-function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, expected_size::Int)::Tuple{Vector{UInt8}, Int}
+function read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::Codec, expected_size::Int)
     # Read chunk size (signed Int64)
     chunk_size, pos = read_i64_le(bytes, pos)
 

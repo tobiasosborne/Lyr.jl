@@ -173,12 +173,14 @@ V222+ value format per-leaf:
 function materialize_i2_values_v222(::Type{T}, i2_topo::I2TopoData{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{InternalNode2{T}, Int} where T
     # V222+ format: each leaf has [metadata][optional inactive vals][optional selection mask][compressed values]
     i1_nodes = Vector{InternalNode1{T}}()
+    # Pre-allocate reusable buffer for leaf value assembly (reduces GC pressure)
+    buf = Vector{T}(undef, 512)
 
     for i1_topo in i2_topo.children
         leaf_nodes = Vector{LeafNode{T}}()
 
         for leaf_topo in i1_topo.leaves
-            values, pos = read_leaf_values(T, bytes, pos, codec, mask_compressed, leaf_topo.value_mask, background, version; value_size)
+            values, pos = read_leaf_values(T, bytes, pos, codec, mask_compressed, leaf_topo.value_mask, background, version; value_size, buf)
             push!(leaf_nodes, LeafNode{T}(leaf_topo.origin, leaf_topo.value_mask, values))
         end
 
@@ -339,11 +341,13 @@ Read leaf buffers and construct an I2 subtree for pre-v222 format (readBuffers p
 """
 function materialize_i2_values_v220(::Type{T}, topo::I2TopoDataV220{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{InternalNode2{T}, Int} where T
     i1_nodes = Vector{InternalNode1{T}}()
+    # Pre-allocate reusable buffer for leaf value assembly (reduces GC pressure)
+    buf = Vector{T}(undef, 512)
 
     for (i1_origin, i1_child_mask, i1_value_mask, leaf_topos, i1_active_vals) in topo.i1_children
         leaf_nodes = Vector{LeafNode{T}}()
         for (leaf_origin, leaf_mask) in leaf_topos
-            values, pos = read_leaf_values(T, bytes, pos, codec, false, leaf_mask, background, version; value_size)
+            values, pos = read_leaf_values(T, bytes, pos, codec, false, leaf_mask, background, version; value_size, buf)
             push!(leaf_nodes, LeafNode{T}(leaf_origin, leaf_mask, values))
         end
 

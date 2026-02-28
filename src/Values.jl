@@ -8,7 +8,7 @@ Used for both LeafNodes and InternalNodes.
 
 `value_size` is the on-disk element size (2 for half-precision Float16, otherwise sizeof(T)).
 """
-function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T; value_size::Int=sizeof(T))::Tuple{Vector{T}, Int} where {T,N,W}
+function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::Mask{N,W}, background::T; value_size::Int=sizeof(T), buf::Union{Nothing,Vector{T}}=nothing)::Tuple{Vector{T}, Int} where {T,N,W}
     is_half = (value_size == 2 && sizeof(T) == 4)
 
     # 1. Read metadata byte
@@ -59,8 +59,12 @@ function read_dense_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Cod
         reinterpret(T, data)
     end
 
-    # 5. Assemble final values array
-    all_values = Vector{T}(undef, N)
+    # 5. Assemble final values array (reuse caller-provided buffer when available)
+    all_values = if buf !== nothing && length(buf) >= N
+        buf
+    else
+        Vector{T}(undef, N)
+    end
 
     if use_sparse
         active_idx = 1
@@ -112,7 +116,7 @@ end
 
 Read leaf node values. Dispatches to v220 (interleaved) or v222+ (ReadMaskValues) format.
 """
-function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32; value_size::Int=sizeof(T))::Tuple{NTuple{512,T}, Int} where T
+function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Codec, mask_compressed::Bool, mask::LeafMask, background::T, version::UInt32; value_size::Int=sizeof(T), buf::Union{Nothing,Vector{T}}=nothing)::Tuple{NTuple{512,T}, Int} where T
     if version < 222
         # Pre-v222 readBuffers: value_mask (64B) + origin (12B) + numBuffers (1B) + compressed ALL 512 values.
         # See reference/LeafNode.h:1382-1390 — value_mask is re-emitted for ALL versions.
@@ -135,14 +139,20 @@ function read_leaf_values(::Type{T}, bytes::Vector{UInt8}, pos::Int, codec::Code
                 T.(halfs)
             end
         else
-            collect(reinterpret(T, data))
+            src = reinterpret(T, data)
+            if buf !== nothing && length(buf) >= 512
+                copyto!(buf, 1, src, 1, min(length(src), 512))
+                buf
+            else
+                collect(src)
+            end
         end
         (NTuple{512, T}(all_values), pos)
     else
         # v222+ buffer pass: each leaf re-emits its value_mask (64 bytes) before ReadMaskValues data.
         # Skip it — already read during topology pass.
         pos += 64
-        values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, mask, background; value_size)
+        values, pos = read_dense_values(T, bytes, pos, codec, mask_compressed, mask, background; value_size, buf)
         (NTuple{512, T}(values), pos)
     end
 end
