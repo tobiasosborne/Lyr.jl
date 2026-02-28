@@ -269,7 +269,7 @@ end
 # =============================================================================
 
 """
-    write_tree!(io::IO, tree::RootNode{T}) -> Nothing
+    write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression()) -> Nothing
 
 Write a VDB tree in v222+ format (separate topology and values sections).
 
@@ -277,9 +277,9 @@ Phase 1 (topology): root tiles, then for each root child:
   I2 masks → I2 ReadMaskValues → [I1 masks → I1 ReadMaskValues → [leaf mask]...]...
 
 Phase 2 (values): for each leaf in same order:
-  value_mask (64B) → metadata(1B) → raw active values
+  value_mask (64B) → metadata(1B) → active values (optionally compressed)
 """
-function write_tree!(io::IO, tree::RootNode{T}) where T
+function write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression()) where T
     # Separate root table into tiles and I2 children (sorted by origin for determinism)
     tiles = Tuple{Coord, Tile{T}}[]
     children = Tuple{Coord, InternalNode2{T}}[]
@@ -319,40 +319,65 @@ function write_tree!(io::IO, tree::RootNode{T}) where T
         write_i32_le!(io, origin.y)
         write_i32_le!(io, origin.z)
 
-        # Write I2 topology
-        _write_i2_topology!(io, i2_node, tree.background, all_leaves)
+        # Write I2 topology (with codec for internal node value compression)
+        _write_i2_topology!(io, i2_node, tree.background, all_leaves, codec)
     end
 
-    # Phase 2: Write leaf values
+    # Phase 2: Write leaf values (with optional compression)
     for leaf in all_leaves
-        _write_leaf_values!(io, leaf, tree.background)
+        _write_leaf_values!(io, leaf, tree.background, codec)
     end
 
     nothing
 end
 
 """Write masks + tile values for an internal node (shared by I2 and I1)."""
-function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}) where T
+function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}, codec::Codec=NoCompression()) where T
     write_mask!(io, node.child_mask)
     write_mask!(io, node.value_mask)
-    # metadata=0 (NO_MASK_OR_INACTIVE_VALS), then active tile values directly
-    # — tiles are already stored in on_indices order, no dense array needed
+    # metadata=0 (NO_MASK_OR_INACTIVE_VALS), then active tile values
+    # The tile data goes through compression just like leaf data
     write_u8!(io, UInt8(0x00))
+
+    # Collect tile data into raw bytes
+    buf = IOBuffer()
     for tile in node.tiles
-        write_tile_value!(io, tile.value)
+        write_tile_value!(buf, tile.value)
+    end
+    raw_data = take!(buf)
+
+    if codec isa NoCompression
+        # No compression: write raw data directly (no size prefix)
+        write_bytes!(io, raw_data)
+    else
+        if isempty(raw_data)
+            # Empty chunk: size prefix = 0
+            write_i64_le!(io, Int64(0))
+        else
+            compressed_data = compress(codec, raw_data)
+            if length(compressed_data) >= length(raw_data)
+                # Compression didn't help: negative size prefix + raw data
+                write_i64_le!(io, Int64(-length(raw_data)))
+                write_bytes!(io, raw_data)
+            else
+                # Compression succeeded: positive size prefix + compressed data
+                write_i64_le!(io, Int64(length(compressed_data)))
+                write_bytes!(io, compressed_data)
+            end
+        end
     end
 end
 
-function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}) where T
-    _write_node_masks_and_tiles!(io, i2, T)
+function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression()) where T
+    _write_node_masks_and_tiles!(io, i2, T, codec)
     for child in i2.children
-        _write_i1_topology!(io, child, background, all_leaves)
+        _write_i1_topology!(io, child, background, all_leaves, codec)
     end
     nothing
 end
 
-function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_leaves::Vector{LeafNode{T}}) where T
-    _write_node_masks_and_tiles!(io, i1, T)
+function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression()) where T
+    _write_node_masks_and_tiles!(io, i1, T, codec)
     for leaf in i1.children
         write_mask!(io, leaf.value_mask)
         push!(all_leaves, leaf)
@@ -361,24 +386,50 @@ function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_le
 end
 
 """
-    _write_leaf_values!(io, leaf::LeafNode{T}, background::T) -> Nothing
+    _write_leaf_values!(io, leaf::LeafNode{T}, background::T, codec::Codec=NoCompression()) -> Nothing
 
 Write leaf values in v222+ format:
 1. Value mask (64 bytes) — re-emitted in readBuffers
 2. Metadata byte (1 byte) — 0x00 = NO_MASK_OR_INACTIVE_VALS
-3. Raw active values (with NoCompression, COMPRESS_ACTIVE_MASK)
+3. Active values, optionally compressed with codec
+
+For NoCompression: raw active values (no size prefix).
+For Zip/Blosc: Int64 size prefix + compressed data. If compressed size >= uncompressed,
+writes negative size prefix (-uncompressed_size) + raw data instead.
 """
-function _write_leaf_values!(io::IO, leaf::LeafNode{T}, background::T) where T
+function _write_leaf_values!(io::IO, leaf::LeafNode{T}, background::T, codec::Codec=NoCompression()) where T
     # Re-emit value mask (64 bytes = 8 UInt64 words)
     write_mask!(io, leaf.value_mask)
 
     # Metadata byte: 0 = NO_MASK_OR_INACTIVE_VALS
     write_u8!(io, UInt8(0x00))
 
-    # Write only active values (mask_compressed path)
-    active_count = count_on(leaf.value_mask)
+    # Collect active values into a raw byte buffer
+    buf = IOBuffer()
     for idx in on_indices(leaf.value_mask)
-        write_tile_value!(io, leaf.values[idx + 1])  # 1-indexed
+        write_tile_value!(buf, leaf.values[idx + 1])  # 1-indexed
+    end
+    raw_data = take!(buf)
+
+    if codec isa NoCompression
+        # No compression: write raw data directly (no size prefix)
+        write_bytes!(io, raw_data)
+    else
+        # Compress the raw data
+        compressed_data = compress(codec, raw_data)
+
+        if isempty(raw_data)
+            # Empty chunk: size prefix = 0
+            write_i64_le!(io, Int64(0))
+        elseif length(compressed_data) >= length(raw_data)
+            # Compression didn't help: write negative size prefix + raw data
+            write_i64_le!(io, Int64(-length(raw_data)))
+            write_bytes!(io, raw_data)
+        else
+            # Compression succeeded: write positive size prefix + compressed data
+            write_i64_le!(io, Int64(length(compressed_data)))
+            write_bytes!(io, compressed_data)
+        end
     end
 
     nothing
@@ -412,22 +463,22 @@ end
 # =============================================================================
 
 """
-    write_vdb(path::String, grid::Grid{T}) -> Nothing
+    write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression()) -> Nothing
 
 Write a single grid to a VDB file.
 
 Creates a v224 format file with:
-- NoCompression codec
+- Specified compression codec (default: NoCompression)
 - COMPRESS_ACTIVE_MASK enabled (sparse active value storage)
 - Standard grid metadata (class)
 """
-function write_vdb(path::String, grid::Grid{T})::Nothing where T
+function write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression())::Nothing where T
     header = VDBHeader(
         UInt32(224),            # format_version (current)
         UInt32(11),             # library_major
         UInt32(0),              # library_minor
         true,                   # has_grid_offsets
-        NoCompression(),        # codec (placeholder for v222+)
+        codec,                  # compression codec
         true,                   # active_mask_compression
         "00000000-0000-0000-0000-000000000000"  # UUID
     )
@@ -465,17 +516,17 @@ function write_vdb_to_buffer(vdb::VDBFile)::Vector{UInt8}
 end
 
 """
-    write_vdb_to_buffer(grid::Grid{T}) -> Vector{UInt8}
+    write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression()) -> Vector{UInt8}
 
 Write a single grid to an in-memory buffer.
 """
-function write_vdb_to_buffer(grid::Grid{T})::Vector{UInt8} where T
+function write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression())::Vector{UInt8} where T
     header = VDBHeader(
         UInt32(224),
         UInt32(11),
         UInt32(0),
         true,
-        NoCompression(),
+        codec,
         true,
         "00000000-0000-0000-0000-000000000000"
     )
@@ -531,9 +582,15 @@ function _write_grid(io::IO, grid::Grid{T}, header::VDBHeader) where T
     byte_offset = position(io)
 
     # For v222+: write per-grid compression flags
-    # Flags: 0x2 = COMPRESS_ACTIVE_MASK (we use this), 0x0 for no ZIP/Blosc
+    # Flags: 0x2 = COMPRESS_ACTIVE_MASK, 0x1 = ZIP, 0x4 = BLOSC
     if header.format_version >= 222
-        compression_flags = UInt32(0x2)  # COMPRESS_ACTIVE_MASK only
+        compression_flags = VDB_COMPRESS_ACTIVE_MASK  # Always set
+        codec = header.compression
+        if codec isa ZipCodec
+            compression_flags |= VDB_COMPRESS_ZIP
+        elseif codec isa BloscCodec
+            compression_flags |= VDB_COMPRESS_BLOSC
+        end
         write_u32_le!(io, compression_flags)
     end
 
@@ -555,8 +612,9 @@ function _write_grid(io::IO, grid::Grid{T}, header::VDBHeader) where T
     # block_offset marks start of the tree data (topology + values)
     block_offset = position(io)
 
-    # Write tree
-    write_tree!(io, grid.tree)
+    # Write tree (with codec for leaf value compression)
+    codec_for_tree = header.format_version >= 222 ? header.compression : NoCompression()
+    write_tree!(io, grid.tree, codec_for_tree)
 
     # end_offset marks end of grid data (0-indexed)
     end_offset = position(io)

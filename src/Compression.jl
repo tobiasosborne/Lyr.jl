@@ -62,6 +62,41 @@ function decompress(::ZipCodec, bytes::Vector{UInt8})::Vector{UInt8}
     transcode(ZlibDecompressor, bytes)
 end
 
+# =============================================================================
+# Compress (write-side)
+# =============================================================================
+
+"""
+    compress(::NoCompression, data::Vector{UInt8}) -> Vector{UInt8}
+
+Identity compression - returns input unchanged.
+"""
+compress(::NoCompression, data::Vector{UInt8})::Vector{UInt8} = data
+
+"""
+    compress(::BloscCodec, data::Vector{UInt8}) -> Vector{UInt8}
+
+Compress data using Blosc.
+"""
+function compress(::BloscCodec, data::Vector{UInt8})::Vector{UInt8}
+    isempty(data) && return UInt8[]
+    Blosc.compress(data)
+end
+
+"""
+    compress(::ZipCodec, data::Vector{UInt8}) -> Vector{UInt8}
+
+Compress data using Zlib.
+"""
+function compress(::ZipCodec, data::Vector{UInt8})::Vector{UInt8}
+    isempty(data) && return UInt8[]
+    transcode(ZlibCompressor, data)
+end
+
+# =============================================================================
+# Read compressed bytes (read-side)
+# =============================================================================
+
 """
     read_compressed_bytes(bytes::Vector{UInt8}, pos::Int, codec::NoCompression, expected_size::Int)
 

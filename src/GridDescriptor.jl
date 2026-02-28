@@ -67,6 +67,8 @@ function parse_value_type(grid_type::String)::Union{DataType, Nothing}
         NTuple{3, Float32}
     elseif vtype in ("vec3d", "Vec3d")
         NTuple{3, Float64}
+    elseif vtype in ("vec3i", "Vec3i")
+        NTuple{3, Int32}
     elseif vtype in ("float", "Float")
         Float32
     elseif vtype in ("double", "Double")

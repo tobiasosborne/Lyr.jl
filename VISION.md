@@ -396,7 +396,7 @@ This is not a modest project. Here is the competitive landscape and where Lyr fi
 
 ### Phase 1: Foundation — COMPLETE
 
-VDB parser, writer, DDA traversal, NanoVDB flat layout. 10,400+ tests passing.
+VDB parser, writer, DDA traversal, NanoVDB flat layout. 29,500+ tests passing.
 
 | Component | Status |
 |-----------|--------|
@@ -407,7 +407,7 @@ VDB parser, writer, DDA traversal, NanoVDB flat layout. 10,400+ tests passing.
 | ValueAccessor with caching | Done |
 | Coordinate transforms | Done |
 
-### Phase 2: Volume Renderer — ~86% COMPLETE
+### Phase 2: Volume Renderer — COMPLETE
 
 | Component | Status |
 |-----------|--------|
@@ -424,21 +424,32 @@ VDB parser, writer, DDA traversal, NanoVDB flat layout. 10,400+ tests passing.
 | Deep EXR compositing | Not started |
 | Multi-scatter | Not started |
 
-### Phase 3: Field Protocol — NOT STARTED
+### Phase 3: Field Protocol — COMPLETE
 
-This is the new critical path. The interface between physics and visualization.
+The interface between physics and visualization.
 
-| # | Component | What | Why |
-|---|-----------|------|-----|
-| 1 | **Field types** | ScalarField3D, VectorField3D, TensorField3D, ParticleData, LineData | Universal physics interface |
-| 2 | **Adaptive voxelization** | Field → VDB grid with automatic resolution | Efficient sampling of continuous fields |
-| 3 | **Field line tracing** | RK4 integration through vector fields | EM, fluid, GR geodesics |
-| 4 | **Isosurface extraction** | Marching cubes on scalar fields | Fermi surfaces, orbitals, level sets |
-| 5 | **Glyph rendering** | Arrows, tensor ellipsoids | Vector/tensor field visualization |
-| 6 | **Time evolution** | Animate any field over time | Dynamics in every domain |
-| 7 | **Compositing** | Multi-field overlay, annotations, colorbars | Publication-quality output |
+| # | Component | Status |
+|---|-----------|--------|
+| 1 | **Field types** (ScalarField3D, VectorField3D, ComplexScalarField3D, ParticleField, TimeEvolution) | Done |
+| 2 | **Adaptive voxelization** (Field → VDB grid with automatic resolution) | Done |
+| 3 | **One-call visualization** (`visualize(field)` with sensible defaults) | Done |
+| 4 | **Camera/material/light presets** (orbit, front, iso, emission, cloud, fire) | Done |
 
-### Phase 4: Physics Modules — NOT STARTED
+### Phase 4: Full VDB Operations — IN PROGRESS
+
+Closing the grid-operations gap with OpenVDB while preserving Lyr's idiomatic Julia architecture (immutable trees, functional construction, multiple dispatch). ~43 issues tracked in beads.
+
+| Subphase | Components | Status |
+|----------|-----------|--------|
+| 4.1 Foundation Utilities | Write w/ compression, half-precision, changeBackground, activate/deactivate, iterators, copyToDense/FromDense, level set primitives, Vec3i | In progress |
+| 4.2 Particle Operations | particles_to_sdf, particle_trails_to_sdf, enhanced ParticleField, point advection | Not started |
+| 4.3 Grid Combinators | CSG (union/intersection/difference), compositing (max/min/sum/mul/replace), clipping, pruning | In progress |
+| 4.4 Differential Operators | Stencils, gradient, divergence, curl, laplacian, mean curvature, magnitude/normalize | Not started |
+| 4.5 Level Set Tools | sdf_to_fog, interior mask, isosurface mask, area/volume/genus, dilate/erode, diagnostics | Not started |
+| 4.6 Mesh Conversion | Marching cubes (volume_to_mesh) | Not started |
+| 4.7 Filtering & Advanced | Mean/Gaussian filter, tricubic interpolation, resampling | Not started |
+
+### Phase 5: Physics Modules — NOT STARTED
 
 Each module is a self-contained package that produces fields Lyr can visualize.
 
@@ -455,7 +466,7 @@ Each module is a self-contained package that produces fields Lyr can visualize.
 | 9 | **LyrPlasma** | P3 | MHD, magnetic topology, particle-in-cell |
 | 10 | **LyrAstro** | P4 | N-body, accretion disks, cosmological structure |
 
-### Phase 5: Production Quality
+### Phase 6: Production Quality
 
 | # | Component | What | Why |
 |---|-----------|------|-----|
@@ -577,6 +588,6 @@ The insight that killed the GUI is the same insight that makes this possible: wh
 
 ---
 
-*Vision revised: 2026-02-22*
+*Vision revised: 2026-02-28*
 *Original document: 2026-02-14*
 *The GUI is dead. Long live the agent.*

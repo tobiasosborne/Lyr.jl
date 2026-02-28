@@ -55,6 +55,10 @@ include("TinyVDB/TinyVDB.jl")
 
 # Grid construction from sparse data
 include("GridBuilder.jl")
+include("GridOps.jl")
+include("Pruning.jl")
+include("LevelSetPrimitives.jl")
+include("CSG.jl")
 include("Particles.jl")
 
 # Phase 2: VDB Writer
@@ -86,7 +90,7 @@ export parse_vdb, write_vdb
 export Grid, Coord, coord, SVec3f, SVec3d, Ray, Camera
 
 # --- Query API ---
-export get_value, is_active, active_voxels, leaves
+export get_value, is_active, active_voxels, inactive_voxels, all_voxels, leaves
 export active_voxel_count, leaf_count
 
 # --- Interpolation & gradient ---
@@ -108,6 +112,15 @@ export tf_blackbody, tf_cool_warm, tf_smoke, tf_viridis
 
 # --- Grid building ---
 export build_grid, voxelize
+export create_level_set_sphere, create_level_set_box
+
+# --- Grid operations ---
+export change_background, activate, deactivate
+export copy_to_dense, copy_from_dense
+export comp_max, comp_min, comp_sum, comp_mul, comp_replace
+export clip
+export prune
+export csg_union, csg_intersection, csg_difference
 
 # --- NanoVDB (high-level) ---
 export NanoGrid, build_nanogrid

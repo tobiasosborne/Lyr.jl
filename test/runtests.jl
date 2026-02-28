@@ -25,7 +25,7 @@ import Lyr:
     # Coordinates
     BBox, intersects, volume,
     # Compression
-    Codec, decompress, read_compressed_bytes,
+    Codec, compress, decompress, read_compressed_bytes,
     NoCompression, BloscCodec, ZipCodec,
     # Coordinate internals
     leaf_origin, internal1_origin, internal2_origin,
@@ -126,7 +126,9 @@ import Lyr:
     include("test_integration.jl")
     include("test_parser_equivalence.jl")
     include("test_writer.jl")
+    include("test_compression_write.jl")
     include("test_grid_builder.jl")
+    include("test_pruning.jl")
     include("test_transfer_function.jl")
     include("test_phase_function.jl")
     include("test_scene.jl")
