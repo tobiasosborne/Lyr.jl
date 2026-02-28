@@ -2,7 +2,52 @@
 
 ---
 
-## Latest Session (2026-02-27) — Elegance Sprint Part 2: 7 Issues (5 Done, 2 In Progress)
+## Latest Session (2026-02-28) — Julian Idiomaticity Sprint: 9 Issues Closed
+
+**Status**: GREEN — 29,778 tests pass, 280/282 issues closed (99.3%)
+
+### What Was Done
+
+1. **Closed 6 completed issues from previous session**: 51qa, 6bjk, ch41, yynz, htbz, z3ms
+
+2. **Vector ops → stdlib** (8 files, 14 replacements):
+   - Module-level `using LinearAlgebra: norm, normalize, dot, cross` in Lyr.jl
+   - Replaced 9 manual `sqrt(x^2+y^2+z^2)` with `norm()` or `hypot()`
+   - Replaced 3 manual dot product expansions with `dot()`
+   - Replaced 1 manual cross product (5 LOC) with `cross()`
+   - Removed duplicate `using LinearAlgebra` from Render.jl
+
+3. **GridBuilder ntuple fix**: `NTuple{W}(words)` → `ntuple(Val(W))` for compile-time construction
+
+4. **VDBConstants.jl** (closes `s56k`): Shared compression flags and version constants between Lyr and TinyVDB. Magic numbers intentionally NOT shared (different parsing strategies). TinyVDB aliases via `const COMPRESS_NONE = VDB_COMPRESS_NONE`.
+
+5. **Mmap option** (closes `nkdl`): `parse_vdb(path; mmap=true)` for memory-mapped VDB parsing. Opt-in for safety (default `false`).
+
+6. **Active-voxel gradient** (closes `czn`): `_gradient_axis` now uses `is_active(acc, coord)` instead of threshold heuristic `abs(v) < bg - ε`. Added `is_active(::ValueAccessor, ::Coord)` method.
+
+7. **TinyVDB test fix**: Pre-existing import issue — 5 NodeMaskFlag constants missing from standalone test import block.
+
+### Key Files Changed
+- `src/Lyr.jl` — module-level LinearAlgebra import, VDBConstants include
+- `src/VDBConstants.jl` — shared format constants (NEW)
+- `src/Surface.jl` — active-voxel-aware gradient
+- `src/Accessors.jl` — `is_active(::ValueAccessor, ::Coord)` method
+- `src/File.jl` — mmap kwarg + `using Mmap`
+- `src/PhaseFunction.jl` — norm/dot/cross replacements (-5 LOC)
+- `src/Ray.jl`, `src/Scene.jl`, `src/Render.jl`, `src/VolumeIntegrator.jl`, `src/Voxelize.jl` — norm/dot replacements
+- `src/GridBuilder.jl` — ntuple(Val(W))
+- `src/Header.jl`, `src/TinyVDB/Compression.jl`, `src/TinyVDB/TinyVDB.jl` — shared constants
+
+### What Remains (2 issues)
+```bash
+bd ready  # Shows:
+# path-tracer-sq2m — P3: Decompression buffer reuse (performance)
+# path-tracer-ntau — P4: Extract Render.jl to separate package (backlog)
+```
+
+---
+
+## Previous Session (2026-02-27) — Elegance Sprint Part 2: 7 Issues (5 Done, 2 In Progress)
 
 **Status**: GREEN — 29,778 tests pass (+116 new), Phase 1 & 2 complete, Phase 3 not started
 
