@@ -16,6 +16,9 @@ struct NearestInterpolation  <: InterpolationMethod end
 """Trilinear sampling — linearly interpolates the 8 surrounding voxels."""
 struct TrilinearInterpolation <: InterpolationMethod end
 
+"""Quadratic B-spline sampling — smooth interpolation using the 27 surrounding voxels."""
+struct QuadraticInterpolation <: InterpolationMethod end
+
 # --- SVec3d primary methods ---
 
 """
@@ -81,6 +84,9 @@ sample_world(grid::Grid{T}, xyz::SVec3d, ::NearestInterpolation) where T =
 sample_world(grid::Grid{T}, xyz::SVec3d, ::TrilinearInterpolation) where T =
     sample_trilinear(grid.tree, world_to_index_float(grid.transform, xyz))
 
+sample_world(grid::Grid{T}, xyz::SVec3d, ::QuadraticInterpolation) where T =
+    sample_quadratic(grid.tree, world_to_index_float(grid.transform, xyz))
+
 sample_world(grid::Grid{T}, xyz::SVec3d) where T =
     sample_world(grid, xyz, TrilinearInterpolation())
 
@@ -92,11 +98,61 @@ sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
 sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
     sample_trilinear(tree, SVec3d(ijk...))
 
+sample_quadratic(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
+    sample_quadratic(tree, SVec3d(ijk...))
+
 sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}, method::InterpolationMethod) where T =
     sample_world(grid, SVec3d(xyz...), method)
 
 sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}) where T =
     sample_world(grid, SVec3d(xyz...), TrilinearInterpolation())
+
+# --- Quadratic B-spline sampling ---
+
+"""
+    sample_quadratic(tree::Tree{T}, ijk::SVec3d) -> T
+
+Sample the tree using quadratic B-spline interpolation (27-point stencil).
+Smoother than trilinear with C1 continuity. Falls back to nearest-neighbor
+at narrow band boundaries (where any of the 27 values equals ±background).
+"""
+function sample_quadratic(tree::Tree{T}, ijk::SVec3d)::T where T
+    # Nearest grid point and fractional offsets ∈ [-0.5, 0.5]
+    i0 = round(Int64, ijk[1])
+    j0 = round(Int64, ijk[2])
+    k0 = round(Int64, ijk[3])
+    u = T(ijk[1] - Float64(i0))
+    v = T(ijk[2] - Float64(j0))
+    w = T(ijk[3] - Float64(k0))
+
+    # Quadratic B-spline weights per axis
+    wx = _quad_weights(u)
+    wy = _quad_weights(v)
+    wz = _quad_weights(w)
+
+    # Accumulate 27-point weighted sum with accessor for cache coherence
+    acc = ValueAccessor(tree)
+    bg = tree.background
+    result = zero(T)
+    for di in -1:1
+        for dj in -1:1
+            for dk in -1:1
+                val = get_value(acc, coord(i0 + di, j0 + dj, k0 + dk))
+                _is_background(val, bg) && return sample_nearest(tree, ijk)
+                result += wx[di + 2] * wy[dj + 2] * wz[dk + 2] * val
+            end
+        end
+    end
+    result
+end
+
+"""Quadratic B-spline weights for offset t ∈ [-0.5, 0.5]. Returns (w₋₁, w₀, w₁)."""
+@inline function _quad_weights(t::T) where {T <: AbstractFloat}
+    half = T(0.5)
+    (half * (half - t)^2,
+     T(0.75) - t * t,
+     half * (half + t)^2)
+end
 
 # --- Internal helpers (unchanged) ---
 

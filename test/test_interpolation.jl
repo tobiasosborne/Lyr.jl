@@ -110,6 +110,81 @@
         @test val == sample_nearest(tree, (0.0, 0.0, 7.5))
     end
 
+    @testset "sample_quadratic: smooth field" begin
+        # Build a grid with a smooth quadratic field f(x,y,z) = x² + y² + z²
+        # Quadratic B-spline should approximate this well
+        data = Dict{Coord, Float32}()
+        for x in -5:5, y in -5:5, z in -5:5
+            data[coord(x, y, z)] = Float32(x^2 + y^2 + z^2)
+        end
+        tree = build_grid(data, 0.0f0; name="quadratic_field").tree
+
+        # At grid points: quadratic B-spline doesn't interpolate exactly
+        # (it smooths), but should be close
+        @test abs(sample_quadratic(tree, (0.0, 0.0, 0.0)) - 0.0f0) < 1.0f0
+
+        # At half-integer points: should be smooth
+        val = sample_quadratic(tree, (0.5, 0.0, 0.0))
+        @test val isa Float32
+        @test val >= 0.0f0  # squared values are non-negative
+
+        # Symmetry: f(1,0,0) ≈ f(-1,0,0)
+        @test sample_quadratic(tree, (1.0, 0.0, 0.0)) ≈
+              sample_quadratic(tree, (-1.0, 0.0, 0.0))
+    end
+
+    @testset "sample_quadratic: constant field exact" begin
+        data = Dict{Coord, Float32}()
+        for x in -3:3, y in -3:3, z in -3:3
+            data[coord(x, y, z)] = 42.0f0
+        end
+        tree = build_grid(data, 0.0f0; name="const").tree
+
+        # Constant field: all weights sum to 1, so result = 42 exactly
+        @test sample_quadratic(tree, (0.0, 0.0, 0.0)) ≈ 42.0f0
+        @test sample_quadratic(tree, (0.3, -0.2, 0.4)) ≈ 42.0f0
+        @test sample_quadratic(tree, (1.0, 1.0, 1.0)) ≈ 42.0f0
+    end
+
+    @testset "sample_quadratic: smoother than trilinear" begin
+        # Spike in a field of 1s (non-zero to avoid background fallback)
+        data = Dict{Coord, Float32}()
+        for x in -3:3, y in -3:3, z in -3:3
+            data[coord(x, y, z)] = 1.0f0
+        end
+        data[coord(0, 0, 0)] = 100.0f0
+        tree = build_grid(data, 999.0f0; name="spike").tree
+
+        # At grid point: trilinear = exact, quadratic = smoothed
+        tri_center = sample_trilinear(tree, (0.0, 0.0, 0.0))
+        quad_center = sample_quadratic(tree, (0.0, 0.0, 0.0))
+        @test tri_center ≈ 100.0f0
+        @test quad_center < 100.0f0  # B-spline smooths toward neighbors
+        @test quad_center > 1.0f0    # but still above neighbor values
+    end
+
+    @testset "sample_quadratic: NTuple convenience" begin
+        data = Dict{Coord, Float32}()
+        for x in -2:2, y in -2:2, z in -2:2
+            data[coord(x, y, z)] = 1.0f0
+        end
+        tree = build_grid(data, 0.0f0; name="ones").tree
+
+        # NTuple overload should work
+        @test sample_quadratic(tree, (0.0, 0.0, 0.0)) ≈ 1.0f0
+    end
+
+    @testset "sample_world with QuadraticInterpolation" begin
+        data = Dict{Coord, Float32}()
+        for x in -3:3, y in -3:3, z in -3:3
+            data[coord(x, y, z)] = 5.0f0
+        end
+        grid = build_grid(data, 0.0f0; name="const", voxel_size=2.0)
+
+        # World coord (0,0,0) -> index (0,0,0)
+        @test sample_world(grid, (0.0, 0.0, 0.0), QuadraticInterpolation()) ≈ 5.0f0
+    end
+
     @testset "gradient" begin
         tree = make_test_tree()
 
