@@ -100,7 +100,7 @@ export active_voxel_count, leaf_count
 
 # --- Interpolation & gradient ---
 export sample_world, sample_trilinear, sample_quadratic, gradient
-export QuadraticInterpolation
+export QuadraticInterpolation, resample_to_match
 
 # --- Stencils ---
 export GradStencil, BoxStencil, move_to!, center_value, laplacian, value_at, mean_value

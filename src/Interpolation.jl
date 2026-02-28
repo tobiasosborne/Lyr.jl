@@ -154,6 +154,69 @@ end
      half * (half + t)^2)
 end
 
+# --- Resampling ---
+
+"""
+    resample_to_match(source::Grid{T}, target::Grid;
+                      method=TrilinearInterpolation()) -> Grid{T}
+
+Resample `source` at every active voxel position of `target`. Each target
+voxel coordinate is converted to world space via `target`'s transform, then
+sampled from `source` using the specified interpolation method.
+Returns a new grid with `target`'s transform and topology.
+"""
+function resample_to_match(source::Grid{T}, target::Grid;
+                           method::InterpolationMethod=TrilinearInterpolation()) where T
+    data = Dict{Coord, T}()
+    bg = source.tree.background
+    for (c, _) in active_voxels(target.tree)
+        world_xyz = index_to_world(target.transform,
+                                   SVec3d(Float64(c.x), Float64(c.y), Float64(c.z)))
+        val = sample_world(source, world_xyz, method)
+        val != bg && (data[c] = val)
+    end
+    build_grid(data, bg; name=source.name, grid_class=source.grid_class,
+               voxel_size=_grid_voxel_size(target))
+end
+
+"""
+    resample_to_match(source::Grid{T}; voxel_size::Float64,
+                      method=TrilinearInterpolation()) -> Grid{T}
+
+Resample `source` to a new resolution. Iterates over the active bounding box
+at the new voxel size and samples the source at each position.
+"""
+function resample_to_match(source::Grid{T}; voxel_size::Float64,
+                           method::InterpolationMethod=TrilinearInterpolation()) where T
+    bbox = active_bounding_box(source.tree)
+    bbox === nothing && return build_grid(Dict{Coord, T}(), source.tree.background;
+                                          name=source.name, voxel_size=voxel_size)
+    src_tf = source.transform
+    # World-space bounding box
+    wmin = index_to_world(src_tf, SVec3d(Float64(bbox.min.x), Float64(bbox.min.y), Float64(bbox.min.z)))
+    wmax = index_to_world(src_tf, SVec3d(Float64(bbox.max.x), Float64(bbox.max.y), Float64(bbox.max.z)))
+
+    # Target index-space bounds
+    inv_vs = 1.0 / voxel_size
+    imin = floor.(Int32, wmin .* inv_vs)
+    imax = ceil.(Int32, wmax .* inv_vs)
+
+    tgt_tf = UniformScaleTransform(voxel_size)
+    data = Dict{Coord, T}()
+    bg = source.tree.background
+    for xi in imin[1]:imax[1]
+        for yi in imin[2]:imax[2]
+            for zi in imin[3]:imax[3]
+                world_xyz = SVec3d(Float64(xi), Float64(yi), Float64(zi)) .* voxel_size
+                val = sample_world(source, world_xyz, method)
+                val != bg && (data[coord(xi, yi, zi)] = val)
+            end
+        end
+    end
+    build_grid(data, bg; name=source.name, grid_class=source.grid_class,
+               voxel_size=voxel_size)
+end
+
 # --- Internal helpers (unchanged) ---
 
 # Check if a value equals ±background (for boundary detection)

@@ -185,6 +185,78 @@
         @test sample_world(grid, (0.0, 0.0, 0.0), QuadraticInterpolation()) ≈ 5.0f0
     end
 
+    @testset "resample_to_match: grid-to-grid" begin
+        # Source grid at voxel_size=1.0
+        data_src = Dict{Coord, Float32}()
+        for x in -5:5, y in -5:5, z in -5:5
+            data_src[coord(x, y, z)] = Float32(x^2 + y^2 + z^2)
+        end
+        source = build_grid(data_src, 0.0f0; name="src", voxel_size=1.0)
+
+        # Target grid at voxel_size=2.0 (coarser)
+        data_tgt = Dict{Coord, Float32}()
+        for x in -2:2, y in -2:2, z in -2:2
+            data_tgt[coord(x, y, z)] = 0.0f0
+        end
+        target = build_grid(data_tgt, 0.0f0; name="tgt", voxel_size=2.0)
+
+        resampled = resample_to_match(source, target)
+        @test resampled isa Grid{Float32}
+        # Target coord (1,0,0) at voxel_size=2.0 → world (2,0,0) → source value ≈ 4.0
+        @test get_value(resampled.tree, coord(1, 0, 0)) ≈ 4.0f0
+        # Target coord (0,0,0) → world (0,0,0) → source value = 0.0
+        @test get_value(resampled.tree, coord(0, 0, 0)) ≈ 0.0f0
+    end
+
+    @testset "resample_to_match: voxel_size kwarg" begin
+        # Source sphere at voxel_size=1.0
+        sphere = create_level_set_sphere(center=(0.0, 0.0, 0.0), radius=10.0,
+                                          voxel_size=1.0, half_width=3.0)
+        n_src = active_voxel_count(sphere.tree)
+
+        # Resample to voxel_size=2.0 (coarser → fewer voxels)
+        coarse = resample_to_match(sphere; voxel_size=2.0)
+        n_coarse = active_voxel_count(coarse.tree)
+        @test n_coarse > 0
+        @test n_coarse < n_src
+    end
+
+    @testset "resample_to_match: identity" begin
+        # Same voxel size → should preserve values at grid points
+        data = Dict{Coord, Float32}()
+        for x in -3:3, y in -3:3, z in -3:3
+            data[coord(x, y, z)] = Float32(x + y + z)
+        end
+        source = build_grid(data, 999.0f0; name="linear", voxel_size=1.0)
+
+        # Target with same voxel size and same coords
+        target = build_grid(data, 0.0f0; name="same", voxel_size=1.0)
+        resampled = resample_to_match(source, target)
+        # Interior values should match exactly (trilinear at grid points = exact)
+        for c in [coord(0,0,0), coord(1,1,1), coord(-2,1,0)]
+            @test get_value(resampled.tree, c) ≈ get_value(source.tree, c)
+        end
+    end
+
+    @testset "resample_to_match: quadratic method" begin
+        data = Dict{Coord, Float32}()
+        for x in -5:5, y in -5:5, z in -5:5
+            data[coord(x, y, z)] = 42.0f0
+        end
+        source = build_grid(data, 999.0f0; name="const", voxel_size=1.0)
+        target = build_grid(data, 0.0f0; name="tgt", voxel_size=1.0)
+
+        resampled = resample_to_match(source, target; method=QuadraticInterpolation())
+        # Constant field → constant output regardless of method
+        @test get_value(resampled.tree, coord(0, 0, 0)) ≈ 42.0f0
+    end
+
+    @testset "resample_to_match: empty grid" begin
+        empty = build_grid(Dict{Coord, Float32}(), 0.0f0; name="empty", voxel_size=1.0)
+        result = resample_to_match(empty; voxel_size=2.0)
+        @test active_voxel_count(result.tree) == 0
+    end
+
     @testset "gradient" begin
         tree = make_test_tree()
 
