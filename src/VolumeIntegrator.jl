@@ -25,36 +25,39 @@ then accepts/rejects based on `sigma_real/sigma_maj`.
 function delta_tracking_step(ray::Ray, nanogrid::NanoGrid, t_enter::Float64,
                              t_exit::Float64, sigma_maj::Float64,
                              albedo::Float64, rng)
-    t = t_enter
     acc = NanoValueAccessor(nanogrid)
 
-    while true
-        # Sample free-flight distance
-        t += -log(rand(rng)) / sigma_maj
+    # Hierarchical DDA: only sample within occupied leaves
+    for leaf_hit in NanoVolumeRayIntersector(nanogrid, ray)
+        leaf_hit.t_enter >= t_exit && break
+        t = max(t_enter, leaf_hit.t_enter)
+        t_leaf_exit = min(t_exit, leaf_hit.t_exit)
 
-        if t >= t_exit
-            return (t_exit, :escaped)
-        end
+        while true
+            t += -log(rand(rng)) / sigma_maj
 
-        # Sample density at current position
-        pos = ray.origin + t * ray.direction
-        density = Float64(get_value(acc,
-            coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
-        density = max(0.0, density)
+            if t >= t_leaf_exit
+                break  # move to next leaf
+            end
 
-        sigma_real = density * sigma_maj
-        accept_prob = clamp(sigma_real / sigma_maj, 0.0, 1.0)
+            pos = ray.origin + t * ray.direction
+            density = Float64(get_value(acc,
+                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+            density = max(0.0, density)
 
-        if rand(rng) < accept_prob
-            # Real collision — scatter or absorb
-            if rand(rng) < albedo
-                return (t, :scattered)
-            else
-                return (t, :absorbed)
+            accept_prob = clamp(density * sigma_maj / sigma_maj, 0.0, 1.0)
+
+            if rand(rng) < accept_prob
+                if rand(rng) < albedo
+                    return (t, :scattered)
+                else
+                    return (t, :absorbed)
+                end
             end
         end
-        # Null collision — continue
     end
+
+    return (t_exit, :escaped)
 end
 
 # ============================================================================
@@ -71,29 +74,36 @@ just accumulates transmittance weights.
 """
 function ratio_tracking(ray::Ray, nanogrid::NanoGrid, t0::Float64, t1::Float64,
                         sigma_maj::Float64, rng)::Float64
-    T = 1.0
-    t = t0
+    T_acc = 1.0
     acc = NanoValueAccessor(nanogrid)
 
-    while true
-        t += -log(rand(rng)) / sigma_maj
+    # Hierarchical DDA: only sample within occupied leaves
+    for leaf_hit in NanoVolumeRayIntersector(nanogrid, ray)
+        leaf_hit.t_enter >= t1 && break
+        t = max(t0, leaf_hit.t_enter)
+        t_leaf_exit = min(t1, leaf_hit.t_exit)
 
-        if t >= t1
-            return T
-        end
+        while true
+            t += -log(rand(rng)) / sigma_maj
 
-        pos = ray.origin + t * ray.direction
-        density = Float64(get_value(acc,
-            coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
-        density = max(0.0, density)
+            if t >= t_leaf_exit
+                break
+            end
 
-        sigma_real = density * sigma_maj
-        T *= (1.0 - clamp(sigma_real / sigma_maj, 0.0, 1.0))
+            pos = ray.origin + t * ray.direction
+            density = Float64(get_value(acc,
+                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+            density = max(0.0, density)
 
-        if T < 1e-10
-            return 0.0
+            T_acc *= (1.0 - clamp(density * sigma_maj / sigma_maj, 0.0, 1.0))
+
+            if T_acc < 1e-10
+                return 0.0
+            end
         end
     end
+
+    T_acc
 end
 
 # ============================================================================
@@ -167,44 +177,44 @@ function _march_emission_absorption(ray::Ray, scene::Scene,
         nanogrid === nothing && throw(ArgumentError(
             "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
 
-        bmin, bmax = _volume_bounds(nanogrid)
-        hit = intersect_bbox(ray, bmin, bmax)
-        hit === nothing && continue
-        t_enter, t_exit = hit
-
         tf = vol.material.transfer_function
         sigma_scale = vol.material.sigma_scale
         emission_scale = vol.material.emission_scale
         nacc = NanoValueAccessor(nanogrid)
 
-        t = t_enter
-        for _ in 1:max_steps
-            t >= t_exit && break
+        # Hierarchical DDA: only march through occupied leaves
+        steps_remaining = max_steps
+        for leaf_hit in NanoVolumeRayIntersector(nanogrid, ray)
             transmittance < 1e-4 && break
+            steps_remaining <= 0 && break
 
-            pos = ray.origin + t * ray.direction
-            density = Float64(get_value(nacc,
-                coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
-            density = max(0.0, density)
+            t = leaf_hit.t_enter
+            t_leaf_exit = leaf_hit.t_exit
 
-            if density > 1e-6
-                rgba = evaluate(tf, density)
-                r, g, b, a = rgba
+            while t < t_leaf_exit && transmittance > 1e-4 && steps_remaining > 0
+                pos = ray.origin + t * ray.direction
+                density = Float64(get_value(nacc,
+                    coord(round(Int32, pos[1]), round(Int32, pos[2]), round(Int32, pos[3]))))
+                density = max(0.0, density)
 
-                # Extinction for this step
-                sigma_t = a * sigma_scale * step_size
-                step_transmittance = exp(-sigma_t)
+                if density > 1e-6
+                    rgba = evaluate(tf, density)
+                    r, g, b, a = rgba
 
-                # Emission contribution
-                emit = (1.0 - step_transmittance) * emission_scale
-                acc_r += transmittance * r * emit
-                acc_g += transmittance * g * emit
-                acc_b += transmittance * b * emit
+                    sigma_t = a * sigma_scale * step_size
+                    step_transmittance = exp(-sigma_t)
 
-                transmittance *= step_transmittance
+                    emit = (1.0 - step_transmittance) * emission_scale
+                    acc_r += transmittance * r * emit
+                    acc_g += transmittance * g * emit
+                    acc_b += transmittance * b * emit
+
+                    transmittance *= step_transmittance
+                end
+
+                t += step_size
+                steps_remaining -= 1
             end
-
-            t += step_size
         end
     end
 
