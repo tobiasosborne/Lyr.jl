@@ -2,7 +2,110 @@
 
 ---
 
-## Latest Session (2026-02-28) — OpenVDB Feature Parity: Phase 1 + Phase 3 (12 Issues Closed)
+## Latest Session (2026-02-28) — Phases 4-7 Complete + Renderer Investigation (19 Issues Closed)
+
+**Status**: GREEN — 72,121 tests pass, 311/326 total closed (95.4%)
+
+### What Was Done
+
+1. **Phase 4: Differential Operators — COMPLETE (8 issues)**
+   - `src/Stencils.jl` — `GradStencil{T}` (7-point), `BoxStencil{T}` (27-point). NTuple-backed, zero-allocation, `@inline`
+   - `src/DifferentialOps.jl` — `gradient_grid`, `divergence`, `curl_grid`, `laplacian` (grid method), `magnitude_grid`, `normalize_grid`, `mean_curvature` (single-pass BoxStencil using 19 of 27 cached values)
+   - Physics-verified tests: ∇²(sphere R=10) = 0.1995 ≈ 2/R, curl(-y,x,0) = (0,0,2), etc.
+
+2. **Phase 5: Level Set Operations — CORE COMPLETE (6 issues)**
+   - `src/LevelSetOps.jl` — `sdf_to_fog`, `sdf_interior_mask`, `extract_isosurface_mask`, `level_set_area`, `level_set_volume`, `check_level_set`
+   - `src/Morphology.jl` — `dilate`, `erode` (face-neighbor topology expansion/contraction)
+
+3. **Phase 7: Advanced Operations — CORE COMPLETE (3 issues)**
+   - `src/Filtering.jl` — `filter_mean`, `filter_gaussian` (BoxStencil + iterative application)
+   - `src/Interpolation.jl` — `sample_quadratic` (27-point B-spline), `resample_to_match` (grid-to-grid and voxel_size overloads)
+
+4. **Phase 2: Particles (1 issue)**
+   - `src/Particles.jl` — `particles_to_sdf` (CSG union via min-accumulation, thread-parallel)
+
+5. **Renderer HDDA investigation** — attempted to accelerate volume renderer by using `NanoVolumeRayIntersector` leaf iteration instead of blind bbox march. Got 10x speedup but introduced visual seams at 8-voxel leaf boundaries. **Reverted**. Filed as P1 issue `path-tracer-tp4g` for proper engineering.
+
+6. **3 demo scripts** with 17+ rendered PNGs and 1 MP4:
+   - `examples/differential_ops_demo.jl` — 6 renders (gradient, laplacian, velocity, divergence, curl)
+   - `examples/filtering_morphology_demo.jl` — 11 renders (mean/gaussian filter, dilate/erode, masks)
+   - `examples/particle_animation.jl` — 60-frame MP4 of particle explosion/collapse
+
+7. **OpenVDB reference cloned** to `~/Projects/OpenVDB` for future API comparison
+
+### Key Architecture Decisions
+
+- **Stencils use NTuple storage** (stack-allocated, cache-line friendly). GradStencil wraps ValueAccessor for cache reuse across `move_to!` calls
+- **mean_curvature uses single-pass BoxStencil** — closed-form κ = div(∇f/|∇f|) from 9 partial derivatives, no intermediate grids
+- **particles_to_sdf uses min-accumulation** — `min(sdf_A, sdf_B)` is CSG union for level sets, thread-parallel with thread-local dicts
+- **Volume renderer is bbox-based** (not HDDA) — the leaf iterator was designed for surface intersection, not continuous volume sampling. HDDA needs proper engineering with continuous-t tracking across leaf intervals
+- **P6.1 volume_to_mesh DEFERRED** — user prioritizes meshes→voxels over voxels→meshes. Recommended: integrate with Meshing.jl rather than reimplementing MC tables
+
+### Issues Closed This Session
+
+| ID | Title |
+|----|-------|
+| path-tracer-3oim | [P4.1] Stencil infrastructure |
+| path-tracer-wqe5 | [P4.2] gradient_grid |
+| path-tracer-2ew9 | [P4.3] divergence |
+| path-tracer-tym8 | [P4.4] curl_grid |
+| path-tracer-v0es | [P4.5] laplacian |
+| path-tracer-uyyf | [P4.6] mean_curvature |
+| path-tracer-eauh | [P4.7] magnitude_grid / normalize_grid |
+| path-tracer-rbfb | [P5.1] sdf_to_fog |
+| path-tracer-eukh | [P5.3] sdf_interior_mask |
+| path-tracer-9czv | [P5.4] extract_isosurface_mask |
+| path-tracer-b51e | [P5.5] Level set measurement |
+| path-tracer-llry | [P5.6] Morphological operations |
+| path-tracer-94wg | [P5.7] check_level_set |
+| path-tracer-qzys | [P7.1] Filtering |
+| path-tracer-4bnx | [P7.2] Quadratic interpolation |
+| path-tracer-9btf | [P7.3] resample_to_match |
+| path-tracer-ffxu | [P2.1] particles_to_sdf |
+| + 2 demo/fix commits | |
+
+### What Remains (15 open issues)
+
+**P1 CRITICAL (1 issue):**
+- `path-tracer-tp4g` — HDDA-accelerated volume rendering. The renderer marches blindly through the full bbox; sparse volumes (scattered particles) are catastrophically slow. The `NanoVolumeRayIntersector` exists but naive leaf iteration causes visual seams. Needs proper continuous-t tracking. Expected 5-50x speedup.
+
+**P2 implementable features (4 issues):**
+- `path-tracer-x3q3` — [P1.2] Half-precision write support (small, self-contained)
+- `path-tracer-3k88` — [P2.2] particle_trails_to_sdf
+- `path-tracer-lo3u` — [P2.3] Enhanced ParticleField in Field Protocol
+- `path-tracer-123f` — [P2.4] Point advection utility
+
+**P2-P3 deferred/investigation (10 issues):**
+- `path-tracer-2ijw` — [P6.1] volume_to_mesh — DEFERRED, integrate with Meshing.jl
+- `path-tracer-f2bw` — [P6.2] mesh_to_level_set (investigation, high value)
+- `path-tracer-61q5` — [P5.2] fog_to_sdf
+- `path-tracer-6h6l` — [P5.8] FastSweeping Eikonal solver
+- `path-tracer-52l4` — [P2.5] PointDataGrid support
+- `path-tracer-w83o` — [P7.5] Node-level iteration + parallel ranges
+- `path-tracer-jwmp` — [P7.4] Segmentation
+- `path-tracer-iy3d` — [P5.9] LevelSetAdvection/Morphing/Fracture
+- `path-tracer-rh5q` — [P7.7] VolumeAdvection/LevelSetTracker
+- `path-tracer-z1ns` — [P7.6] MultiResGrid
+
+### Next Session Priorities
+
+1. **HDDA renderer optimization** (`path-tracer-tp4g`) — P1 blocker for any demo with scattered volumes. The fix: properly tile leaf intervals with continuous-t, validate against bbox reference. ~20 LOC change when done right.
+2. **P6.2 mesh_to_level_set** — highest-value remaining feature (meshes → voxels pipeline)
+3. **P1.2 half-precision write** — completes Phase 1
+4. **API review** — OpenVDB reference is cloned at `~/Projects/OpenVDB`. Send review subagents to compare API "slices" against Lyr.jl.
+
+### Key Files Changed This Session
+- `src/Stencils.jl`, `src/DifferentialOps.jl`, `src/LevelSetOps.jl`, `src/Morphology.jl`, `src/Filtering.jl` (NEW)
+- `src/Interpolation.jl` (quadratic B-spline + resample_to_match)
+- `src/Particles.jl` (particles_to_sdf)
+- `src/VolumeIntegrator.jl` (HDDA attempted + reverted)
+- `src/Lyr.jl` (exports)
+- `examples/differential_ops_demo.jl`, `examples/filtering_morphology_demo.jl`, `examples/particle_animation.jl` (NEW)
+- 7 new test files
+
+---
+
+## Previous Session (2026-02-28) — OpenVDB Feature Parity: Phase 1 + Phase 3 (12 Issues Closed)
 
 **Status**: GREEN — 37,997 tests pass, 12/43 new issues closed
 
