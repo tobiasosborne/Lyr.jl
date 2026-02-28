@@ -115,6 +115,7 @@ import Lyr:
     include("test_elegance_sprint.jl")
     include("test_accessors.jl")
     include("test_interpolation.jl")
+    include("test_stencils.jl")
     include("test_ray.jl")
     include("test_dda.jl")
     include("test_node_dda.jl")

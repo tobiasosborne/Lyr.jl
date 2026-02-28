@@ -39,6 +39,7 @@ include("File.jl")
 # Queries and utilities
 include("Accessors.jl")
 include("Interpolation.jl")
+include("Stencils.jl")
 include("Ray.jl")
 include("DDA.jl")
 include("Render.jl")
@@ -95,6 +96,9 @@ export active_voxel_count, leaf_count
 
 # --- Interpolation & gradient ---
 export sample_world, sample_trilinear, gradient
+
+# --- Stencils ---
+export GradStencil, BoxStencil, move_to!, center_value, laplacian, value_at, mean_value
 
 # --- Surface finding ---
 export find_surface, SurfaceHit
