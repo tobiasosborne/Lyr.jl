@@ -40,6 +40,7 @@ include("File.jl")
 include("Accessors.jl")
 include("Interpolation.jl")
 include("Stencils.jl")
+include("DifferentialOps.jl")
 include("Ray.jl")
 include("DDA.jl")
 include("Render.jl")
@@ -99,6 +100,9 @@ export sample_world, sample_trilinear, gradient
 
 # --- Stencils ---
 export GradStencil, BoxStencil, move_to!, center_value, laplacian, value_at, mean_value
+
+# --- Differential operators ---
+export gradient_grid, divergence, curl_grid, magnitude_grid, normalize_grid
 
 # --- Surface finding ---
 export find_surface, SurfaceHit

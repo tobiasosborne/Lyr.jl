@@ -47,8 +47,8 @@ end
 Create a GradStencil backed by a fresh ValueAccessor.
 """
 function GradStencil(tree::Tree{T}) where T
-    z = zero(T)
-    GradStencil{T}(ValueAccessor(tree), ntuple(_ -> z, Val(7)), Coord(Int32(0), Int32(0), Int32(0)))
+    bg = tree.background
+    GradStencil{T}(ValueAccessor(tree), ntuple(_ -> bg, Val(7)), Coord(Int32(0), Int32(0), Int32(0)))
 end
 
 """
@@ -124,8 +124,8 @@ end
 Create a BoxStencil backed by a fresh ValueAccessor.
 """
 function BoxStencil(tree::Tree{T}) where T
-    z = zero(T)
-    BoxStencil{T}(ValueAccessor(tree), ntuple(_ -> z, Val(27)), Coord(Int32(0), Int32(0), Int32(0)))
+    bg = tree.background
+    BoxStencil{T}(ValueAccessor(tree), ntuple(_ -> bg, Val(27)), Coord(Int32(0), Int32(0), Int32(0)))
 end
 
 """
