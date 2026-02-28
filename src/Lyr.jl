@@ -62,6 +62,7 @@ include("Pruning.jl")
 include("LevelSetPrimitives.jl")
 include("CSG.jl")
 include("LevelSetOps.jl")
+include("Filtering.jl")
 include("Particles.jl")
 
 # Phase 2: VDB Writer
@@ -104,6 +105,9 @@ export GradStencil, BoxStencil, move_to!, center_value, laplacian, value_at, mea
 
 # --- Differential operators ---
 export gradient_grid, divergence, curl_grid, mean_curvature, magnitude_grid, normalize_grid
+
+# --- Filtering ---
+export filter_mean, filter_gaussian
 
 # --- Surface finding ---
 export find_surface, SurfaceHit
