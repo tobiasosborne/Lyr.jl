@@ -113,18 +113,19 @@ _render(lap_fog, "showcase/diff_ops_laplacian.png";
 # ============================================================================
 println("\n--- 4. Velocity Field: Gaussian Vortex ---")
 let
-    R = 15
-    sigma2 = Float32(200.0)  # decay scale
+    R = 12
+    sigma2 = Float32(50.0)  # tight decay — exp(-r²/50) ≈ 0.01 at r=12
     data = Dict{Coord, NTuple{3, Float32}}()
     for x in -R:R, y in -R:R, z in -R:R
         r2 = Float32(x^2 + y^2 + z^2)
+        r2 > Float32(R * R) && continue  # spherical cutoff
         decay = exp(-r2 / sigma2)
         # Swirling vortex: (-y, x, 0) * decay + upward plume
         vx = Float32(-y) * decay
         vy = Float32(x) * decay
-        vz = Float32(2.0) * exp(-Float32(x^2 + y^2) / Float32(50.0)) * decay
+        vz = Float32(3.0) * exp(-Float32(x^2 + y^2) / Float32(25.0)) * decay
         mag = sqrt(vx^2 + vy^2 + vz^2)
-        mag > 0.01f0 && (data[coord(x, y, z)] = (vx, vy, vz))
+        mag > 0.05f0 && (data[coord(x, y, z)] = (vx, vy, vz))
     end
     global velocity = build_grid(data, (0.0f0, 0.0f0, 0.0f0); name="velocity")
 end
@@ -135,9 +136,9 @@ vel_mag = magnitude_grid(velocity)
 println("  Peak speed at (0,5,0): $(round(get_value(vel_mag.tree, coord(0, 5, 0)), digits=2))")
 println("  Speed at origin:       $(round(get_value(vel_mag.tree, coord(0, 0, 0)), digits=2))")
 
-vel_fog = _to_fog(vel_mag, v -> Float32(min(1.0, v / 10.0)); name="speed")
+vel_fog = _to_fog(vel_mag, v -> v > 0.3f0 ? Float32(min(1.0, v / 5.0)) : 0.0f0; name="speed")
 _render(vel_fog, "showcase/diff_ops_velocity.png";
-        cam_dist=60.0, tf=tf_blackbody(), sigma=20.0, emission=3.0)
+        cam_dist=50.0, tf=tf_blackbody(), sigma=25.0, emission=3.0)
 
 # ============================================================================
 # 5. Divergence of the Velocity Field
@@ -151,9 +152,9 @@ println("  Divergence at origin:  $(round(get_value(div_grid.tree, coord(0, 0, 0
 println("  Divergence at (5,0,0): $(round(get_value(div_grid.tree, coord(5, 0, 0)), digits=3))")
 
 # Render: absolute divergence — shows sources (positive) and sinks (negative)
-div_fog = _to_fog(div_grid, v -> Float32(min(1.0, abs(v) / 0.5)); name="divergence")
+div_fog = _to_fog(div_grid, v -> abs(v) > 0.05f0 ? Float32(min(1.0, abs(v) / 0.3)) : 0.0f0; name="divergence")
 _render(div_fog, "showcase/diff_ops_divergence.png";
-        cam_dist=60.0, tf=tf_cool_warm(), sigma=15.0, emission=2.5)
+        cam_dist=50.0, tf=tf_cool_warm(), sigma=25.0, emission=3.0)
 
 # ============================================================================
 # 6. Curl of the Velocity Field (Vorticity)
@@ -168,9 +169,9 @@ curl_mag = magnitude_grid(curl)
 println("  Vorticity at origin:  $(round(get_value(curl_mag.tree, coord(0, 0, 0)), digits=3))")
 println("  Vorticity at (5,0,0): $(round(get_value(curl_mag.tree, coord(5, 0, 0)), digits=3))")
 
-curl_fog = _to_fog(curl_mag, v -> Float32(min(1.0, v / 2.0)); name="vorticity")
+curl_fog = _to_fog(curl_mag, v -> v > 0.1f0 ? Float32(min(1.0, v / 1.5)) : 0.0f0; name="vorticity")
 _render(curl_fog, "showcase/diff_ops_curl.png";
-        cam_dist=60.0, tf=tf_viridis(), sigma=15.0, emission=2.5)
+        cam_dist=50.0, tf=tf_viridis(), sigma=25.0, emission=3.0)
 
 # ============================================================================
 # 7. Normalize — Direction Field Verification
