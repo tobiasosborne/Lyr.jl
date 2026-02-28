@@ -44,6 +44,30 @@
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
 
+### 7. Demo After Feature Set Completion
+
+When a logical group of features is complete (e.g., all Phase 1 items, or all CSG operations), **create a demo script** in `examples/` that:
+
+- Exercises every new function with realistic, application-near usage
+- Prints clear output showing what each operation does (voxel counts, file sizes, timing)
+- Renders at least one image showcasing the visual result (volume render of CSG, particles, etc.)
+- Saves output images to `showcase/` for the README/portfolio
+- Is self-contained: runs with `julia --project examples/demo_name.jl`
+- Uses the actual public API (catches bad ergonomics early)
+
+**Why**: Demos are the best integration test. They catch API friction, verify the render pipeline end-to-end, and produce visual proof of work. See `examples/grid_operations_demo.jl` as the template.
+
+**API cheat sheet for rendering** (easy to get wrong):
+```julia
+cam = Camera((50.0, 40.0, 30.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 40.0)  # tuples, not SVec3d
+mat = VolumeMaterial(tf_blackbody(); sigma_scale=15.0)  # tf is first positional, rest keyword
+nano = build_nanogrid(grid.tree)  # REQUIRED before rendering
+vol = VolumeEntry(grid, nano, mat)  # positional: grid, nanogrid, material
+scene = Scene(cam, DirectionalLight((1.0, 1.0, 1.0), (1.0, 0.5, 1.0)), vol)  # positional: cam, light(s), vol(s)
+img = render_volume_image(scene, 800, 600; spp=32)
+write_ppm("output.ppm", img)
+```
+
 ## Task Management
 
 - **Plan First**: Create beads issues (`bd create`) with clear scope before coding
@@ -51,6 +75,7 @@
 - **Track Progress**: `bd update <id> --status in_progress` when starting, `bd close <id>` when done
 - **Explain Changes**: High-level summary at each step
 - **Document Results**: Update `HANDOFF.md` with session summary
+- **Demo After Completion**: Create demo script exercising all new features (see rule 7 above)
 - **Capture Lessons**: Update `docs/lessons.md` after corrections
 
 ## Core Principles

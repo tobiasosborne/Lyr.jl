@@ -2,7 +2,78 @@
 
 ---
 
-## Latest Session (2026-02-28) — Final Sprint: 282/282 Issues Closed (100%)
+## Latest Session (2026-02-28) — OpenVDB Feature Parity: Phase 1 + Phase 3 (12 Issues Closed)
+
+**Status**: GREEN — 37,997 tests pass, 12/43 new issues closed
+
+### What Was Done
+
+1. **Created 43 beads issues** for the full OpenVDB feature parity roadmap (Phases 1-7), with cross-phase dependencies wired.
+
+2. **Implemented 12 issues** across Phase 1 (Foundation) and Phase 3 (Combinators) using 6 parallel subagents:
+
+   **New source files (673 LOC):**
+   - `src/GridOps.jl` (325 LOC) — change_background, activate/deactivate, copy_to_dense/copy_from_dense, comp_max/min/sum/mul, comp_replace, clip
+   - `src/LevelSetPrimitives.jl` (139 LOC) — create_level_set_sphere, create_level_set_box (analytical SDF narrow-band)
+   - `src/Pruning.jl` (120 LOC) — prune(grid; tolerance) collapses uniform leaves to tiles
+   - `src/CSG.jl` (89 LOC) — csg_union, csg_intersection, csg_difference
+
+   **Modified source files (407 LOC changed):**
+   - `src/Compression.jl` — added compress() for Zip/Blosc write-side
+   - `src/FileWrite.jl` — codec kwarg threaded through write pipeline with VDB chunk size prefix
+   - `src/Accessors.jl` — inactive_voxels() and all_voxels() lazy iterators
+   - `src/GridDescriptor.jl` — Vec3i (NTuple{3,Int32}) parse support
+   - `src/Lyr.jl` — 20 new exported symbols
+
+3. **6 new test files** — 8,432 new tests (29,565 → 37,997)
+
+4. **Demo script** — `examples/grid_operations_demo.jl` exercises all new features end-to-end with 3 rendered CSG images
+
+5. **Updated CLAUDE.md** — added rule 7 (Demo After Feature Set Completion) with API cheat sheet
+
+6. **Updated VISION.md** — Phase 2 → COMPLETE, Phase 3 → COMPLETE, added Phase 4 (VDB Operations)
+
+### Issues Closed
+| ID | Title |
+|----|-------|
+| path-tracer-5l34 | [P1.1] Write with compression (Zip/Blosc) |
+| path-tracer-51fu | [P1.3] changeBackground |
+| path-tracer-r3fq | [P1.4] activate/deactivate |
+| path-tracer-gxkn | [P1.5] Inactive value iteration |
+| path-tracer-7jdf | [P1.6] copyToDense/copyFromDense |
+| path-tracer-e5b6 | [P1.7] Level set primitives |
+| path-tracer-sdml | [P1.8] Vec3i support |
+| path-tracer-b0mg | [P3.1] CSG operations |
+| path-tracer-7g3f | [P3.2] Compositing |
+| path-tracer-ac04 | [P3.3] comp_replace |
+| path-tracer-ievv | [P3.4] Clipping |
+| path-tracer-6vax | [P3.5] Tree pruning |
+
+### What Remains (31 open issues)
+
+```bash
+bd ready   # Shows unblocked issues ready to work
+bd stats   # 12 closed, 31 open
+```
+
+**Next priorities (in order):**
+1. **P1.2** (path-tracer-x3q3) — Half-precision write (small, no blockers)
+2. **P2.1** (path-tracer-ffxu) — particles_to_sdf (unblocked now that P1.7 is done)
+3. **P4.1** (path-tracer-3oim) — Stencil infrastructure (unlocks all differential operators: P4.2-P4.6, P7.1-P7.2)
+4. **P5.1** (path-tracer-rbfb) — sdf_to_fog (unblocked now that P1.7 is done)
+
+**After completing each group, create a demo in `examples/` per CLAUDE.md rule 7.**
+
+### Key Files Changed
+- `src/GridOps.jl`, `src/LevelSetPrimitives.jl`, `src/CSG.jl`, `src/Pruning.jl` (NEW)
+- `src/Compression.jl`, `src/FileWrite.jl`, `src/Accessors.jl`, `src/GridDescriptor.jl`, `src/Lyr.jl`
+- `test/test_gridops.jl`, `test/test_level_set_primitives.jl`, `test/test_csg.jl`, `test/test_pruning.jl`, `test/test_iterators.jl`, `test/test_compression_write.jl` (NEW)
+- `examples/grid_operations_demo.jl` (NEW)
+- `CLAUDE.md`, `VISION.md`, `HANDOFF.md`
+
+---
+
+## Previous Session (2026-02-28) — Final Sprint: 282/282 Issues Closed (100%)
 
 **Status**: GREEN — 29,778 tests pass, ALL 282 issues closed
 
