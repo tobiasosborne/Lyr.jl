@@ -2,7 +2,86 @@
 
 ---
 
-## Latest Session (2026-02-28b) — HDDA Volume Rendering (1 P1 Issue Closed)
+## Latest Session (2026-03-01) — mesh_to_level_set (1 Issue Closed)
+
+**Status**: GREEN — 75,455 tests pass, 313/326 total closed (96.0%)
+
+### What Was Done
+
+1. **mesh_to_level_set** (`path-tracer-f2bw` — P6.2 CLOSED)
+   - Converts closed triangle meshes to narrow-band signed distance fields
+   - Algorithm: per-triangle narrow-band voxelization with angle-weighted pseudonormal sign determination (Baerentzen & Aanes 2005)
+   - `src/MeshToVolume.jl` (220 LOC) — `_closest_point_on_triangle` (Ericson 7-region Voronoi), `_precompute_topology`, `mesh_to_level_set`
+   - Thread-parallel per-triangle voxelization following `particles_to_sdf` pattern
+   - 3,258 new tests including cube/icosphere comparison against analytic primitives
+   - Demo: `examples/mesh_to_level_set_demo.jl` → `showcase/mesh_to_sdf.ppm`
+
+### Key Architecture Decisions
+
+- **Per-triangle rasterization, not per-voxel BVH** — each triangle writes to its narrow-band bounding box (~216 voxels for half_width=3). Same O(F * V_local) pattern as `particles_to_sdf`. No spatial acceleration needed.
+- **Angle-weighted pseudonormals for sign** — O(1) sign per query after precomputation. Correct for manifold meshes. No global sweep/flood fill needed.
+- **Closest-wins merge** — `if abs(new_sdf) < abs(existing) then replace`. Different from CSG union (`min`) because all triangles form one surface, not independent objects.
+- **Single-pass sign computation** — sign computed inline during distance calculation (pseudonormal from closest feature). No separate sign pass needed.
+- **Manifold mesh assumption** — pseudonormals require closed, consistently-oriented input. Non-manifold = user responsibility.
+
+### API
+
+```julia
+mesh_to_level_set(vertices, faces; voxel_size=1.0, half_width=3.0) → Grid{Float32}
+```
+
+- `vertices`: Vector of (x,y,z) world-space positions
+- `faces`: Vector of (i,j,k) 1-indexed triangle vertex indices
+- Returns: `Grid{Float32}` with `GRID_LEVEL_SET`, negative inside, positive outside
+
+### Performance
+
+- Icosphere (258 verts, 512 faces, R=15, vs=1.0): 16,868 voxels generated
+- Closely matches analytic sphere: 17,150 voxels (1.6% difference)
+- Thread-parallel triangle processing
+
+### Issues Closed This Session
+
+| ID | Title |
+|----|-------|
+| path-tracer-f2bw | [P6.2] mesh_to_level_set |
+
+### What Remains (13 open issues)
+
+**P2 implementable features (3 issues):**
+- `path-tracer-x3q3` — [P1.2] Half-precision write support (completes Phase 1)
+- `path-tracer-3k88` — [P2.2] particle_trails_to_sdf
+- `path-tracer-lo3u` — [P2.3] Enhanced ParticleField in Field Protocol
+- `path-tracer-123f` — [P2.4] Point advection utility
+
+**P2-P3 deferred/investigation (9 issues):**
+- `path-tracer-2ijw` — [P6.1] volume_to_mesh — DEFERRED
+- `path-tracer-61q5` — [P5.2] fog_to_sdf
+- `path-tracer-6h6l` — [P5.8] FastSweeping Eikonal solver
+- `path-tracer-52l4` — [P2.5] PointDataGrid support
+- `path-tracer-w83o` — [P7.5] Node-level iteration + parallel ranges
+- `path-tracer-jwmp` — [P7.4] Segmentation
+- `path-tracer-iy3d` — [P5.9] LevelSetAdvection/Morphing/Fracture
+- `path-tracer-rh5q` — [P7.7] VolumeAdvection/LevelSetTracker
+- `path-tracer-z1ns` — [P7.6] MultiResGrid
+
+### Next Session Priorities
+
+1. **P1.2 half-precision write** — completes Phase 1 (small, self-contained)
+2. **P5.2 fog_to_sdf** — useful complement to mesh_to_level_set
+3. **API review** — compare against OpenVDB reference at `~/Projects/OpenVDB`
+
+### Key Files Changed This Session
+- `src/MeshToVolume.jl` (NEW — mesh to SDF via pseudonormal sign)
+- `src/Lyr.jl` (+2 lines: include, export)
+- `test/test_mesh_to_level_set.jl` (NEW — 3,258 tests)
+- `test/runtests.jl` (+1 include)
+- `examples/mesh_to_level_set_demo.jl` (NEW — demo script)
+- `showcase/mesh_to_sdf.ppm` (NEW — rendered icosphere SDF)
+
+---
+
+## Previous Session (2026-02-28b) — HDDA Volume Rendering (1 P1 Issue Closed)
 
 **Status**: GREEN — 72,197 tests pass, 312/326 total closed (95.7%)
 
