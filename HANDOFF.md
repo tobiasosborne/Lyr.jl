@@ -1,5 +1,7 @@
 # Lyr.jl Handoff Document
 
+**API Reference**: `docs/api_reference.md` — full signatures, gotchas, source file map, workflow examples.
+
 ---
 
 ## Latest Session (2026-03-01) — mesh_to_level_set (1 Issue Closed)

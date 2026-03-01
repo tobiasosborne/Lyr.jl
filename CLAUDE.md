@@ -57,16 +57,53 @@ When a logical group of features is complete (e.g., all Phase 1 items, or all CS
 
 **Why**: Demos are the best integration test. They catch API friction, verify the render pipeline end-to-end, and produce visual proof of work. See `examples/grid_operations_demo.jl` as the template.
 
-**API cheat sheet for rendering** (easy to get wrong):
+**Full API reference**: `docs/api_reference.md` — exhaustive signatures, gotchas, source file map.
+
+**Rendering cheat sheet** (easy to get wrong):
 ```julia
 cam = Camera((50.0, 40.0, 30.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 40.0)  # tuples, not SVec3d
 mat = VolumeMaterial(tf_blackbody(); sigma_scale=15.0)  # tf is first positional, rest keyword
 nano = build_nanogrid(grid.tree)  # REQUIRED before rendering
 vol = VolumeEntry(grid, nano, mat)  # positional: grid, nanogrid, material
-scene = Scene(cam, DirectionalLight((1.0, 1.0, 1.0), (1.0, 0.5, 1.0)), vol)  # positional: cam, light(s), vol(s)
+scene = Scene(cam, DirectionalLight((1.0, 1.0, 1.0), (1.0, 0.5, 1.0)), vol)
 img = render_volume_image(scene, 800, 600; spp=32)
 write_ppm("output.ppm", img)
 ```
+
+**Grid building cheat sheet**:
+```julia
+# SDF primitives
+sphere = create_level_set_sphere(center=(0.0,0.0,0.0), radius=10.0)
+box    = create_level_set_box(min_corner=(-5.0,-5.0,-5.0), max_corner=(5.0,5.0,5.0))
+
+# From geometry
+grid = particles_to_sdf(positions, radii; voxel_size=0.5)
+grid = mesh_to_level_set(vertices, faces; voxel_size=0.5)  # closed manifold mesh
+
+# From data
+grid = build_grid(Dict(coord(0,0,0) => 1.0f0), 0.0f0; name="density")
+grid = copy_from_dense(array3d, 0.0f0)
+
+# CSG (level sets only)
+csg_union(a, b)         # min(sdf_a, sdf_b)
+csg_intersection(a, b)  # max(sdf_a, sdf_b)
+csg_difference(a, b)    # max(sdf_a, -sdf_b)
+```
+
+**Field Protocol cheat sheet**:
+```julia
+field = ScalarField3D((x,y,z) -> exp(-(x^2+y^2+z^2)/50),
+                      BoxDomain(SVec3d(-10,-10,-10), SVec3d(10,10,10)), 5.0)
+img = visualize(field)  # one-call: voxelize → render
+grid = voxelize(field)  # just voxelize
+```
+
+**Key gotchas** (see `docs/api_reference.md` for full list):
+- Camera takes tuples, not SVec3d
+- `build_nanogrid(grid.tree)` required before rendering
+- Level sets: negative = inside, positive = outside
+- All grid ops return new grids (immutable trees)
+- `write_png` requires `using PNGFiles` before Lyr
 
 ## Task Management
 
