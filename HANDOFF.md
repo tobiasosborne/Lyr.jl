@@ -4,7 +4,91 @@
 
 ---
 
-## Latest Session (2026-03-01) — mesh_to_level_set (1 Issue Closed)
+## Latest Session (2026-03-01b) — Multi-scatter Volumetric Path Tracer (1 Issue Closed)
+
+**Status**: GREEN — 75,566 tests pass, 314/327 total closed (96.0%)
+
+### What Was Done
+
+1. **Multi-scatter volumetric path tracer** (`path-tracer-mofz` — P1 CLOSED)
+   - Ground-truth reference renderer for validating future optimizations
+   - Full random walks through participating media with next-event estimation (NEE) at each scattering vertex
+   - Absorption weighting (`throughput *= albedo`) — more efficient than stochastic absorption for high-albedo media
+   - Russian roulette after configurable bounce count for unbiased path termination
+   - Shadow transmittance computed through ALL scene volumes (not just current)
+
+2. **Method dispatch hierarchy** — new `render_volume(scene, method, w, h; spp, seed)` API
+   - `ReferencePathTracer(max_bounces=64, rr_start=3)` — multi-scatter ground truth
+   - `SingleScatterTracer()` — wraps existing `render_volume_image`
+   - `EmissionAbsorption(step_size, max_steps)` — wraps existing `render_volume_preview`
+   - Old API (`render_volume_image`, `render_volume_preview`) unchanged — zero breakage
+
+3. **Showcase renders** at 800x600
+   - `cloud_multi_scatter.png` — fog sphere with 64-bounce scattering (1.78x brighter than single-scatter)
+   - `sculpted_orb.png` — CSG-carved orb (sphere minus 4 cavities) on fog ground plane
+   - Both single-scatter and emission-absorption comparisons
+
+### Key Architecture Decisions
+
+- **Absorption weighting, not stochastic** — every path survives to bounce; throughput tracks energy. More efficient for high-albedo media (clouds, fog).
+- **`render_volume` alongside old API** — additional dispatch entry point. `render_volume_image`/`render_volume_preview` unchanged.
+- **Method types as structs** — Julia multiple dispatch. Each method carries its own parameters (max_bounces, step_size, etc.).
+- **Sequential volume processing** — matches existing behavior. Overlapping volume extinction composition is future work.
+- **Phase functions exported** — `IsotropicPhase`, `HenyeyGreensteinPhase` now public API.
+
+### New API
+
+```julia
+# Multi-scatter reference renderer
+render_volume(scene, ReferencePathTracer(max_bounces=64, rr_start=3), 800, 600; spp=32)
+
+# Single-scatter (delegates to render_volume_image)
+render_volume(scene, SingleScatterTracer(), 800, 600; spp=32)
+
+# Emission-absorption (delegates to render_volume_preview)
+render_volume(scene, EmissionAbsorption(step_size=0.5, max_steps=2000), 800, 600)
+```
+
+**Lighting gotcha**: Phase function divides by 4π ≈ 12.6 at each vertex. Light intensity needs to be 10-15x higher than you'd expect (e.g., `(12.0, 10.0, 8.0)` not `(1.0, 1.0, 1.0)`).
+
+### Performance (800x600, 32 spp, 64 threads)
+
+| Renderer | Cloud scene | Showcase scene |
+|----------|-------------|----------------|
+| Multi-scatter (64 bounces) | 334s | 213s |
+| Single-scatter (1 bounce) | 183s | 116s |
+| Preview (emission-absorption) | 1.3s | 0.75s |
+
+**Threading**: Use `julia -t auto` or `julia -t 64`. Default is 1 thread.
+
+### Issues Closed This Session
+
+| ID | Title |
+|----|-------|
+| path-tracer-mofz | Multi-scatter volumetric path tracer (reference renderer) |
+
+### Key Files Changed This Session
+- `src/IntegrationMethods.jl` (NEW — VolumeIntegrationMethod type hierarchy)
+- `src/VolumeIntegrator.jl` (+241 LOC: `_delta_tracking_collision`, `_shadow_transmittance`, `_trace_multiscatter`, `render_volume` dispatch)
+- `src/Lyr.jl` (+include, +exports for render_volume, method types, phase functions)
+- `test/test_multiscatter.jl` (NEW — 111 tests)
+- `test/runtests.jl` (+include, +imports)
+- `examples/multiscatter_demo.jl` (NEW — single vs multi-scatter comparison)
+- `examples/volumetric_showcase.jl` (NEW — CSG sculpted orb on fog ground)
+
+### Future Steps (not in scope, validated against this reference)
+
+1. MIS (NEE + phase function sampling)
+2. Residual ratio tracking for shadow rays
+3. Decomposition tracking for free-flight
+4. Environment map + area lights
+5. Spectral rendering (hero wavelength)
+6. GPU multi-scatter kernel
+7. Feature-guided denoising (AOV buffers)
+
+---
+
+## Previous Session (2026-03-01) — mesh_to_level_set (1 Issue Closed)
 
 **Status**: GREEN — 75,455 tests pass, 313/326 total closed (96.0%)
 
