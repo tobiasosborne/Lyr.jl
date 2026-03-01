@@ -381,3 +381,244 @@ end
 function _light_contribution(light::DirectionalLight, point::SVec3d)
     (light.direction, light.intensity, Inf)
 end
+
+# ============================================================================
+# Multi-scatter path tracer — collision-only delta tracking
+# ============================================================================
+
+"""
+    _delta_tracking_collision(ray, nanogrid, t_enter, t_exit, sigma_maj, rng)
+
+Find next real collision via delta tracking (no absorption/scattering split).
+
+Returns `(t, true)` on real collision, `(t_exit, false)` on escape.
+The caller handles absorption externally via throughput weighting.
+"""
+function _delta_tracking_collision(ray::Ray, nanogrid::NanoGrid,
+                                   t_enter::Float64, t_exit::Float64,
+                                   sigma_maj::Float64, rng)
+    t = t_enter
+    acc = NanoValueAccessor(nanogrid)
+
+    for span in NanoVolumeHDDA(nanogrid, ray)
+        span.t0 >= t_exit && break
+        t = max(t, span.t0)
+        span_end = min(span.t1, t_exit)
+
+        while true
+            t += -log(rand(rng)) / sigma_maj
+            t >= span_end && break
+
+            pos = ray.origin + t * ray.direction
+            density = get_value_trilinear(acc, pos)
+            density = max(0.0, density)
+
+            accept_prob = clamp(density, 0.0, 1.0)
+            if rand(rng) < accept_prob
+                return (t, true)
+            end
+        end
+    end
+
+    return (t_exit, false)
+end
+
+# ============================================================================
+# Multi-scatter path tracer — shadow transmittance through all volumes
+# ============================================================================
+
+"""
+    _shadow_transmittance(shadow_ray, scene, max_dist, rng) -> Float64
+
+Compute shadow ray transmittance through ALL scene volumes via ratio tracking.
+"""
+function _shadow_transmittance(shadow_ray::Ray, scene::Scene,
+                               max_dist::Float64, rng)::Float64
+    T = 1.0
+    for vol in scene.volumes
+        nanogrid = vol.nanogrid
+        nanogrid === nothing && continue
+        bmin, bmax = _volume_bounds(nanogrid)
+        hit = intersect_bbox(shadow_ray, bmin, bmax)
+        hit === nothing && continue
+        t0, t1 = hit
+        t1 = min(t1, max_dist)
+        t0 >= t1 && continue
+        sigma_maj = vol.material.sigma_scale
+        T *= ratio_tracking(shadow_ray, nanogrid, t0, t1, sigma_maj, rng)
+        T < 1e-10 && return 0.0
+    end
+    return T
+end
+
+# ============================================================================
+# Multi-scatter path tracer — core random walk
+# ============================================================================
+
+"""
+    _trace_multiscatter(ray, scene, rng, max_bounces, rr_start) -> NTuple{3, Float64}
+
+Trace a multi-bounce random walk through the scene.
+
+At each scattering vertex: NEE toward all lights, then sample a new direction
+from the phase function. Russian roulette after `rr_start` bounces.
+"""
+function _trace_multiscatter(ray::Ray, scene::Scene, rng,
+                             max_bounces::Int, rr_start::Int)::NTuple{3, Float64}
+    acc_r = 0.0
+    acc_g = 0.0
+    acc_b = 0.0
+    throughput = 1.0
+    current_ray = ray
+
+    for bounce in 0:max_bounces
+        collision = false
+
+        for vol in scene.volumes
+            nanogrid = vol.nanogrid
+            nanogrid === nothing && continue
+
+            bmin, bmax = _volume_bounds(nanogrid)
+            hit = intersect_bbox(current_ray, bmin, bmax)
+            hit === nothing && continue
+            t_enter, t_exit = hit
+
+            tf = vol.material.transfer_function
+            sigma_scale = vol.material.sigma_scale
+            emission_scale = vol.material.emission_scale
+            albedo = vol.material.scattering_albedo
+            pf = vol.material.phase_function
+            sigma_maj = sigma_scale
+
+            t_hit, found = _delta_tracking_collision(current_ray, nanogrid,
+                                                      t_enter, t_exit, sigma_maj, rng)
+            !found && continue
+
+            # Evaluate density and transfer function at hit
+            hit_pos = current_ray.origin + t_hit * current_ray.direction
+            hit_acc = NanoValueAccessor(nanogrid)
+            density = max(0.0, get_value_trilinear(hit_acc, hit_pos))
+            rgba = evaluate(tf, density)
+            emit_r, emit_g, emit_b, _ = rgba
+
+            # Absorption weighting: throughput *= albedo
+            throughput *= albedo
+
+            # NEE: direct lighting at this vertex
+            for light in scene.lights
+                light_dir, light_intensity, light_dist = _light_contribution(light, hit_pos)
+
+                shadow_ray = Ray(hit_pos + 0.01 * light_dir, light_dir)
+                transmittance = _shadow_transmittance(shadow_ray, scene, light_dist, rng)
+
+                cos_theta = -dot(current_ray.direction, light_dir)
+                phase = evaluate(pf, cos_theta)
+
+                scale = throughput * transmittance * phase * emission_scale
+                acc_r += emit_r * light_intensity[1] * scale
+                acc_g += emit_g * light_intensity[2] * scale
+                acc_b += emit_b * light_intensity[3] * scale
+            end
+
+            # Sample new direction from phase function
+            new_dir = sample_phase(pf, current_ray.direction, rng)
+            current_ray = Ray(hit_pos + 1e-4 * new_dir, new_dir)
+            collision = true
+            break  # found collision in this volume, start next bounce
+        end
+
+        !collision && break  # escaped all volumes
+
+        # Russian roulette after rr_start bounces
+        if bounce >= rr_start
+            rr_prob = clamp(throughput, 0.05, 1.0)
+            if rand(rng) > rr_prob
+                throughput = 0.0
+                break
+            end
+            throughput /= rr_prob
+        end
+
+        throughput < 1e-10 && break
+    end
+
+    # Background blend with remaining throughput
+    bg = scene.background
+    acc_r += throughput * bg[1]
+    acc_g += throughput * bg[2]
+    acc_b += throughput * bg[3]
+
+    (acc_r, acc_g, acc_b)
+end
+
+# ============================================================================
+# render_volume — unified dispatch on VolumeIntegrationMethod
+# ============================================================================
+
+"""
+    render_volume(scene, method::ReferencePathTracer, width, height; spp=1, seed=UInt64(42))
+
+Multi-scatter volumetric path tracer — ground-truth reference renderer.
+"""
+function render_volume(scene::Scene, method::ReferencePathTracer,
+                       width::Int, height::Int;
+                       spp::Int=1, seed::UInt64=UInt64(42))
+    for vol in scene.volumes
+        vol.nanogrid === nothing && throw(ArgumentError(
+            "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
+    end
+
+    aspect = Float64(width) / Float64(height)
+    pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
+    inv_spp = 1.0 / spp
+
+    Threads.@threads for y in 1:height
+        rng = Xoshiro(seed + UInt64(y))
+        for x in 1:width
+            acc_r = 0.0
+            acc_g = 0.0
+            acc_b = 0.0
+
+            for _ in 1:spp
+                u = (Float64(x) - 1.0 + rand(rng)) / Float64(width)
+                v = 1.0 - (Float64(y) - 1.0 + rand(rng)) / Float64(height)
+                ray = camera_ray(scene.camera, u, v, aspect)
+
+                r, g, b = _trace_multiscatter(ray, scene, rng,
+                                               method.max_bounces, method.rr_start)
+                acc_r += r
+                acc_g += g
+                acc_b += b
+            end
+
+            pixels[y, x] = (clamp(acc_r * inv_spp, 0.0, 1.0),
+                            clamp(acc_g * inv_spp, 0.0, 1.0),
+                            clamp(acc_b * inv_spp, 0.0, 1.0))
+        end
+    end
+
+    pixels
+end
+
+"""
+    render_volume(scene, method::SingleScatterTracer, width, height; spp=1, seed=UInt64(42))
+
+Single-scatter volume renderer — delegates to existing `_trace_volume_ray`.
+"""
+function render_volume(scene::Scene, ::SingleScatterTracer,
+                       width::Int, height::Int;
+                       spp::Int=1, seed::UInt64=UInt64(42))
+    render_volume_image(scene, width, height; spp=spp, seed=seed)
+end
+
+"""
+    render_volume(scene, method::EmissionAbsorption, width, height)
+
+Emission-absorption preview renderer — delegates to existing `render_volume_preview`.
+"""
+function render_volume(scene::Scene, method::EmissionAbsorption,
+                       width::Int, height::Int;
+                       kwargs...)
+    render_volume_preview(scene, width, height;
+                          step_size=method.step_size, max_steps=method.max_steps)
+end

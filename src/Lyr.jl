@@ -78,6 +78,7 @@ include("FileWrite.jl")
 include("TransferFunction.jl")
 include("PhaseFunction.jl")
 include("Scene.jl")
+include("IntegrationMethods.jl")
 include("VolumeIntegrator.jl")
 include("Output.jl")
 include("GPU.jl")
@@ -122,11 +123,17 @@ export dilate, erode
 export find_surface, SurfaceHit
 
 # --- Rendering pipeline ---
-export render_volume_image, render_volume_preview
+export render_volume_image, render_volume_preview, render_volume
+
+# --- Integration methods ---
+export ReferencePathTracer, SingleScatterTracer, EmissionAbsorption
 export write_ppm, write_png, write_exr
 
 # --- Scene setup ---
 export PointLight, DirectionalLight, VolumeMaterial, VolumeEntry, Scene
+
+# --- Phase functions ---
+export IsotropicPhase, HenyeyGreensteinPhase
 
 # --- Transfer functions ---
 export TransferFunction, ControlPoint, evaluate

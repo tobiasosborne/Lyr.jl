@@ -87,6 +87,8 @@ import Lyr:
     center, extent,
     # Volume internals
     delta_tracking_step, ratio_tracking,
+    _delta_tracking_collision, _shadow_transmittance, _trace_multiscatter,
+    _volume_bounds,
     # GPU
     gpu_render_volume,
     _gpu_get_value, _gpu_get_value_trilinear,
@@ -141,6 +143,7 @@ import Lyr:
     include("test_phase_function.jl")
     include("test_scene.jl")
     include("test_volume_renderer.jl")
+    include("test_multiscatter.jl")
     include("test_gpu.jl")
     include("test_output.jl")
     include("test_show.jl")
