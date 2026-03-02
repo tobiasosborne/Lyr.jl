@@ -738,22 +738,30 @@ function NanoValueAccessor(grid::NanoGrid{T}) where T
     NanoValueAccessor{T}(grid, 0, z, 0, z, 0, z)
 end
 
-function get_value(acc::NanoValueAccessor{T}, c::Coord)::T where T
+"""Reset the accessor cache so it can be reused for a new ray/query."""
+@inline function reset!(acc::NanoValueAccessor)
+    acc.leaf_offset = 0
+    acc.i1_offset = 0
+    acc.i2_offset = 0
+    nothing
+end
+
+@inline function get_value(acc::NanoValueAccessor{T}, c::Coord)::T where T
     buf = acc.grid.buffer
 
     # Level 0: cached leaf
-    if acc.leaf_offset != 0 && leaf_origin(c) == acc.leaf_origin
+    @inbounds if acc.leaf_offset != 0 && leaf_origin(c) == acc.leaf_origin
         offset = leaf_offset(c)
         return _buf_load(T, buf, acc.leaf_offset + _LEAF_VALUES_OFF + offset * sizeof(T))
     end
 
     # Level 1: cached I1
-    if acc.i1_offset != 0 && internal1_origin(c) == acc.i1_origin
+    @inbounds if acc.i1_offset != 0 && internal1_origin(c) == acc.i1_origin
         return _nano_get_from_i1(acc, acc.i1_offset, c)
     end
 
     # Level 2: cached I2
-    if acc.i2_offset != 0 && internal2_origin(c) == acc.i2_origin
+    @inbounds if acc.i2_offset != 0 && internal2_origin(c) == acc.i2_origin
         return _nano_get_from_i2(acc, acc.i2_offset, c)
     end
 
@@ -776,6 +784,46 @@ voxels and lerps based on fractional position.
     v = pos[2] - Float64(y0)
     w = pos[3] - Float64(z0)
 
+    # Fast path: all 8 corners in same leaf (true ~70-85% of samples)
+    # A leaf is 8x8x8 voxels. If none of x0,y0,z0 are at position 7 within
+    # their leaf, then (x0+1,y0+1,z0+1) is still in the same leaf.
+    if (x0 & Int32(7)) != Int32(7) && (y0 & Int32(7)) != Int32(7) && (z0 & Int32(7)) != Int32(7)
+        # Ensure leaf is cached
+        c0 = Coord(x0, y0, z0)
+        lo = leaf_origin(c0)
+        if acc.leaf_offset == 0 || lo != acc.leaf_origin
+            get_value(acc, c0)  # populates leaf cache
+        end
+
+        leaf_off = acc.leaf_offset
+        if leaf_off != 0
+            buf = acc.grid.buffer
+            # leaf_offset layout: offset = 64*lx + 8*ly + lz (0-based)
+            base = leaf_offset(c0)
+            vbase = leaf_off + _LEAF_VALUES_OFF
+            szT = sizeof(T)
+            @inbounds begin
+                c000 = Float64(_buf_load(T, buf, vbase + base * szT))
+                c100 = Float64(_buf_load(T, buf, vbase + (base + 64) * szT))
+                c010 = Float64(_buf_load(T, buf, vbase + (base + 8) * szT))
+                c110 = Float64(_buf_load(T, buf, vbase + (base + 72) * szT))
+                c001 = Float64(_buf_load(T, buf, vbase + (base + 1) * szT))
+                c101 = Float64(_buf_load(T, buf, vbase + (base + 65) * szT))
+                c011 = Float64(_buf_load(T, buf, vbase + (base + 9) * szT))
+                c111 = Float64(_buf_load(T, buf, vbase + (base + 73) * szT))
+            end
+
+            c00 = c000 + u * (c100 - c000)
+            c10 = c010 + u * (c110 - c010)
+            c01 = c001 + u * (c101 - c001)
+            c11 = c011 + u * (c111 - c011)
+            c0_ = c00 + v * (c10 - c00)
+            c1_ = c01 + v * (c11 - c01)
+            return c0_ + w * (c1_ - c0_)
+        end
+    end
+
+    # Slow path: crosses leaf boundary — go through accessor cache for each corner
     c000 = Float64(get_value(acc, coord(x0,     y0,     z0)))
     c100 = Float64(get_value(acc, coord(x0 + 1, y0,     z0)))
     c010 = Float64(get_value(acc, coord(x0,     y0 + 1, z0)))
@@ -785,18 +833,16 @@ voxels and lerps based on fractional position.
     c011 = Float64(get_value(acc, coord(x0,     y0 + 1, z0 + 1)))
     c111 = Float64(get_value(acc, coord(x0 + 1, y0 + 1, z0 + 1)))
 
-    c00 = c000 * (1.0 - u) + c100 * u
-    c10 = c010 * (1.0 - u) + c110 * u
-    c01 = c001 * (1.0 - u) + c101 * u
-    c11 = c011 * (1.0 - u) + c111 * u
-
-    c0 = c00 * (1.0 - v) + c10 * v
-    c1 = c01 * (1.0 - v) + c11 * v
-
-    c0 * (1.0 - w) + c1 * w
+    c00 = c000 + u * (c100 - c000)
+    c10 = c010 + u * (c110 - c010)
+    c01 = c001 + u * (c101 - c001)
+    c11 = c011 + u * (c111 - c011)
+    c0_ = c00 + v * (c10 - c00)
+    c1_ = c01 + v * (c11 - c01)
+    c0_ + w * (c1_ - c0_)
 end
 
-function _nano_get_from_root(acc::NanoValueAccessor{T}, c::Coord)::T where T
+@inline function _nano_get_from_root(acc::NanoValueAccessor{T}, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)
     root_pos = _nano_root_pos(acc.grid)
@@ -818,7 +864,7 @@ function _nano_get_from_root(acc::NanoValueAccessor{T}, c::Coord)::T where T
     return _nano_get_from_i2(acc, i2_off, c)
 end
 
-function _nano_get_from_i2(acc::NanoValueAccessor{T}, i2_off::Int, c::Coord)::T where T
+@inline function _nano_get_from_i2(acc::NanoValueAccessor{T}, i2_off::Int, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)
     i2_idx = internal2_child_index(c)
@@ -841,7 +887,7 @@ function _nano_get_from_i2(acc::NanoValueAccessor{T}, i2_off::Int, c::Coord)::T 
     return _nano_get_from_i1(acc, i1_off, c)
 end
 
-function _nano_get_from_i1(acc::NanoValueAccessor{T}, i1_off::Int, c::Coord)::T where T
+@inline function _nano_get_from_i1(acc::NanoValueAccessor{T}, i1_off::Int, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)
     i1_idx = internal1_child_index(c)

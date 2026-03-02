@@ -80,7 +80,7 @@ end
 
 Advance the DDA by one voxel. Returns the axis crossed (1, 2, or 3).
 """
-function dda_step!(state::DDAState)::Int
+@inline function dda_step!(state::DDAState)::Int
     tmax = state.tmax
 
     # Find axis with smallest tmax
@@ -149,7 +149,7 @@ end
 Compute the linear child index (0-based) for the current DDA position within the node.
 Uses bit-shift logic matching `internal1_child_index`/`internal2_child_index`.
 """
-function node_dda_child_index(ndda::NodeDDA)::Int
+@inline function node_dda_child_index(ndda::NodeDDA)::Int
     # DDA ijk is in child-grid coordinates (index_space / child_size).
     # Convert to local child coordinates within this node.
     cs = ndda.child_size
@@ -165,7 +165,7 @@ end
 
 Check if the DDA is still within the node's child grid.
 """
-function node_dda_inside(ndda::NodeDDA)::Bool
+@inline function node_dda_inside(ndda::NodeDDA)::Bool
     cs = ndda.child_size
     lx = ndda.state.ijk[1] - ndda.origin[1] ÷ cs
     ly = ndda.state.ijk[2] - ndda.origin[2] ÷ cs

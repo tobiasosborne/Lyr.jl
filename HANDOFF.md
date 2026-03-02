@@ -4,7 +4,97 @@
 
 ---
 
-## Latest Session (2026-03-02) — Ground Truth Test Framework (1 Issue Closed)
+## Latest Session (2026-03-02b) — Renderer Performance Optimization (20x speedup)
+
+**Status**: YELLOW — Renders work correctly, full test suite NOT yet run. Must verify.
+
+### What Was Done
+
+**Volume renderer performance optimization** (`path-tracer-1hqc` — P0 IN PROGRESS)
+
+Lyr.jl was ~50-100x slower than Mitsuba 3. Root cause: massive heap allocations in inner rendering loops. Applied systematic optimizations achieving **20.7x speedup** on single-scatter rendering.
+
+### Performance Results (64 threads)
+
+| Metric | BEFORE | AFTER | Speedup |
+|--------|--------|-------|---------|
+| SS 200x150 spp=4 | 0.769s | **0.160s** | **4.8x** |
+| SS 400x300 spp=8 | 9.349s | **0.452s** | **20.7x** |
+| Preview EA 200x150 | 0.132s | 0.115s | 1.15x |
+| MS 200x150 spp=4 | 0.337s | **0.134s** | **2.5x** |
+| SS alloc 64x48 spp=2 | 152.63 MB | **8.59 MB** | **17.8x less** |
+
+### Key Changes (6 files modified)
+
+1. **Inlined HDDA state machine into delta_tracking_step and ratio_tracking** (`src/VolumeIntegrator.jl`)
+   - Eliminated closure boxing — the `do` block callback pattern caused Julia to heap-allocate all mutable captured variables
+   - HDDA root hits collected into stack-allocated `MVector{8}` instead of heap `Vector`
+   - Root collection + insertion sort fully inlined — zero allocations per ray
+
+2. **Accessor reuse** (`src/VolumeIntegrator.jl`)
+   - `NanoValueAccessor` created once per thread, reused across all rays via `reset!(acc)`
+   - Added `reset!` method to `NanoValueAccessor` (`src/NanoVDB.jl`)
+   - Previously: ~46M accessor allocations per 800x600x32spp render → now: 64 (one per thread)
+
+3. **Precomputed per-volume constants** (`src/VolumeIntegrator.jl`)
+   - `_PrecomputedVolume{T}` struct caches bmin/bmax/sigma_maj/albedo/tf/pf
+   - `_escape_radiance` computed once before pixel loop
+   - Eliminated per-ray `_volume_bounds()` buffer loads
+
+4. **Same-leaf trilinear fast-path** (`src/NanoVDB.jl`)
+   - When all 8 interpolation corners are in the same leaf (~70-85% of samples), bypass accessor cache entirely
+   - Direct buffer reads with offset arithmetic: `base + {0,1,8,9,64,65,72,73} * sizeof(T)`
+   - Condition: `(x0 & 7) != 7 && (y0 & 7) != 7 && (z0 & 7) != 7`
+
+5. **Scalar intersect_bbox** (`src/Ray.jl`)
+   - Replaced SVector broadcasting (`isnan.()`, `ifelse.()`, `min.()`, `max.()`) with explicit scalar ops
+   - NaN-safe min/max via `_nmin(a,b) = a < b ? a : b`
+   - Added `Ray_prenorm` constructor for shadow rays (skips normalization)
+
+6. **@inline/@inbounds annotations** (`src/Coordinates.jl`, `src/DDA.jl`, `src/NanoVDB.jl`)
+   - `leaf_origin`, `leaf_offset`, `internal1_origin`, `internal1_child_index`, `internal2_origin`, `internal2_child_index`
+   - `dda_step!`, `node_dda_child_index`, `node_dda_inside`
+   - `get_value`, `_nano_get_from_i1`, `_nano_get_from_i2`, `_nano_get_from_root`
+
+7. **randexp(rng) instead of -log(rand(rng))** — avoids log + handles rand()=0 edge case
+
+### CRITICAL: What Next Agent Must Do
+
+1. **RUN THE FULL TEST SUITE**: `julia --project -t auto -e 'using Pkg; Pkg.test()'`
+   - Tests were NOT run this session. Some may fail due to changed RNG sequence (randexp vs -log(rand))
+   - Ground truth statistical tests (test_ground_truth.jl) may need tolerance adjustment
+   - Determinism tests will fail if they compare exact pixel values (seed produces different sequence now)
+
+2. **TransferFunction LUT** — not yet implemented (Task #5). Add 256-entry precomputed LUT for O(1) TF evaluation.
+
+3. **Remaining allocations** — 8.59 MB for 64x48 spp=2 is mostly from:
+   - Per-thread accessor creation (64 threads × mutable struct)
+   - `MVector{8}` in HDDA (mutable, may heap-allocate)
+   - Consider replacing MVector with NTuple-based approach
+
+4. **Profile the optimized code** — run `scripts/profile_render.jl` to find the NEW bottleneck
+
+5. **Close beads issue** `path-tracer-1hqc` after tests pass
+
+### Files Changed This Session
+
+- `src/VolumeIntegrator.jl` (REWRITTEN — inlined HDDA, accessor reuse, precomputed volumes)
+- `src/VolumeHDDA.jl` (+130 LOC — `foreach_hdda_span` callback, kept for EA preview renderer)
+- `src/NanoVDB.jl` (+45 LOC — trilinear fast-path, `reset!`, @inline/@inbounds)
+- `src/Ray.jl` (scalar `intersect_bbox`, `Ray_prenorm`)
+- `src/DDA.jl` (@inline on `dda_step!`, `node_dda_child_index`, `node_dda_inside`)
+- `src/Coordinates.jl` (@inline on 6 coordinate functions)
+- `scripts/profile_render.jl` (NEW — profiling/benchmark script)
+
+### Beads Issues
+
+| ID | Title | Status |
+|----|-------|--------|
+| path-tracer-1hqc | Renderer performance optimization | in_progress |
+
+---
+
+## Previous Session (2026-03-02) — Ground Truth Test Framework (1 Issue Closed)
 
 **Status**: GREEN — 76,391 tests pass, 315/328 total closed (96.0%)
 

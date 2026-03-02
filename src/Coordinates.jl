@@ -53,7 +53,7 @@ const INTERNAL2_TOTAL_LOG2 = LEAF_LOG2 + INTERNAL1_LOG2 + INTERNAL2_LOG2  # 12
 
 Round coordinate down to the origin of its containing leaf node (aligned to 8).
 """
-function leaf_origin(c::Coord)::Coord
+@inline function leaf_origin(c::Coord)::Coord
     mask = ~Int32(LEAF_DIM - 1)  # ~7 = ...11111000
     Coord(c.x & mask, c.y & mask, c.z & mask)
 end
@@ -63,7 +63,7 @@ end
 
 Round coordinate down to the origin of its containing Internal1 node (aligned to 128 = 8*16).
 """
-function internal1_origin(c::Coord)::Coord
+@inline function internal1_origin(c::Coord)::Coord
     size = Int32(1) << INTERNAL1_TOTAL_LOG2  # 128
     mask = ~(size - 1)
     Coord(c.x & mask, c.y & mask, c.z & mask)
@@ -74,7 +74,7 @@ end
 
 Round coordinate down to the origin of its containing Internal2 node (aligned to 4096 = 8*16*32).
 """
-function internal2_origin(c::Coord)::Coord
+@inline function internal2_origin(c::Coord)::Coord
     size = Int32(1) << INTERNAL2_TOTAL_LOG2  # 4096
     mask = ~(size - 1)
     Coord(c.x & mask, c.y & mask, c.z & mask)
@@ -106,7 +106,7 @@ value = leaf.values[offset + 1]  # Julia 1-based array access
 is_active = is_on(leaf.value_mask, offset)  # Mask uses 0-based indexing
 ```
 """
-function leaf_offset(c::Coord)::Int
+@inline function leaf_offset(c::Coord)::Int
     # Get local coordinates within the leaf (0-7 each)
     lx = c.x & (LEAF_DIM - 1)
     ly = c.y & (LEAF_DIM - 1)
@@ -126,7 +126,7 @@ Compute the child index for a coordinate within an Internal1 node.
 Returns a **0-based index** for compatibility with bitmask operations.
 For table access, use with `on_indices` iteration pattern (see Accessors.jl).
 """
-function internal1_child_index(c::Coord)::Int
+@inline function internal1_child_index(c::Coord)::Int
     # Get coordinates relative to Internal1 origin, then extract Internal1 part
     shift = LEAF_LOG2  # 3
     mask = INTERNAL1_DIM - 1  # 15
@@ -150,7 +150,7 @@ Compute the child index for a coordinate within an Internal2 node.
 Returns a **0-based index** for compatibility with bitmask operations.
 For table access, use with `on_indices` iteration pattern (see Accessors.jl).
 """
-function internal2_child_index(c::Coord)::Int
+@inline function internal2_child_index(c::Coord)::Int
     # Get coordinates relative to Internal2 origin, then extract Internal2 part
     shift = INTERNAL1_TOTAL_LOG2  # 7
     mask = INTERNAL2_DIM - 1  # 31

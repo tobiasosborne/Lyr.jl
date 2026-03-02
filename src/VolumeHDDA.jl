@@ -202,3 +202,154 @@ function _hdda_advance(buf::Vector{UInt8}, ray::Ray,
         s.i2_t_entry = tmin
     end
 end
+
+# ── Zero-allocation callback-based HDDA ──────────────────────────────────────
+#
+# The iterator protocol forces HDDAState to be heap-allocated (it escapes the
+# iterate function). This callback version keeps ALL state on the stack.
+# Call f(t0::Float64, t1::Float64)::Bool for each span. Return false to stop.
+
+const _MAX_ROOTS = 8
+
+"""
+    foreach_hdda_span(f, nanogrid::NanoGrid{T}, ray::Ray) where T
+
+Iterate over merged active spans along a ray through a NanoGrid, calling
+`f(t0, t1)` for each span. Return `false` from `f` to stop early.
+
+Zero heap allocations — all state lives on the stack. Use this instead of
+`NanoVolumeHDDA` in performance-critical render loops.
+"""
+@inline function foreach_hdda_span(f, nanogrid::NanoGrid{T}, ray::Ray) where T
+    buf = nanogrid.buffer
+    root_pos = _nano_root_pos(nanogrid)
+    root_count = nano_root_count(nanogrid)
+    entry_sz = _root_entry_size(T)
+
+    # Collect root hits into stack-allocated buffer
+    root_tmins = MVector{_MAX_ROOTS, Float64}(ntuple(_ -> 0.0, Val(_MAX_ROOTS)))
+    root_offs  = MVector{_MAX_ROOTS, Int}(ntuple(_ -> 0, Val(_MAX_ROOTS)))
+    n_roots = 0
+
+    @inbounds for i in 0:(root_count - 1)
+        ep = root_pos + i * entry_sz
+        is_child = _buf_load(UInt8, buf, ep + 12)
+        is_child == 0x01 || continue
+        i2_off = Int(_buf_load(UInt32, buf, ep + 13))
+        origin = _buf_load_coord(buf, i2_off)
+        aabb = AABB(
+            SVec3d(Float64(origin.x), Float64(origin.y), Float64(origin.z)),
+            SVec3d(Float64(origin.x) + 4096.0, Float64(origin.y) + 4096.0,
+                   Float64(origin.z) + 4096.0)
+        )
+        hit = intersect_bbox(ray, aabb)
+        if hit !== nothing
+            n_roots += 1
+            n_roots > _MAX_ROOTS && break
+            root_tmins[n_roots] = hit[1]
+            root_offs[n_roots] = i2_off
+        end
+    end
+
+    n_roots == 0 && return nothing
+
+    # Insertion sort (n_roots is tiny, typically 1)
+    @inbounds for i in 2:n_roots
+        kt = root_tmins[i]
+        ko = root_offs[i]
+        j = i - 1
+        while j >= 1 && root_tmins[j] > kt
+            root_tmins[j + 1] = root_tmins[j]
+            root_offs[j + 1] = root_offs[j]
+            j -= 1
+        end
+        root_tmins[j + 1] = kt
+        root_offs[j + 1] = ko
+    end
+
+    # State machine — all local variables
+    span_t0 = -1.0
+
+    @inbounds for ri in 1:n_roots
+        i2_off = root_offs[ri]
+        origin = _buf_load_coord(buf, i2_off)
+        i2_ndda = node_dda_init(ray, root_tmins[ri], origin, Int32(32), Int32(128))
+        i2_t_entry = root_tmins[ri]
+
+        while node_dda_inside(i2_ndda)
+            cidx = node_dda_child_index(i2_ndda)
+            has_child = _buf_mask_is_on(buf, i2_off + _I2_CMASK_OFF, cidx)
+
+            if has_child
+                # I1 node exists — descend
+                tidx = _buf_count_on_before(buf, i2_off + _I2_CMASK_OFF,
+                                            i2_off + _I2_CPREFIX_OFF, cidx)
+                i1_off = Int(_buf_load(UInt32, buf, i2_off + _I2_DATA_OFF + tidx * 4))
+                i1_origin = _buf_load_coord(buf, i1_off)
+                i1_aabb = AABB(
+                    SVec3d(Float64(i1_origin.x), Float64(i1_origin.y), Float64(i1_origin.z)),
+                    SVec3d(Float64(i1_origin.x) + 128.0, Float64(i1_origin.y) + 128.0,
+                           Float64(i1_origin.z) + 128.0)
+                )
+                hit = intersect_bbox(ray, i1_aabb)
+
+                if hit !== nothing
+                    tmin, _ = hit
+                    i1_ndda = node_dda_init(ray, tmin, i1_origin, Int32(16), Int32(8))
+                    i1_t_entry = tmin
+
+                    # Phase 1: DDA through I1 cells (stride 8)
+                    while node_dda_inside(i1_ndda)
+                        i1_cidx = node_dda_child_index(i1_ndda)
+                        i1_has_child = _buf_mask_is_on(buf, i1_off + _I1_CMASK_OFF, i1_cidx)
+                        i1_has_tile  = !i1_has_child && _buf_mask_is_on(buf, i1_off + _I1_VMASK_OFF, i1_cidx)
+
+                        if i1_has_child || i1_has_tile
+                            if span_t0 < 0.0
+                                span_t0 = i1_t_entry
+                            end
+                        elseif span_t0 >= 0.0
+                            # Inactive cell with open span — yield
+                            f(span_t0, i1_t_entry) || return nothing
+                            span_t0 = -1.0
+                        end
+
+                        i1_t_entry = node_dda_cell_time(i1_ndda)
+                        dda_step!(i1_ndda.state)
+                    end
+
+                    i2_t_entry = node_dda_cell_time(i2_ndda)
+                    dda_step!(i2_ndda.state)
+                    continue  # back to I2 loop
+                else
+                    # Ray misses I1 AABB — gap
+                    if span_t0 >= 0.0
+                        f(span_t0, i2_t_entry) || return nothing
+                        span_t0 = -1.0
+                    end
+                end
+            else
+                has_tile = _buf_mask_is_on(buf, i2_off + _I2_VMASK_OFF, cidx)
+                if has_tile
+                    if span_t0 < 0.0
+                        span_t0 = i2_t_entry
+                    end
+                elseif span_t0 >= 0.0
+                    f(span_t0, i2_t_entry) || return nothing
+                    span_t0 = -1.0
+                end
+            end
+
+            i2_t_entry = node_dda_cell_time(i2_ndda)
+            dda_step!(i2_ndda.state)
+        end
+
+        # I2 exhausted — close any open span
+        if span_t0 >= 0.0
+            f(span_t0, i2_t_entry) || return nothing
+            span_t0 = -1.0
+        end
+    end
+
+    nothing
+end

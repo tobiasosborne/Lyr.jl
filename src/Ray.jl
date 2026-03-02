@@ -64,6 +64,9 @@ function Ray(origin::SVec3d, direction::SVec3d)
     Ray(origin, dir, _safe_inv_dir(dir))
 end
 
+"""Construct a Ray from origin and ALREADY-NORMALIZED direction (skips norm/div)."""
+@inline Ray_prenorm(origin::SVec3d, dir::SVec3d) = Ray(origin, dir, _safe_inv_dir(dir))
+
 # Convenience: construct from NTuples
 Ray(origin::NTuple{3, Float64}, direction::NTuple{3, Float64}) =
     Ray(SVec3d(origin...), SVec3d(direction...))
@@ -74,20 +77,35 @@ Ray(origin::NTuple{3, Float64}, direction::NTuple{3, Float64}) =
 Compute ray-box intersection using the slab method.
 Returns (t_enter, t_exit) or `nothing` if no intersection.
 """
-function intersect_bbox(ray::Ray, aabb::AABB)::Union{Tuple{Float64, Float64}, Nothing}
-    t1 = (aabb.min - ray.origin) .* ray.inv_dir
-    t2 = (aabb.max - ray.origin) .* ray.inv_dir
+@inline function intersect_bbox(ray::Ray, aabb::AABB)::Union{Tuple{Float64, Float64}, Nothing}
+    # Scalar slab test — no intermediate SVector allocations.
+    # NaN-safe min/max: if a is NaN, return b (conservative bound)
+    @inline _nmin(a, b) = a < b ? a : b
+    @inline _nmax(a, b) = a > b ? a : b
 
-    # Replace NaN with appropriate bounds (NaN arises from 0*Inf when ray is
-    # axis-aligned and origin sits exactly on a slab boundary)
-    tmin_v = min.(t1, t2)
-    tmax_v = max.(t1, t2)
-    tmin_v = ifelse.(isnan.(tmin_v), -Inf, tmin_v)
-    tmax_v = ifelse.(isnan.(tmax_v),  Inf, tmax_v)
+    ox, oy, oz = ray.origin[1], ray.origin[2], ray.origin[3]
+    idx, idy, idz = ray.inv_dir[1], ray.inv_dir[2], ray.inv_dir[3]
+    bmin_x, bmin_y, bmin_z = aabb.min[1], aabb.min[2], aabb.min[3]
+    bmax_x, bmax_y, bmax_z = aabb.max[1], aabb.max[2], aabb.max[3]
 
-    tmin = maximum(tmin_v)
-    tmax = minimum(tmax_v)
+    t1x = (bmin_x - ox) * idx
+    t2x = (bmax_x - ox) * idx
+    tmin = _nmin(t1x, t2x)
+    tmax = _nmax(t1x, t2x)
 
+    t1y = (bmin_y - oy) * idy
+    t2y = (bmax_y - oy) * idy
+    tmin = _nmax(tmin, _nmin(t1y, t2y))
+    tmax = _nmin(tmax, _nmax(t1y, t2y))
+
+    t1z = (bmin_z - oz) * idz
+    t2z = (bmax_z - oz) * idz
+    tmin = _nmax(tmin, _nmin(t1z, t2z))
+    tmax = _nmin(tmax, _nmax(t1z, t2z))
+
+    # Handle NaN from 0*Inf: _nmin/_nmax return the non-NaN operand,
+    # so NaN slabs are effectively ignored (infinite extent on that axis).
+    # Final check: if tmin or tmax are NaN here, the >= comparison returns false.
     if tmax >= max(tmin, 0.0)
         return (max(tmin, 0.0), tmax)
     end
