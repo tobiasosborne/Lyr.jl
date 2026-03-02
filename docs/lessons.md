@@ -58,3 +58,30 @@
 - With `emission_scale=0`, `light_intensity=(0,0,0)`, `albedo=1.0`: throughput stays exactly 1.0
 - Background added at full weight regardless of scattering → pixels == background EXACTLY (atol=1e-10)
 - This is variance-free (no Monte Carlo noise) because the only contribution is deterministic background
+
+## Cross-Renderer Comparison (2026-03-02)
+
+**Mitsuba 3 as ground truth oracle**:
+- Install: `uv venv .mitsuba-env && .mitsuba-env/bin/python3 -m pip install mitsuba numpy`
+- Python API: `mi.set_variant('scalar_rgb')`, `mi.load_dict({...})`, `mi.render(scene)`
+- Output: numpy float32 arrays — save as raw binary with 12-byte header (H,W,C as uint32)
+- `scalar_rgb` variant = one-ray-at-a-time, simplest, good for ground truth
+
+**Parameter mapping pitfalls**:
+- Mitsuba `direction` in `directional` emitter = light TRAVEL direction (toward scene)
+- Lyr `DirectionalLight(dir, ...)` = direction TOWARD the light (away from scene)
+- Must negate: Mitsuba `(0,0,-1)` → Lyr `(0,0,1)`
+- Mitsuba `homogeneous` medium = zero spatial lookups, constant sigma_t everywhere
+- Lyr fog sphere = VDB tree with density=1.0 voxels + trilinear interpolation — 10-50x slower
+
+**Performance lesson**:
+- 256×256 × 512 spp through VDB = minutes, not seconds
+- Mitsuba `homogeneous` does same in 5 seconds (no tree traversal)
+- **Must add HomogeneousMedium fast path** or drop to 64×64 for tests
+- Never promise "fast" without profiling the actual code path
+
+**Transfer function insight**:
+- Lyr's TF is visualization (maps density→color), not physics
+- For cross-renderer comparison: constant white TF `(1,1,1,1)`, `emission_scale=1.0`
+- This reduces Lyr's rendering equation to standard radiative transfer
+- Lyr is a SUPERSET of Mitsuba (can do everything Mitsuba does + visualization coloring)

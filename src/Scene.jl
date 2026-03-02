@@ -57,6 +57,19 @@ end
 DirectionalLight(dir::NTuple{3,Float64}) =
     DirectionalLight(dir, (1.0, 1.0, 1.0))
 
+"""
+    ConstantEnvironmentLight <: AbstractLight
+
+Uniform radiance from all directions (for white furnace tests).
+When a ray escapes the volume, it receives this radiance instead of `scene.background`.
+"""
+struct ConstantEnvironmentLight <: AbstractLight
+    radiance::SVec3d
+end
+
+ConstantEnvironmentLight(r::NTuple{3,Float64}) =
+    ConstantEnvironmentLight(SVec3d(r...))
+
 # ============================================================================
 # Volume material
 # ============================================================================

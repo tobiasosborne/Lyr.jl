@@ -176,3 +176,30 @@ Load a reference render PPM. Thin wrapper around `read_ppm`.
 function load_reference_render(path::String)::Matrix{NTuple{3, Float64}}
     read_ppm(path)
 end
+
+"""
+    read_float32_image(path) -> Matrix{NTuple{3, Float64}}
+
+Read a raw float32 image written by Mitsuba reference scripts.
+Format: 12-byte header (H, W, C as UInt32 LE) followed by H×W×C Float32 values
+in row-major order (C-contiguous: [y, x, channel]).
+"""
+function read_float32_image(path::String)::Matrix{NTuple{3, Float64}}
+    data = read(path)
+    length(data) >= 12 || throw(ArgumentError("File too small for header: $(length(data)) bytes"))
+    h = reinterpret(UInt32, data[1:4])[1]
+    w = reinterpret(UInt32, data[5:8])[1]
+    c = reinterpret(UInt32, data[9:12])[1]
+    c == 3 || throw(ArgumentError("Expected 3 channels, got $c"))
+    expected = 12 + h * w * 3 * 4
+    length(data) == expected || throw(ArgumentError(
+        "Expected $expected bytes, got $(length(data))"))
+    floats = reinterpret(Float32, @view data[13:end])
+    pixels = Matrix{NTuple{3, Float64}}(undef, Int(h), Int(w))
+    idx = 1
+    for y in 1:Int(h), x in 1:Int(w)
+        pixels[y, x] = (Float64(floats[idx]), Float64(floats[idx+1]), Float64(floats[idx+2]))
+        idx += 3
+    end
+    pixels
+end

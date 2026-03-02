@@ -118,6 +118,20 @@ function _volume_bounds(nanogrid::NanoGrid)
     (bmin, bmax)
 end
 
+"""
+    _escape_radiance(scene) -> NTuple{3, Float64}
+
+Background radiance for escaped rays. Uses ConstantEnvironmentLight if present,
+otherwise falls back to scene.background.
+"""
+function _escape_radiance(scene::Scene)::NTuple{3, Float64}
+    for light in scene.lights
+        if light isa ConstantEnvironmentLight
+            return (light.radiance[1], light.radiance[2], light.radiance[3])
+        end
+    end
+    (scene.background[1], scene.background[2], scene.background[3])
+end
 
 # ============================================================================
 # Emission-absorption preview renderer (V7)
@@ -351,8 +365,8 @@ function _trace_volume_ray(ray::Ray, scene::Scene, rng,
         end
     end
 
-    # Blend with background
-    bg = scene.background
+    # Blend with background / environment
+    bg = _escape_radiance(scene)
     acc_r += throughput * bg[1]
     acc_g += throughput * bg[2]
     acc_b += throughput * bg[3]
@@ -542,8 +556,8 @@ function _trace_multiscatter(ray::Ray, scene::Scene, rng,
         throughput < 1e-10 && break
     end
 
-    # Background blend with remaining throughput
-    bg = scene.background
+    # Background / environment blend with remaining throughput
+    bg = _escape_radiance(scene)
     acc_r += throughput * bg[1]
     acc_g += throughput * bg[2]
     acc_b += throughput * bg[3]

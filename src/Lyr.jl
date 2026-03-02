@@ -130,10 +130,10 @@ export render_volume_image, render_volume_preview, render_volume
 export ReferencePathTracer, SingleScatterTracer, EmissionAbsorption
 export write_ppm, write_png, write_exr
 export read_ppm, image_rmse, image_psnr, image_ssim, image_max_diff
-export save_reference_render, load_reference_render
+export save_reference_render, load_reference_render, read_float32_image
 
 # --- Scene setup ---
-export PointLight, DirectionalLight, VolumeMaterial, VolumeEntry, Scene
+export PointLight, DirectionalLight, ConstantEnvironmentLight, VolumeMaterial, VolumeEntry, Scene
 
 # --- Phase functions ---
 export IsotropicPhase, HenyeyGreensteinPhase
