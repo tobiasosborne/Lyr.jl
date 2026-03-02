@@ -4,7 +4,77 @@
 
 ---
 
-## Latest Session (2026-03-01b) — Multi-scatter Volumetric Path Tracer (1 Issue Closed)
+## Latest Session (2026-03-02) — Ground Truth Test Framework (1 Issue Closed)
+
+**Status**: GREEN — 76,391 tests pass, 315/328 total closed (96.0%)
+
+### What Was Done
+
+1. **Ground truth volumetric renderer test framework** (`path-tracer-fpmm` — P1 CLOSED)
+   - Created `test/test_ground_truth.jl` — 825 new tests across 4 tiers
+   - **Tier 0: Analytical** (6 tests, ~405 assertions)
+     - Beer-Lambert transmittance via EA renderer at 3 sigma_scale values
+     - White furnace test (albedo=1, no light → pixels == background exactly)
+     - EA step-size convergence (monotonically decreasing error)
+     - HG phase function mean cos_theta = g (50k samples × 6 g values)
+     - Ratio tracking statistical convergence to exp(-sigma_t * d)
+     - Delta tracking escape/scatter fraction statistics
+   - **Tier 1: Homogeneous Sphere Sweep** (5 tests, ~198 assertions)
+     - Albedo monotonicity (0.0 < 0.5 < 0.99)
+     - Forward scattering (HG g=0.8) brightens far side
+     - Backward scattering (HG g=-0.8) brightens near side
+     - Extinction produces measurably different brightness
+     - White furnace via multi-scatter (all pixels == background)
+   - **Tier 2: Renderer Cross-Validation** (4 tests, ~11 assertions)
+     - SingleScatter ≈ ReferencePathTracer at 1 bounce
+     - EA step-size convergence (second sigma_scale)
+     - Multi-scatter brightness non-decreasing with bounce count
+     - Determinism across all 3 renderers
+   - **Tier 3: Component Statistics** (5 tests, ~60 assertions)
+     - ratio_tracking mean convergence (5000 trials)
+     - _delta_tracking_collision escape rate vs Beer-Lambert (10000 trials)
+     - _shadow_transmittance convergence (3000 trials)
+     - HG sample_phase mean cos_theta (100k samples × 7 g values)
+     - TF alpha=0 produces pure background
+   - **Tier 4: Conservation & Invariants** (4 tests, ~149 assertions)
+     - Optical depth invariance (sigma_scale × path = const)
+     - Helmholtz reciprocity (swap camera/light direction)
+     - Albedo decay behavior (low vs high)
+     - Zero density → pure background (all 3 renderers)
+
+2. **Crash recovery** — recovered research from 3 crashed sessions via JSONL transcript mining
+
+3. **Lessons documented** — `docs/lessons.md` created with session crash recovery techniques and ground truth test pitfalls
+
+### Key Architecture Decisions
+
+- **Inline stats helpers** (`_mean`, `_std`) instead of `using Statistics` — avoids adding test dependency
+- **Constant TF `_TF_OPAQUE_WHITE`** — (r,g,b,a)=(1,1,1,1) at all densities, decouples TF from extinction math
+- **N=17 voxels** for clean path_length=16 (AABB spans [0,16])
+- **N=33 voxels** for statistical tests where trilinear boundary effects matter
+- **4σ tolerance** for Monte Carlo statistical tests → ~0.006% individual failure rate
+
+### Issues Closed This Session
+
+| ID | Title |
+|----|-------|
+| path-tracer-fpmm | Ground truth volumetric renderer test framework |
+
+### Key Files Changed This Session
+- `test/test_ground_truth.jl` (NEW — 825 tests, ~700 LOC)
+- `test/runtests.jl` (+1 line: include)
+- `docs/lessons.md` (NEW — crash recovery + implementation lessons)
+
+### Future Steps (benchmark tiers not yet implemented)
+
+1. Tier 2 VDB: Reference renders from local VDB fixtures (smoke1, explosion, bunny_cloud) vs Mitsuba 3
+2. Tier 3: Disney Cloud (`wdas_cloud_sixteenth.vdb`) with Hyperion reference render
+3. Tier 4: PBRT-v4 volumetric scenes with pixel-level ground truth PNGs
+4. Cross-renderer pixel diff reports (RMSE, SSIM)
+
+---
+
+## Previous Session (2026-03-01b) — Multi-scatter Volumetric Path Tracer (1 Issue Closed)
 
 **Status**: GREEN — 75,566 tests pass, 314/327 total closed (96.0%)
 
