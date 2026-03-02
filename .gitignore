@@ -11,11 +11,26 @@ test/fixtures/starmap_*
 *.ppm
 *.png
 renders/
+# Exception: benchmark golden renders + showcase
+!test/fixtures/reference_renders/*.ppm
+!showcase/benchmarks/*.ppm
+!showcase/benchmarks/*.png
+
+# Test fixtures — Disney cloud VDB
+test/fixtures/disney/*.zip
+!test/fixtures/disney/*.vdb
 
 # Debug scripts
 debug_*.jl
 scripts/
+# Exception: benchmark scripts
+!scripts/generate_benchmark_renders.jl
+!scripts/download_disney_cloud.jl
 
 # IDE / tooling
 .claude/
 .vscode/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

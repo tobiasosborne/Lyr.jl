@@ -145,6 +145,7 @@ import Lyr:
     include("test_volume_renderer.jl")
     include("test_multiscatter.jl")
     include("test_ground_truth.jl")
+    include("test_benchmark_renders.jl")
     include("test_gpu.jl")
     include("test_output.jl")
     include("test_show.jl")
