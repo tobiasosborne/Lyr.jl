@@ -222,32 +222,61 @@ function voxelize(f::ComplexScalarField3D; kwargs...)
 end
 
 """
-    voxelize(f::ParticleField; voxel_size, sigma, cutoff_sigma, normalize, threshold) -> Grid{Float32}
+    voxelize(f::ParticleField; voxel_size, mode, sigma, cutoff_sigma, half_width, normalize, threshold) -> Grid{Float32}
 
-Voxelize particles via Gaussian splatting. Each particle contributes a Gaussian
-kernel to the density field.
+Voxelize particles via Gaussian splatting (fog mode) or as a level set SDF (levelset mode).
+
+# Mode selection
+- `:auto` (default) — if `f.properties` contains `:radii`, produces a level set; otherwise fog
+- `:fog` — Gaussian splatting density field
+- `:levelset` — CSG union of sphere SDFs via `particles_to_sdf`
 
 # Arguments
 - `f::ParticleField` — Particle data
 - `voxel_size::Float64` — World-space voxel size (default: `characteristic_scale / 5`)
-- `sigma::Float64` — Gaussian standard deviation in world units (default: `2.0`)
-- `cutoff_sigma::Float64` — Kernel extent in sigma units (default: `3.0`)
-- `normalize::Bool` — Normalize to [0, 1] (default: `true`)
-- `threshold::Float64` — Discard values below this (default: `1e-6`)
+- `mode::Symbol` — `:auto`, `:fog`, or `:levelset` (default: `:auto`)
+- `sigma::Float64` — Gaussian standard deviation in world units, fog mode only (default: `2.0`)
+- `cutoff_sigma::Float64` — Kernel extent in sigma units, fog mode only (default: `3.0`)
+- `half_width::Float64` — Narrow band half-width in voxels, levelset mode only (default: `3.0`)
+- `normalize::Bool` — Normalize to [0, 1], fog mode only (default: `true`)
+- `threshold::Float64` — Discard values below this, fog mode only (default: `1e-6`)
 
-# Example
+# Examples
 ```julia
+# Fog mode (no radii)
 pos = [SVec3d(randn(3)...) for _ in 1:500]
 field = ParticleField(pos)
 grid = voxelize(field; voxel_size=0.5, sigma=1.0)
+
+# Level set mode (with radii)
+pos = [SVec3d(0.0, 0.0, 0.0), SVec3d(10.0, 0.0, 0.0)]
+props = Dict{Symbol, Vector}(:radii => [3.0, 3.0])
+field = ParticleField(pos; properties=props)
+grid = voxelize(field; voxel_size=0.5)  # auto-detects :levelset
 ```
 """
 function voxelize(f::ParticleField;
                   voxel_size::Float64=auto_voxel_size(f),
+                  mode::Symbol=:auto,
                   sigma::Float64=2.0,
                   cutoff_sigma::Float64=3.0,
+                  half_width::Float64=3.0,
                   normalize::Bool=true,
                   threshold::Float64=1e-6)
+    # Auto-detect mode based on whether radii are present
+    actual_mode = mode
+    if mode === :auto
+        actual_mode = haskey(f.properties, :radii) ? :levelset : :fog
+    end
+
+    if actual_mode === :levelset
+        # Level set mode: CSG union of sphere SDFs
+        radii = get(f.properties, :radii, 1.0)
+        return particles_to_sdf(f.positions, radii;
+                                voxel_size=voxel_size, half_width=half_width)
+    end
+
+    # Fog mode: Gaussian splatting (existing behavior, unchanged)
     density = gaussian_splat(f.positions;
                              voxel_size=voxel_size,
                              sigma=sigma,

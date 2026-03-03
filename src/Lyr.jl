@@ -70,6 +70,8 @@ include("Morphology.jl")
 include("FastSweeping.jl")
 include("Particles.jl")
 include("MeshToVolume.jl")
+include("Segmentation.jl")
+include("Meshing.jl")
 
 # Phase 2: VDB Writer
 include("BinaryWrite.jl")
@@ -126,6 +128,8 @@ export filter_mean, filter_gaussian
 export dilate, erode
 export reinitialize_sdf
 export advect_points
+export segment_active_voxels
+export volume_to_mesh
 
 # --- Surface finding ---
 export find_surface, SurfaceHit
