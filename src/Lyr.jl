@@ -67,6 +67,7 @@ include("CSG.jl")
 include("LevelSetOps.jl")
 include("Filtering.jl")
 include("Morphology.jl")
+include("FastSweeping.jl")
 include("Particles.jl")
 include("MeshToVolume.jl")
 
@@ -119,6 +120,7 @@ export filter_mean, filter_gaussian
 
 # --- Morphology ---
 export dilate, erode
+export reinitialize_sdf
 
 # --- Surface finding ---
 export find_surface, SurfaceHit

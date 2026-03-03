@@ -122,6 +122,7 @@ import Lyr:
     include("test_level_set_ops.jl")
     include("test_filtering.jl")
     include("test_morphology.jl")
+    include("test_fast_sweeping.jl")
     include("test_particles_to_sdf.jl")
     include("test_mesh_to_level_set.jl")
     include("test_ray.jl")
