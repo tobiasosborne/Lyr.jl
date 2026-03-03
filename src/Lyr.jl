@@ -90,6 +90,9 @@ include("FieldProtocol.jl")
 include("Voxelize.jl")
 include("Visualize.jl")
 
+# Point advection (depends on FieldProtocol)
+include("PointAdvection.jl")
+
 # ============================================================================
 # Public API — only symbols users type in their code are exported.
 # All other symbols are accessible via Lyr.symbol_name or import Lyr: symbol_name.
@@ -104,6 +107,7 @@ export Grid, Coord, coord, SVec3f, SVec3d, Ray, Camera
 # --- Query API ---
 export get_value, is_active, active_voxels, inactive_voxels, all_voxels, leaves
 export active_voxel_count, leaf_count
+export i1_nodes, i2_nodes, collect_leaves, foreach_leaf
 
 # --- Interpolation & gradient ---
 export sample_world, sample_trilinear, sample_quadratic, gradient
@@ -121,6 +125,7 @@ export filter_mean, filter_gaussian
 # --- Morphology ---
 export dilate, erode
 export reinitialize_sdf
+export advect_points
 
 # --- Surface finding ---
 export find_surface, SurfaceHit
@@ -145,7 +150,7 @@ export TransferFunction, ControlPoint, evaluate
 export tf_blackbody, tf_cool_warm, tf_smoke, tf_viridis
 
 # --- Grid building ---
-export build_grid, voxelize, particles_to_sdf, mesh_to_level_set
+export build_grid, voxelize, particles_to_sdf, particle_trails_to_sdf, mesh_to_level_set
 export create_level_set_sphere, create_level_set_box
 
 # --- Grid operations ---
@@ -157,7 +162,7 @@ export prune
 export csg_union, csg_intersection, csg_difference
 
 # --- Level set operations ---
-export sdf_to_fog, sdf_interior_mask, extract_isosurface_mask
+export sdf_to_fog, fog_to_sdf, sdf_interior_mask, extract_isosurface_mask
 export level_set_area, level_set_volume
 export check_level_set, LevelSetDiagnostic
 

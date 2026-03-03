@@ -148,3 +148,97 @@ function particles_to_sdf(positions::AbstractVector, radii;
     build_grid(result, bg; name="particles_sdf",
                grid_class=GRID_LEVEL_SET, voxel_size=voxel_size)
 end
+
+"""
+    particle_trails_to_sdf(positions, velocities, radii;
+                           dt=1.0, voxel_size=1.0, half_width=3.0) -> Grid{Float32}
+
+Convert particle trails to a level set SDF. Each particle is extruded along its
+velocity for duration `dt`, creating a capsule shape (cylinder + hemisphere caps).
+All capsules are CSG-unioned via min().
+
+# Arguments
+- `positions`: vector of positions (anything indexable with `[1]`, `[2]`, `[3]`)
+- `velocities`: vector of velocities (same length as positions)
+- `radii`: scalar (uniform) or vector (per-particle) radii in world units
+- `dt`: time duration for extrusion (default 1.0)
+- `voxel_size`: voxel edge length (default 1.0)
+- `half_width`: narrow band half-width in voxels (default 3.0)
+
+# Example
+```julia
+pos = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0)]
+vel = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+grid = particle_trails_to_sdf(pos, vel, 2.0; dt=5.0, voxel_size=0.5)
+```
+"""
+function particle_trails_to_sdf(positions::AbstractVector, velocities::AbstractVector, radii;
+                                 dt::Float64=1.0, voxel_size::Float64=1.0, half_width::Float64=3.0)
+    length(positions) == length(velocities) || throw(ArgumentError("positions and velocities must have same length"))
+    bg = Float32(half_width * voxel_size)
+    inv_vs = 1.0 / voxel_size
+    band = half_width * voxel_size
+
+    nt = Threads.maxthreadid()
+    local_dicts = [Dict{Coord, Float32}() for _ in 1:nt]
+
+    Threads.@threads for pi in 1:length(positions)
+        d = local_dicts[Threads.threadid()]
+        pos = positions[pi]
+        vel = velocities[pi]
+        r = radii isa Number ? Float64(radii) : Float64(radii[pi])
+
+        # Capsule endpoints
+        p1x, p1y, p1z = Float64(pos[1]), Float64(pos[2]), Float64(pos[3])
+        p2x = p1x + Float64(vel[1]) * dt
+        p2y = p1y + Float64(vel[2]) * dt
+        p2z = p1z + Float64(vel[3]) * dt
+
+        abx, aby, abz = p2x - p1x, p2y - p1y, p2z - p1z
+        ab_dot = abx*abx + aby*aby + abz*abz
+
+        # Bounding box
+        lo_x = min(p1x, p2x) - r - band
+        lo_y = min(p1y, p2y) - r - band
+        lo_z = min(p1z, p2z) - r - band
+        hi_x = max(p1x, p2x) + r + band
+        hi_y = max(p1y, p2y) + r + band
+        hi_z = max(p1z, p2z) + r + band
+
+        imin = floor(Int32, lo_x * inv_vs)
+        jmin = floor(Int32, lo_y * inv_vs)
+        kmin = floor(Int32, lo_z * inv_vs)
+        imax = ceil(Int32, hi_x * inv_vs)
+        jmax = ceil(Int32, hi_y * inv_vs)
+        kmax = ceil(Int32, hi_z * inv_vs)
+
+        for iz in kmin:kmax, iy in jmin:jmax, ix in imin:imax
+            vx = Float64(ix) * voxel_size
+            vy = Float64(iy) * voxel_size
+            vz = Float64(iz) * voxel_size
+
+            # Capsule SDF: distance to line segment - radius
+            apx, apy, apz = vx - p1x, vy - p1y, vz - p1z
+            t = ab_dot > 0.0 ? clamp((apx*abx + apy*aby + apz*abz) / ab_dot, 0.0, 1.0) : 0.0
+            cx = p1x + t * abx
+            cy = p1y + t * aby
+            cz = p1z + t * abz
+            dist = sqrt((vx-cx)^2 + (vy-cy)^2 + (vz-cz)^2)
+            sdf = Float32(dist - r)
+
+            abs(sdf) > bg && continue
+            c = Coord(ix, iy, iz)
+            d[c] = min(get(d, c, bg), sdf)
+        end
+    end
+
+    result = local_dicts[1]
+    for i in 2:nt
+        for (c, v) in local_dicts[i]
+            result[c] = min(get(result, c, bg), v)
+        end
+    end
+
+    build_grid(result, bg; name="particle_trails_sdf",
+               grid_class=GRID_LEVEL_SET, voxel_size=voxel_size)
+end

@@ -213,6 +213,10 @@ grid_type_string(::Type{Int32})              = "Tree_int32_5_4_3"
 grid_type_string(::Type{Int64})              = "Tree_int64_5_4_3"
 grid_type_string(::Type{Bool})               = "Tree_bool_5_4_3"
 
+# 2-arg overloads for half-precision suffix
+grid_type_string(::Type{Float32}, half::Bool) = half ? "Tree_float_5_4_3_HalfFloat" : "Tree_float_5_4_3"
+grid_type_string(::Type{Float64}, half::Bool) = half ? "Tree_double_5_4_3_HalfFloat" : "Tree_double_5_4_3"
+
 """
     grid_class_string(gc::GridClass) -> String
 
@@ -241,7 +245,7 @@ only active values (mask_compressed=true).
 For internal nodes, `values` is a dense vector of N values (one per slot).
 We write only the active values (those where mask is on).
 """
-function write_mask_values!(io::IO, ::Type{T}, values::Vector{T}, mask::Mask{N,W}, background::T) where {T,N,W}
+function write_mask_values!(io::IO, ::Type{T}, values::Vector{T}, mask::Mask{N,W}, background::T; half_precision::Bool=false) where {T,N,W}
     # Metadata byte: 0 = NO_MASK_OR_INACTIVE_VALS
     # This means: inactive values get background, no selection mask needed
     write_u8!(io, UInt8(0x00))
@@ -254,7 +258,11 @@ function write_mask_values!(io::IO, ::Type{T}, values::Vector{T}, mask::Mask{N,W
     # Collect active values
     buf = IOBuffer()
     for idx in on_indices(mask)
-        write_tile_value!(buf, values[idx + 1])  # 1-indexed array
+        if half_precision
+            write_tile_value!(buf, Float16(values[idx + 1]))  # 1-indexed array
+        else
+            write_tile_value!(buf, values[idx + 1])  # 1-indexed array
+        end
     end
     data = take!(buf)
 
@@ -279,7 +287,7 @@ Phase 1 (topology): root tiles, then for each root child:
 Phase 2 (values): for each leaf in same order:
   value_mask (64B) → metadata(1B) → active values (optionally compressed)
 """
-function write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression()) where T
+function write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
     # Separate root table into tiles and I2 children (sorted by origin for determinism)
     tiles = Tuple{Coord, Tile{T}}[]
     children = Tuple{Coord, InternalNode2{T}}[]
@@ -305,6 +313,7 @@ function write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression()) wh
         write_i32_le!(io, origin.x)
         write_i32_le!(io, origin.y)
         write_i32_le!(io, origin.z)
+        # Root tile values always written at full precision (reader expects sizeof(T))
         write_tile_value!(io, tile.value)
         write_u8!(io, tile.active ? UInt8(0x01) : UInt8(0x00))
     end
@@ -320,19 +329,19 @@ function write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression()) wh
         write_i32_le!(io, origin.z)
 
         # Write I2 topology (with codec for internal node value compression)
-        _write_i2_topology!(io, i2_node, tree.background, all_leaves, codec)
+        _write_i2_topology!(io, i2_node, tree.background, all_leaves, codec; half_precision=half_precision)
     end
 
     # Phase 2: Write leaf values (with optional compression)
     for leaf in all_leaves
-        _write_leaf_values!(io, leaf, tree.background, codec)
+        _write_leaf_values!(io, leaf, tree.background, codec; half_precision=half_precision)
     end
 
     nothing
 end
 
 """Write masks + tile values for an internal node (shared by I2 and I1)."""
-function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}, codec::Codec=NoCompression()) where T
+function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
     write_mask!(io, node.child_mask)
     write_mask!(io, node.value_mask)
     # metadata=0 (NO_MASK_OR_INACTIVE_VALS), then active tile values
@@ -342,7 +351,11 @@ function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}, codec::Codec=NoCo
     # Collect tile data into raw bytes
     buf = IOBuffer()
     for tile in node.tiles
-        write_tile_value!(buf, tile.value)
+        if half_precision
+            write_tile_value!(buf, Float16(tile.value))
+        else
+            write_tile_value!(buf, tile.value)
+        end
     end
     raw_data = take!(buf)
 
@@ -368,16 +381,16 @@ function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}, codec::Codec=NoCo
     end
 end
 
-function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression()) where T
-    _write_node_masks_and_tiles!(io, i2, T, codec)
+function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
+    _write_node_masks_and_tiles!(io, i2, T, codec; half_precision=half_precision)
     for child in i2.children
-        _write_i1_topology!(io, child, background, all_leaves, codec)
+        _write_i1_topology!(io, child, background, all_leaves, codec; half_precision=half_precision)
     end
     nothing
 end
 
-function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression()) where T
-    _write_node_masks_and_tiles!(io, i1, T, codec)
+function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
+    _write_node_masks_and_tiles!(io, i1, T, codec; half_precision=half_precision)
     for leaf in i1.children
         write_mask!(io, leaf.value_mask)
         push!(all_leaves, leaf)
@@ -397,7 +410,7 @@ For NoCompression: raw active values (no size prefix).
 For Zip/Blosc: Int64 size prefix + compressed data. If compressed size >= uncompressed,
 writes negative size prefix (-uncompressed_size) + raw data instead.
 """
-function _write_leaf_values!(io::IO, leaf::LeafNode{T}, background::T, codec::Codec=NoCompression()) where T
+function _write_leaf_values!(io::IO, leaf::LeafNode{T}, background::T, codec::Codec=NoCompression(); half_precision::Bool=false) where T
     # Re-emit value mask (64 bytes = 8 UInt64 words)
     write_mask!(io, leaf.value_mask)
 
@@ -407,7 +420,11 @@ function _write_leaf_values!(io::IO, leaf::LeafNode{T}, background::T, codec::Co
     # Collect active values into a raw byte buffer
     buf = IOBuffer()
     for idx in on_indices(leaf.value_mask)
-        write_tile_value!(buf, leaf.values[idx + 1])  # 1-indexed
+        if half_precision
+            write_tile_value!(buf, Float16(leaf.values[idx + 1]))  # 1-indexed
+        else
+            write_tile_value!(buf, leaf.values[idx + 1])  # 1-indexed
+        end
     end
     raw_data = take!(buf)
 
@@ -463,7 +480,7 @@ end
 # =============================================================================
 
 """
-    write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression()) -> Nothing
+    write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression(), half_precision::Bool=false) -> Nothing
 
 Write a single grid to a VDB file.
 
@@ -471,8 +488,11 @@ Creates a v224 format file with:
 - Specified compression codec (default: NoCompression)
 - COMPRESS_ACTIVE_MASK enabled (sparse active value storage)
 - Standard grid metadata (class)
+
+When `half_precision=true`, Float32/Float64 values are converted to Float16 during writing.
+The grid type string is suffixed with `_HalfFloat` so readers can detect the encoding.
 """
-function write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression())::Nothing where T
+function write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression(), half_precision::Bool=false)::Nothing where T
     header = VDBHeader(
         UInt32(224),            # format_version (current)
         UInt32(11),             # library_major
@@ -484,11 +504,11 @@ function write_vdb(path::String, grid::Grid{T}; codec::Codec=NoCompression())::N
     )
 
     vdb = VDBFile(header, [grid])
-    write_vdb(path, vdb)
+    write_vdb(path, vdb; half_precision=half_precision)
 end
 
 """
-    write_vdb(path::String, vdb::VDBFile) -> Nothing
+    write_vdb(path::String, vdb::VDBFile; half_precision::Bool=false) -> Nothing
 
 Write a complete VDB file.
 
@@ -497,30 +517,30 @@ Strategy for grid offsets:
 2. For each grid: write descriptor with placeholder offsets, then grid data
 3. Seek back to patch the offsets in each grid descriptor
 """
-function write_vdb(path::String, vdb::VDBFile)::Nothing
+function write_vdb(path::String, vdb::VDBFile; half_precision::Bool=false)::Nothing
     open(path, "w") do io
-        _write_vdb_to_io(io, vdb)
+        _write_vdb_to_io(io, vdb; half_precision=half_precision)
     end
     nothing
 end
 
 """
-    write_vdb_to_buffer(vdb::VDBFile) -> Vector{UInt8}
+    write_vdb_to_buffer(vdb::VDBFile; half_precision::Bool=false) -> Vector{UInt8}
 
 Write a complete VDB file to an in-memory buffer. Useful for testing.
 """
-function write_vdb_to_buffer(vdb::VDBFile)::Vector{UInt8}
+function write_vdb_to_buffer(vdb::VDBFile; half_precision::Bool=false)::Vector{UInt8}
     io = IOBuffer()
-    _write_vdb_to_io(io, vdb)
+    _write_vdb_to_io(io, vdb; half_precision=half_precision)
     take!(io)
 end
 
 """
-    write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression()) -> Vector{UInt8}
+    write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression(), half_precision::Bool=false) -> Vector{UInt8}
 
 Write a single grid to an in-memory buffer.
 """
-function write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression())::Vector{UInt8} where T
+function write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression(), half_precision::Bool=false)::Vector{UInt8} where T
     header = VDBHeader(
         UInt32(224),
         UInt32(11),
@@ -530,7 +550,7 @@ function write_vdb_to_buffer(grid::Grid{T}; codec::Codec=NoCompression())::Vecto
         true,
         "00000000-0000-0000-0000-000000000000"
     )
-    write_vdb_to_buffer(VDBFile(header, [grid]))
+    write_vdb_to_buffer(VDBFile(header, [grid]); half_precision=half_precision)
 end
 
 """
@@ -538,7 +558,7 @@ end
 
 Internal: write a complete VDB file to any IO stream.
 """
-function _write_vdb_to_io(io::IO, vdb::VDBFile)::Nothing
+function _write_vdb_to_io(io::IO, vdb::VDBFile; half_precision::Bool=false)::Nothing
     # Write header
     write_header!(io, vdb.header)
 
@@ -550,7 +570,7 @@ function _write_vdb_to_io(io::IO, vdb::VDBFile)::Nothing
 
     # Write each grid
     for grid in vdb.grids
-        _write_grid(io, grid, vdb.header)
+        _write_grid(io, grid, vdb.header; half_precision=half_precision)
     end
 
     nothing
@@ -561,9 +581,9 @@ end
 
 Write a single grid: descriptor (with offset patching) + grid data.
 """
-function _write_grid(io::IO, grid::Grid{T}, header::VDBHeader) where T
+function _write_grid(io::IO, grid::Grid{T}, header::VDBHeader; half_precision::Bool=false) where T
     # Build grid descriptor with placeholder offsets
-    grid_type = grid_type_string(T)
+    grid_type = half_precision ? grid_type_string(T, true) : grid_type_string(T)
 
     # Record position of the descriptor's offset fields for patching
     # First write the name, grid_type, instance_parent strings
@@ -606,7 +626,7 @@ function _write_grid(io::IO, grid::Grid{T}, header::VDBHeader) where T
     # Write buffer count (always 1 for standard trees)
     write_u32_le!(io, UInt32(1))
 
-    # Write background value
+    # Write background value (always full precision — reader expects sizeof(T) bytes here)
     write_tile_value!(io, grid.tree.background)
 
     # block_offset marks start of the tree data (topology + values)
@@ -614,7 +634,7 @@ function _write_grid(io::IO, grid::Grid{T}, header::VDBHeader) where T
 
     # Write tree (with codec for leaf value compression)
     codec_for_tree = header.format_version >= 222 ? header.compression : NoCompression()
-    write_tree!(io, grid.tree, codec_for_tree)
+    write_tree!(io, grid.tree, codec_for_tree; half_precision=half_precision)
 
     # end_offset marks end of grid data (0-indexed)
     end_offset = position(io)

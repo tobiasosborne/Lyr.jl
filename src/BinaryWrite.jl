@@ -140,6 +140,12 @@ function write_tile_value!(io::IO, val::T)::Nothing where {T <: Union{Float32, F
     nothing
 end
 
+# Float16: half-precision little-endian write
+function write_tile_value!(io::IO, val::Float16)::Nothing
+    write_f16_le!(io, val)
+    nothing
+end
+
 # Bool: single byte
 function write_tile_value!(io::IO, val::Bool)::Nothing
     write_u8!(io, val ? UInt8(0x01) : UInt8(0x00))

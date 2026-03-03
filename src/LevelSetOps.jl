@@ -198,3 +198,40 @@ function check_level_set(grid::Grid{T}) where {T <: AbstractFloat}
 
     LevelSetDiagnostic(isempty(issues), issues, n_active, n_interior, n_exterior, n_surface)
 end
+
+# ============================================================================
+# fog_to_sdf — convert fog volume to level set SDF
+# ============================================================================
+
+"""
+    fog_to_sdf(fog::Grid{T}; threshold::T=T(0.5),
+               half_width::Float64=3.0) where {T <: AbstractFloat} -> Grid{T}
+
+Convert a fog volume to a level set SDF. Voxels with density > `threshold`
+become interior (negative SDF), others become exterior (positive SDF).
+Uses the Fast Sweeping Method to compute proper signed distances.
+
+Approximately the inverse of `sdf_to_fog`.
+"""
+function fog_to_sdf(fog::Grid{T}; threshold::T=T(0.5),
+                    half_width::Float64=3.0) where {T <: AbstractFloat}
+    vs = _grid_voxel_size(fog)
+    bg = T(half_width * vs)
+
+    # Step 1: Create signed field from fog topology
+    data = Dict{Coord, T}()
+    for (c, density) in active_voxels(fog.tree)
+        data[c] = density > threshold ? -bg : bg
+    end
+
+    isempty(data) && return build_grid(data, bg; name=fog.name * "_sdf",
+                                       grid_class=GRID_LEVEL_SET, voxel_size=vs)
+
+    # Step 2: Dilate to ensure narrow band coverage
+    seed = build_grid(data, bg; name=fog.name * "_sdf",
+                      grid_class=GRID_LEVEL_SET, voxel_size=vs)
+    expanded = dilate(seed; iterations=max(1, ceil(Int, half_width)))
+
+    # Step 3: Reinitialize SDF via Fast Sweeping
+    reinitialize_sdf(expanded; iterations=2)
+end

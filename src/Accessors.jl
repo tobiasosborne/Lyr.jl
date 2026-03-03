@@ -610,3 +610,109 @@ function _advance_all_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{
 
     nothing
 end
+
+# =============================================================================
+# InternalNode2 Iterator
+# =============================================================================
+
+struct I2NodesIterator{T}
+    tree::Tree{T}
+end
+
+"""
+    i2_nodes(tree::Tree{T})
+
+Return an iterator over all InternalNode2 nodes as `(InternalNode2{T}, Coord)` pairs.
+"""
+i2_nodes(tree::Tree{T}) where T = I2NodesIterator{T}(tree)
+
+Base.IteratorSize(::Type{I2NodesIterator{T}}) where T = Base.SizeUnknown()
+Base.eltype(::Type{I2NodesIterator{T}}) where T = Tuple{InternalNode2{T}, Coord}
+
+function Base.iterate(it::I2NodesIterator{T}, state=nothing) where T
+    pairs = state === nothing ? collect(it.tree.table) : state[1]
+    idx = state === nothing ? 1 : state[2]
+    while idx <= length(pairs)
+        origin, entry = pairs[idx]
+        if entry isa InternalNode2{T}
+            return ((entry, origin), (pairs, idx + 1))
+        end
+        idx += 1
+    end
+    nothing
+end
+
+# =============================================================================
+# InternalNode1 Iterator
+# =============================================================================
+
+struct I1NodesIterator{T}
+    tree::Tree{T}
+end
+
+"""
+    i1_nodes(tree::Tree{T})
+
+Return an iterator over all InternalNode1 nodes as `(InternalNode1{T}, Coord)` pairs.
+"""
+i1_nodes(tree::Tree{T}) where T = I1NodesIterator{T}(tree)
+
+Base.IteratorSize(::Type{I1NodesIterator{T}}) where T = Base.SizeUnknown()
+Base.eltype(::Type{I1NodesIterator{T}}) where T = Tuple{InternalNode1{T}, Coord}
+
+function Base.iterate(it::I1NodesIterator{T}, state=nothing) where T
+    if state === nothing
+        root_pairs = collect(it.tree.table)
+        return _advance_i1_nodes(root_pairs, 1, 1)
+    else
+        root_pairs, root_idx, i2_idx = state
+        return _advance_i1_nodes(root_pairs, root_idx, i2_idx)
+    end
+end
+
+function _advance_i1_nodes(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
+                           root_idx::Int, i2_idx::Int) where T
+    while root_idx <= length(root_pairs)
+        entry = root_pairs[root_idx].second
+        if entry isa InternalNode2{T}
+            node2 = entry::InternalNode2{T}
+            if i2_idx <= length(node2.children)
+                node1 = node2.children[i2_idx]
+                return ((node1, node1.origin), (root_pairs, root_idx, i2_idx + 1))
+            end
+        end
+        root_idx += 1
+        i2_idx = 1
+    end
+    nothing
+end
+
+# =============================================================================
+# Batch parallel leaf processing
+# =============================================================================
+
+"""
+    collect_leaves(tree::Tree{T}) -> Vector{LeafNode{T}}
+
+Materialize all leaves into a vector for random access and parallel chunking.
+"""
+function collect_leaves(tree::Tree{T})::Vector{LeafNode{T}} where T
+    result = LeafNode{T}[]
+    for leaf in leaves(tree)
+        push!(result, leaf)
+    end
+    result
+end
+
+"""
+    foreach_leaf(f, tree::Tree{T}) -> Nothing
+
+Apply `f(leaf)` to every leaf in the tree, parallelized across threads.
+"""
+function foreach_leaf(f::F, tree::Tree{T})::Nothing where {F, T}
+    lvs = collect_leaves(tree)
+    Threads.@threads for leaf in lvs
+        f(leaf)
+    end
+    nothing
+end
