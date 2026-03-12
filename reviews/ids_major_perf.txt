@@ -1,0 +1,8 @@
+path-tracer-4fmn | BUG: Doppler intensity uses (1+z)^-3 but broadband RGB needs (1+z)^-4
+path-tracer-r73c | PERF: planck_to_xyz recomputes 81 exp() calls per pixel in volumetric inner loop
+path-tracer-bno4 | PERF: DDA step creates 2 immutable structs with 6 branches per step
+path-tracer-nqsh | PERF: node_dda_inside and node_dda_child_index duplicate local coordinate computation
+path-tracer-11ov | PERF: Hamiltonian recomputed redundantly — metric_inverse called twice per step
+path-tracer-c6jb | PERF: GR integrator stepper dispatches on Symbol instead of type
+path-tracer-ika3 | BUG: CSG narrow-band gaps at intersection seams
+path-tracer-4mwp | BUG: renormalize_null picks wrong root when p_t = 0

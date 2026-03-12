@@ -1,0 +1,11 @@
+path-tracer-2jnh | BUG: sin²θ clamp creates non-smooth metric for ForwardDiff
+path-tracer-8jsv | BUG: sinθ_safe sign handling discontinuity near θ=π
+path-tracer-yo2i | BUG: sRGB matrix coefficients truncated to 4 decimal places
+path-tracer-1zw7 | PHYSICS: Adaptive step profile too coarse near photon sphere
+path-tracer-52ip | PHYSICS: Volumetric GR renderer uses abs(dl) instead of proper length element
+path-tracer-ii5j | PERF: write_ppm uses text format P3 instead of binary P6
+path-tracer-fwkp | PERF: Missing @fastmath in GR integrator inner loops
+path-tracer-yptd | PERF: GeodesicState allocation in thin-disk inner loop
+path-tracer-kixv | PERF: sample_quadratic creates new ValueAccessor per call
+path-tracer-l0bh | PORTABILITY: ROOT_TILE_VOXELS overflows Int32 on 32-bit systems
+path-tracer-1zcr | PHYSICS: Novikov-Thorne flux uses zeroth-order approximation

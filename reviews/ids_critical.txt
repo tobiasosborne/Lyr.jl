@@ -1,0 +1,5 @@
+path-tracer-ffab | BUG: Thin-disk renderer hardcodes Boyer-Lindquist assumptions, breaks KS coordinates
+path-tracer-ydmy | BUG: Schwarzschild tetrad column layout transposed vs Kerr/KS
+path-tracer-y1hu | BUG: Delta/ratio tracking uses raw density as acceptance probability instead of sigma_t/sigma_maj
+path-tracer-thj7 | PERF: Kerr metric uses ForwardDiff for inverse partials — 10-20x slower than analytic
+path-tracer-hecg | REFACTOR: HDDA state machine copy-pasted 6-12 times across VolumeIntegrator.jl and VolumeHDDA.jl

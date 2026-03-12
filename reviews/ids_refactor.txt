@@ -1,0 +1,8 @@
+path-tracer-lwp3 | REFACTOR: NanoVDB I1/I2 views are near-identical copy-paste — parameterize on mask width
+path-tracer-l77u | REFACTOR: Accessors.jl tree iterator trio — 3 copies of identical tree traversal
+path-tracer-qt4m | TYPE: Scene lights field is type-unstable Vector{AbstractLight}
+path-tracer-he6c | TYPE: VolumeEntry allows invalid Nothing nanogrid state
+path-tracer-ns5d | TYPE: RootNode table uses Union-typed Dict, forces type check per access
+path-tracer-ylmz | ARCH: Two rendering pipelines (main + GR) share zero code
+path-tracer-jirf | TYPE: _PrecomputedVolume stores abstract PhaseFunction, forcing dynamic dispatch
+path-tracer-54vs | NAMING: evaluate function overloaded for 3-4 unrelated operations

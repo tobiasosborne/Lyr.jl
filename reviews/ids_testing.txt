@@ -1,0 +1,11 @@
+path-tracer-fj1a | TEST: ImageCompare.jl has zero unit tests — silently corrupts regression testing
+path-tracer-fgzb | TEST: VolumeIntegrator.jl (780 lines) has no unit-level tests
+path-tracer-0c2t | TEST: 33 tests silently pass when fixture VDB files missing
+path-tracer-emsz | TEST: Exceptions.jl (139 lines, 7 exception types) completely untested
+path-tracer-iflm | TEST: SchwarzschildKS metric (257 lines) has no dedicated test file
+path-tracer-mwa5 | TEST: WeakField stub exported but throws unhelpful error, untested
+path-tracer-qgei | TEST: No error path tests for Field Protocol → Voxelize → Visualize pipeline
+path-tracer-cqnp | TEST: Transfer function missing NaN/boundary input tests
+path-tracer-eu65 | TEST: GR integrator adaptive_step and renormalize_null have no direct unit tests
+path-tracer-l9f3 | TEST: Meshing.jl (526 lines) has proportionally few tests
+path-tracer-3223 | TEST: resample_to_match exported but untested

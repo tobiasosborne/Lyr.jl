@@ -4,7 +4,132 @@
 
 ---
 
-## Latest Session (2026-03-12f) — Volumetric Planck Pipeline + Pole Fix (SUBSTANDARD)
+## Latest Session (2026-03-12g) — Full-Scale Code Review (58 Issues Filed)
+
+**Status**: GREEN — No code changes. Full suite still 94,325 pass. **58 new beads issues filed from 7-agent code review.**
+
+### What Was Done
+
+Launched 7 specialized review agents in parallel to scour the entire codebase:
+
+1. **Architecture Review** — module structure, contracts, API boundaries
+2. **Test Coverage Review** — coverage gaps, edge cases, integration tests
+3. **Bugs & Code Smells** — line-by-line: off-by-one, type issues, logic errors
+4. **Julia Idiomaticity** — type stability, performance patterns, elegance
+5. **Linus Torvalds Style** — simplicity, over-engineering, maintainability
+6. **John Carmack Style** — rendering pipeline, numerical precision, hot paths
+7. **Donald Knuth Style** — algorithmic correctness, mathematical rigor
+
+All reports saved in `reviews/` directory (7 markdown files).
+
+After deduplication, **58 beads issues** created with **12 dependency chains**.
+
+### Issue Summary
+
+| Priority | Count | Key Issues |
+|----------|-------|------------|
+| **P0** | 1 | Thin-disk renderer hardcodes BL coords — breaks KS rendering (6 locations) |
+| **P1** | 4 | Tetrad layout bug, delta tracking normalization, Kerr ForwardDiff 10-20x perf, HDDA 12x copy-paste |
+| **P2** | 19 | Doppler exponent, Planck LUT, DDA branching, type instabilities, test gaps |
+| **P3** | 21 | Minor bugs, physics accuracy, architecture, cleanup |
+| **P4** | 13 | Nits, minor tests, naming |
+
+**48 ready to work, 10 blocked** (waiting on upstream fixes).
+
+### Recommended Attack Order
+
+**Phase 1 — Critical Correctness (do these first):**
+
+| Issue | Priority | What | Files |
+|-------|----------|------|-------|
+| `path-tracer-ffab` | P0 bug | Thin-disk BL assumptions break KS coords | `src/GR/render.jl`, `matter.jl`, `integrator.jl` |
+| `path-tracer-ydmy` | P1 bug | Schwarzschild tetrad transposed vs Kerr/KS | `src/GR/camera.jl:61-66` |
+| `path-tracer-y1hu` | P1 bug | Delta/ratio tracking acceptance probability | `src/VolumeIntegrator.jl:153,340` |
+| `path-tracer-4fmn` | P2 bug | Doppler intensity (1+z)^3 → ^4 | `src/GR/redshift.jl:81`, `render.jl:101` |
+| `path-tracer-4mwp` | P2 bug | renormalize_null p_t=0 edge case | `src/GR/integrator.jl:200` |
+
+**Phase 2 — High-Impact Performance (biggest wins):**
+
+| Issue | Priority | What | Expected Speedup |
+|-------|----------|------|-----------------|
+| `path-tracer-thj7` | P1 | Kerr analytic metric_inverse_partials | 10-20x Kerr rendering |
+| `path-tracer-r73c` | P2 | Planck-to-RGB lookup table | 5-10x volumetric colorization |
+| `path-tracer-bno4` | P2 | DDA step branchless optimization | ~2x DDA throughput |
+| `path-tracer-nqsh` | P2 | Merge node_dda_inside + child_index | 2x local coord compute |
+| `path-tracer-c6jb` | P2 | Symbol → type dispatch for stepper | Enables inlining |
+
+**Phase 3 — Refactoring (after Phase 1-2 stabilize):**
+
+| Issue | Priority | What | Impact |
+|-------|----------|------|--------|
+| `path-tracer-hecg` | P1 | HDDA consolidation (blocked by bno4, nqsh) | 60% VolumeIntegrator.jl reduction |
+| `path-tracer-lwp3` | P2 | NanoVDB I1/I2 dedup (blocked by gr27) | Half the NanoVDB view code |
+| `path-tracer-l77u` | P2 | Accessors iterator trio → one generic | 350→80 lines |
+| `path-tracer-qt4m` | P2 | Scene lights type stability | 5-15% multi-light overhead |
+| `path-tracer-he6c` | P2 | VolumeEntry remove Nothing state | Type safety |
+
+**Phase 4 — Test Coverage:**
+
+| Issue | Priority | What |
+|-------|----------|------|
+| `path-tracer-fj1a` | P2 | ImageCompare.jl unit tests (regression testing integrity) |
+| `path-tracer-fgzb` | P2 | VolumeIntegrator.jl unit tests (blocked by y1hu) |
+| `path-tracer-0c2t` | P2 | Fix 33 silently-passing fixture-gated tests |
+| `path-tracer-iflm` | P3 | SchwarzschildKS metric tests (blocked by ffab, ydmy) |
+| `path-tracer-emsz` | P3 | Exceptions.jl tests |
+
+### Dependency Chains (DAG)
+
+```
+DDA step opt (bno4) ──┐
+node_dda merge (nqsh) ┴──→ HDDA consolidation (hecg)
+
+NanoVDB layout (gr27) → NanoVDB views dedup (lwp3) → GPU dedup (h53s)
+
+BL fix (ffab) ──→ KS tests (iflm)
+Tetrad fix (ydmy) ┘
+BL fix (ffab) ──→ GeodesicState alloc (yptd)
+
+Kerr partials (thj7) → Hamiltonian redundancy (11ov)
+Stepper dispatch (c6jb) → @fastmath (fwkp)
+Delta tracking fix (y1hu) → VolumeIntegrator tests (fgzb)
+renormalize_null fix (4mwp) → integrator unit tests (eu65)
+TF asymmetry (wkao) → PrecomputedVolume PF fix (jirf)
+```
+
+### Key Insights from Reviews
+
+1. **The bones are excellent** — VDB tree types, mask implementation, coordinates, NanoVDB flat buffer, GR Hamiltonian formulation, Field Protocol all praised by every reviewer
+2. **Copy-paste is the #1 problem** — HDDA state machine (12 copies), NanoVDB I1/I2 views, Accessors iterators, Binary.jl readers. The fix is parameterization on the axis of variation, not more abstraction
+3. **KS coordinates are completely broken in thin-disk path** — volumetric renderer handles KS correctly, thin-disk hardcodes BL everywhere. 6 locations need `_coord_r`/`_sky_angles` dispatch
+4. **Delta tracking is physically wrong** — uses raw density instead of sigma_t/sigma_maj. This affects every volume render
+5. **Kerr is 10-20x slower than necessary** — ForwardDiff for metric partials when analytic is ~50 lines following the Schwarzschild template
+
+### Files Created This Session
+
+| File | What |
+|------|------|
+| `reviews/architecture_review.md` | Module structure, API boundaries, separation of concerns |
+| `reviews/test_coverage_review.md` | Coverage gaps, missing edge cases |
+| `reviews/bugs_and_smells_review.md` | Line-by-line bug hunt |
+| `reviews/julia_idiomaticity_review.md` | Type stability, performance patterns |
+| `reviews/linus_torvalds_review.md` | Simplicity, over-engineering review |
+| `reviews/john_carmack_review.md` | Rendering pipeline, numerical precision |
+| `reviews/donald_knuth_review.md` | Algorithmic correctness, mathematical rigor |
+| `reviews/ids_*.txt` | Issue ID reference files (6 files) |
+
+### Commands for Next Agent
+
+```bash
+bd ready                    # See 48 unblocked issues
+bd show path-tracer-ffab    # Start with the P0 bug
+bd blocked                  # See 10 blocked issues and their blockers
+bd stats                    # 58 open, 342 closed
+```
+
+---
+
+## Previous Session (2026-03-12f) — Volumetric Planck Pipeline + Pole Fix (SUBSTANDARD)
 
 **Status**: GREEN — Full suite 94,325 pass. Code committed. **Render quality is substandard.**
 

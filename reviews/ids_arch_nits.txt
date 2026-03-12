@@ -1,0 +1,15 @@
+path-tracer-o601 | ARCH: Flat module structure — 55+ files, no intermediate submodules
+path-tracer-rmfe | ARCH: TinyVDB (~1200 lines) compiled for every user, only used by tests
+path-tracer-gr27 | CLEANUP: NanoVDB magic byte offsets throughout — should be derived layout constants
+path-tracer-h53s | CLEANUP: GPU.jl duplicates NanoVDB buffer access logic
+path-tracer-5oo4 | CLEANUP: OrdinaryDiffEq listed as dependency but never imported
+path-tracer-x5u9 | CLEANUP: Deprecated render_image still fully implemented (100 lines)
+path-tracer-pu0l | CLEANUP: write_ppm defined in Render.jl, other writers in Output.jl
+path-tracer-8nnf | CLEANUP: Unused patch_area variable in denoise_nlm
+path-tracer-oeco | NIT: Export list mixes high-level API with low-level implementation details
+path-tracer-wkao | NIT: PhaseFunction is abstract type but TransferFunction is concrete — asymmetric design
+path-tracer-tox2 | NIT: Three overlapping bounding box types (BBox, AABB, BoxDomain)
+path-tracer-8egg | NIT: Binary.jl has 7 type-specialized readers that read_le already handles
+path-tracer-bfc1 | NIT: IntegrationMethods strategy pattern adds ceremony without value
+path-tracer-aoxj | NIT: Planck integration uses rectangular rule — trapezoidal is free improvement
+path-tracer-gms4 | NIT: GR submodule re-declares StaticArrays types already in parent
