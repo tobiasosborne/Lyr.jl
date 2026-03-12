@@ -47,6 +47,26 @@ function keplerian_four_velocity(m::Schwarzschild, r::Float64)::SVec4d
 end
 
 """
+    keplerian_four_velocity(m::Kerr{BoyerLindquist}, r) -> SVec4d
+
+Contravariant 4-velocity u^μ of a prograde circular Keplerian orbit at radius r
+in Boyer-Lindquist coordinates (equatorial plane, θ = π/2).
+
+Uses Ω = √M / (r^{3/2} + a√M) and normalizes via g_μν u^μ u^ν = -1.
+"""
+function keplerian_four_velocity(m::Kerr{BoyerLindquist}, r::Float64)::SVec4d
+    M, a = m.M, m.a
+    Ω = sqrt(M) / (r^(3/2) + a * sqrt(M))
+    # Evaluate metric at equatorial plane
+    x = SVec4d(0.0, r, π/2, 0.0)
+    g = metric(m, x)
+    # g_tt + 2 g_tφ Ω + g_φφ Ω² from normalization with u^r = u^θ = 0
+    denom = -(g[1,1] + 2.0 * g[1,4] * Ω + g[4,4] * Ω^2)
+    ut = 1.0 / sqrt(max(denom, 1e-15))
+    SVec4d(ut, 0.0, 0.0, Ω * ut)
+end
+
+"""
     keplerian_four_velocity(m::SchwarzschildKS, r, x) -> SVec4d
 
 Keplerian 4-velocity in Cartesian KS coordinates.

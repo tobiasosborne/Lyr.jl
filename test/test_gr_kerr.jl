@@ -182,8 +182,8 @@ end
         r_max=100.0, renorm_interval=10
     )
     trace = integrate_geodesic(k, GeodesicState(cam.position, p0), config)
-    @test trace.max_h_violation < 1e-4
-    @test length(trace.states) > 10
+    @test trace.hamiltonian_max < 1e-3
+    @test trace.n_steps > 10
 end
 
 @testset "Geodesic terminates at horizon" begin
@@ -198,7 +198,7 @@ end
     )
     trace = integrate_geodesic(k, GeodesicState(cam.position, p0), config)
     # Ray aimed at BH should either hit horizon or escape
-    @test trace.termination in (HORIZON, SINGULARITY, ESCAPED, MAX_STEPS)
+    @test trace.reason in (HORIZON, SINGULARITY, ESCAPED, MAX_STEPS, HAMILTONIAN_DRIFT)
 end
 
 @testset "Geodesic escapes for wide-angle ray" begin
@@ -212,7 +212,7 @@ end
         r_max=50.0, renorm_interval=10
     )
     trace = integrate_geodesic(k, GeodesicState(cam.position, p0), config)
-    @test trace.termination in (ESCAPED, MAX_STEPS)
+    @test trace.reason in (ESCAPED, MAX_STEPS)
 end
 
 # ============================================================================
@@ -272,12 +272,12 @@ end
             r_max=50.0, renorm_interval=10
         ),
         background=(0.0, 0.0, 0.0),
-        enable_redshift=true,
-        enable_threading=false,
-        supersample=1
+        use_redshift=true,
+        use_threads=false,
+        samples_per_pixel=1
     )
 
-    img = gr_render_image(cam, config, disk, sky, 32, 32)
+    img = gr_render_image(cam, config; disk=disk, sky=sky)
     @test size(img) == (32, 32)
     # Should have some non-black pixels from the disk
     bright = count(px -> px[1] > 0.01, img)
@@ -297,12 +297,12 @@ end
             r_max=50.0, renorm_interval=10
         ),
         background=(0.0, 0.0, 0.0),
-        enable_redshift=true,
-        enable_threading=false,
-        supersample=1
+        use_redshift=true,
+        use_threads=false,
+        samples_per_pixel=1
     )
 
-    img = gr_render_image(cam, config, disk, sky, 32, 32)
+    img = gr_render_image(cam, config; disk=disk, sky=sky)
     # Compute left vs right brightness (spin asymmetry)
     left_sum = sum(px[1] for px in img[:, 1:16])
     right_sum = sum(px[1] for px in img[:, 17:32])

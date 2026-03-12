@@ -42,7 +42,7 @@ Subtypes may override with analytic expressions for performance.
 function metric_inverse_partials(m::MetricSpace{4}, x::SVec4d)::NTuple{4, SMat4d}
     # metric_inverse returns SMat4d (16 components).
     # We differentiate the flattened 16-vector w.r.t. 4 coordinates → 16×4 Jacobian.
-    f(x_) = SVector{16, Float64}(metric_inverse(m, x_))
+    f(x_) = SVector{16}(metric_inverse(m, x_))
     J = ForwardDiff.jacobian(f, x)  # 16×4
 
     # Reshape: column μ of J gives ∂gᵅᵝ/∂xᵘ as a flat 16-vector
