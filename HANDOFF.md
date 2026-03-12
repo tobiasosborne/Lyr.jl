@@ -4,7 +4,96 @@
 
 ---
 
-## Latest Session (2026-03-12d) — Kerr Metric Complete
+## Latest Session (2026-03-12e) — Kerr Showcase + Physics Issues Filed
+
+**Status**: GREEN — Full suite 94,278 pass. Kerr showcase rendered. Two new issues filed for next agent.
+
+### What Was Done
+
+1. **Rendered Kerr showcase images** (1920x1080, 4 spp, 64 threads)
+   - `showcase/kerr_blackhole.png` — Kerr a=0.95, thin disk + checkerboard sky
+   - `showcase/schwarzschild_blackhole.png` — Schwarzschild comparison
+   - Demo script: `examples/kerr_blackhole_demo.jl`
+
+2. **Filed issues for physics improvements**:
+   - `path-tracer-f940` (P1) — Physically correct accretion disk
+   - `path-tracer-u1g5` (P2) — Pole artifacts in BL coordinates
+
+### What Next Agent Should Do
+
+#### Issue `path-tracer-f940`: Physically Correct Accretion Disk (P1)
+
+The current disk looks "cartoonish" — fake emissivity and fake color ramp. Three targeted changes needed (~200 lines total):
+
+**1. Replace `disk_emissivity()` with Novikov-Thorne** (`src/GR/matter.jl:24-33`)
+```julia
+# Current (fake): (r_in/r)^3
+# Target (Novikov-Thorne 1973):
+function novikov_thorne_flux(r, r_isco, M)
+    x = sqrt(r / M)
+    x_isco = sqrt(r_isco / M)
+    # Standard NT integral (Bardeen et al. 1972, Page & Thorne 1974)
+    (3M) / (8π * r^3) * (1 - sqrt(r_isco / r))
+end
+```
+Then derive temperature: `T(r) = (F(r) / σ_SB)^{1/4}` where σ_SB is Stefan-Boltzmann constant.
+
+**2. Replace `blackbody_color()` with Planck→RGB** (`src/GR/redshift.jl:27-40`)
+```julia
+# Current: linear color ramp (NOT physics)
+# Target: Planck's law B(λ,T) integrated against CIE color matching functions
+# Standard approach: evaluate at ~380-780nm, multiply by x̄(λ), ȳ(λ), z̄(λ) → XYZ → sRGB
+# Use tabulated CIE 1931 2° observer (or Judd-Vos modified)
+# Apply gamma correction for display
+```
+Key references: CIE 1931 color matching functions, sRGB primaries.
+Simpler alternative: use Wien approximation + analytic RGB fits (Tanner Helland's algorithm or similar).
+
+**3. Wire temperature through the render pipeline** (`src/GR/render.jl:88-106`)
+```julia
+# Current: intensity = disk_emissivity(disk, r) → blackbody_color(intensity * 5.0)
+# Target:
+T_emit = disk_temperature(disk, r)      # from Novikov-Thorne
+T_obs = T_emit / z_plus_1               # redshifted temperature
+color = planck_to_rgb(T_obs)            # proper Planck spectrum
+intensity = novikov_thorne_flux(r, ...) / z_plus_1^4  # bolometric
+return scale_rgb(color, intensity)       # color × brightness
+```
+Remove the `* 5.0` visibility hack.
+
+**Physical scales** (geometric units M=1):
+- Typical accretion disk: T_inner ≈ 10^7 K (X-ray), T_outer ≈ 10^4 K (UV/optical)
+- For visualization: scale T so inner disk ≈ 8000-15000 K (white-blue), outer ≈ 3000-5000 K (orange-red)
+- This gives a visually striking result matching Interstellar/EHT images
+
+#### Issue `path-tracer-u1g5`: Pole Artifacts (P2)
+
+Visible as bright/dark streaks near top/bottom of BH shadow. Caused by BL coordinate singularity at θ=0,π.
+
+**Cheapest fix**: Adaptive supersampling — detect rays near poles (θ < 0.1 or θ > π-0.1 at any geodesic step) and re-render those pixels at 9-16 spp.
+
+**Proper fix**: Use SchwarzschildKS (Cartesian) coordinates for geodesics that pass near poles. Already have the infrastructure (`SchwarzschildKS` metric, `_coord_r`, `_to_spherical` dispatchers). Would need a Kerr equivalent (Kerr-Schild Cartesian).
+
+**Files**: `src/GR/camera.jl:54-58` (tetrad sinθ division), `src/GR/render.jl` (adaptive spp), `src/GR/metrics/kerr.jl` (sin²θ clamp).
+
+### Files Changed This Session
+
+| File | Change |
+|------|--------|
+| `examples/kerr_blackhole_demo.jl` | New: Kerr + Schwarzschild BH showcase script |
+| `showcase/kerr_blackhole.png` | New: 1920x1080 Kerr a=0.95 render |
+| `showcase/schwarzschild_blackhole.png` | New: 1920x1080 Schwarzschild render |
+
+### Open Issues
+
+| Issue | Priority | Type | Status |
+|-------|----------|------|--------|
+| `path-tracer-f940` | P1 | feature | open — Physically correct accretion disk |
+| `path-tracer-u1g5` | P2 | bug | open — Pole artifacts in BL coordinates |
+
+---
+
+## Previous Session (2026-03-12d) — Kerr Metric Complete
 
 **Status**: COMPLETE — All 169 Kerr tests pass. Added to runtests.jl. Full suite verification pending.
 
