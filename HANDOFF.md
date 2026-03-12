@@ -4,7 +4,67 @@
 
 ---
 
-## Latest Session (2026-03-12e) — Kerr Showcase + Physics Issues Filed
+## Latest Session (2026-03-12f) — Volumetric Planck Pipeline + Pole Fix (SUBSTANDARD)
+
+**Status**: GREEN — Full suite 94,325 pass. Code committed. **Render quality is substandard.**
+
+### What Was Done
+
+1. **Volumetric RGB+Planck pipeline** (`src/GR/render.jl`)
+   - Changed `_trace_pixel_with_p0` from scalar `I_acc` to `(R_acc, G_acc, B_acc)` RGB accumulation
+   - Each step: `disk_temperature_nt()` → redshift → `planck_to_rgb(T_obs)` → scale by emissivity → accumulate RGB
+   - Reinhard tone mapping in `_volumetric_final_color`
+   - **Problem**: renders look washed out / uniformly white-grey. The Planck colors are barely visible — no clear red-to-blue gradient across the disk. Reinhard tone mapping may be over-compressing. The emission magnitude scaling (using normalized `disk_temperature` separately from Kelvin `disk_temperature_nt`) may be wrong.
+
+2. **VolumetricMatter extended** (`src/GR/volumetric.jl`)
+   - Added `r_isco::Float64` and `T_inner::Float64` fields
+   - Backward-compat 4-arg constructor (defaults: `r_isco=inner_radius`, `T_inner=10000.0`)
+
+3. **Kerr volumetric_redshift** (`src/GR/redshift.jl`)
+   - Added `volumetric_redshift(m::Kerr{BoyerLindquist}, ...)` dispatch
+   - Guards with `r <= horizon_radius(m) * 1.1`
+
+4. **Pole artifact mitigation** (partially successful)
+   - Raised ALL sin²θ floors from `1e-10` to `1e-6` across schwarzschild.jl (3 locations), kerr.jl (2), camera.jl (2)
+   - sinθ floors raised from `1e-5` to `1e-3` (schwarzschild.jl partials, camera.jl Schwarzschild tetrad)
+   - Added pole termination in volumetric integrator: `θ < 1e-3 || θ > π - 1e-3` → early return
+   - **Problem**: Residual dotted pole artifact still visible as vertical dark line above/below shadow
+
+5. **Thin-disk reverted** to simple `disk_emissivity` + `blackbody_color` (removed NT+Planck from thin path)
+   - Removed `is_near_pole`, `_estimate_ray_theta`, pole-adaptive second pass
+
+6. **Demo rewritten** (`examples/kerr_blackhole_demo.jl`) to use `VolumetricMatter` + `ThickDisk`, dark background, no checkerboard sky
+
+### Known Issues / What Needs Fixing
+
+1. **Washed-out colors**: The volumetric disk appears mostly white/grey with no visible temperature gradient. Root causes to investigate:
+   - Reinhard tone mapping `r/(1+r)` may compress too aggressively — try exposure control: `1 - exp(-exposure * r)` or simple `clamp(r * gain, 0, 1)`
+   - The split between `disk_temperature` (normalized, for emission magnitude) and `disk_temperature_nt` (Kelvin, for Planck color) may be incorrect — the emission magnitude `jj` doesn't encode the actual luminosity difference between inner/outer disk, so all steps contribute similar brightness regardless of temperature
+   - Consider using `disk_temperature_nt` for BOTH magnitude and color, but with a normalization factor to keep emission in a reasonable range
+
+2. **Pole artifact not fully resolved**: The sin²θ=1e-6 floor and θ<1e-3 termination help but don't eliminate the vertical dotted line. Consider:
+   - Wider pole termination (e.g., θ < 0.01)
+   - Smoothing/interpolation near poles instead of hard cutoff
+   - Switching to Kerr-Schild coordinates for near-pole rays
+
+3. **Doppler beaming weak**: The Kerr image shows slight L/R asymmetry but it should be more dramatic at a=0.95. The `volumetric_redshift` for Kerr uses equatorial Keplerian velocity even for off-plane gas — this approximation may be too crude for thick disks.
+
+### Files Modified
+
+| File | What changed |
+|------|-------------|
+| `src/GR/render.jl` | RGB accumulation, Planck colors, pole termination, thin-disk reverted, removed pole-adaptive pass |
+| `src/GR/volumetric.jl` | `r_isco`, `T_inner` fields + backward-compat constructor |
+| `src/GR/redshift.jl` | `volumetric_redshift` for Kerr |
+| `src/GR/metrics/schwarzschild.jl` | sin²θ floors 1e-10→1e-6, sinθ 1e-5→1e-3 |
+| `src/GR/metrics/kerr.jl` | sin²θ floors 1e-10→1e-6 |
+| `src/GR/camera.jl` | sinθ 1e-5→1e-3, sin²θ 1e-10→1e-6 |
+| `examples/kerr_blackhole_demo.jl` | Volumetric thick disk, dark background |
+| `test/test_gr_volumetric.jl` | 6-arg VolumetricMatter constructor test |
+
+---
+
+## Previous Session (2026-03-12e) — Kerr Showcase + Physics Issues Filed
 
 **Status**: GREEN — Full suite 94,278 pass. Kerr showcase rendered. Two new issues filed for next agent.
 
