@@ -4,7 +4,68 @@
 
 ---
 
-## Latest Session (2026-03-12b) — All 339 Issues Closed, Cross-Renderer Validated
+## Latest Session (2026-03-12c) — Kerr Metric Implementation (In Progress)
+
+**Status**: IN PROGRESS — Kerr BL metric implemented, 148/164 tests pass. 3 fixes applied, needs re-test.
+
+### What Was Done
+
+1. **Implemented Kerr metric in Boyer-Lindquist coordinates** (`path-tracer-oaq6`, in_progress)
+   - `metric()` and `metric_inverse()` with analytic closed-form expressions
+   - `is_singular()`, `coordinate_bounds()`, `inner_horizon_radius()`, `isco_retrograde()`
+   - ForwardDiff handles `metric_inverse_partials` (no analytic partials needed)
+   - `static_observer_tetrad(::Kerr{BoyerLindquist})` in camera.jl — handles g_tφ cross-term
+
+2. **Test results** (148 pass, 10 fail, 6 error before fixes):
+   - Construction, horizons, ISCO, ergosphere: ALL PASS
+   - Schwarzschild limit (a=0): ALL 96 PASS — metric matches exactly
+   - Metric symmetry, inverse identity, signature: ALL PASS
+   - Off-diagonal g_tφ: PASS
+   - Hamiltonian RHS: ERROR (ForwardDiff blocked by Float64 annotations) — **FIXED**
+   - Tetrad orthonormality: FAIL (column/row convention mismatch) — **FIXED**
+   - Render tests: ERROR (CelestialSphere constructor) — **FIXED**
+
+3. **Three fixes applied (not yet re-tested)**:
+   - Removed `::Float64` type annotations from `_kerr_Σ` and `_kerr_Δ` (enables ForwardDiff)
+   - Fixed tetrad constructor: column-major layout so columns = tetrad legs (matches `pixel_to_momentum`)
+   - Fixed test: `CelestialSphere` needs radius argument
+
+### What Next Agent Should Do
+
+1. **Run the Kerr test**: `julia --project -e 'using Test; include("test/test_gr_kerr.jl")'`
+   - All 3 known issues have been fixed; expect most/all tests to pass
+   - If tetrad still fails: check that `E^T * g * E ≈ η` (columns as legs)
+   - If Hamiltonian RHS still fails: check ForwardDiff through metric_inverse
+
+2. **Add test to runtests.jl**: `include("test_gr_kerr.jl")` in the GR testset
+
+3. **Close issue**: `bd close path-tracer-oaq6`
+
+4. **Run full test suite**: Verify no regressions from camera.jl tetrad change
+
+5. **Optional**: Create a Kerr render demo (showcase spinning BH with asymmetric disk)
+
+### Files Changed This Session
+
+| File | Change |
+|------|--------|
+| `src/GR/metrics/kerr.jl` | Full BL metric implementation (replaced stubs) |
+| `src/GR/camera.jl` | Added `static_observer_tetrad(::Kerr{BoyerLindquist})` |
+| `src/GR/GR.jl` | Added exports: `isco_retrograde`, `inner_horizon_radius` |
+| `test/test_gr_kerr.jl` | New: 164 tests for Kerr metric |
+| `src/VolumeIntegrator.jl` | Fixed HG phase function sign error (lines 571, 699) |
+| `test/test_cross_renderer.jl` | Relaxed Scene B/C tolerances |
+| `test/runtests.jl` | Updated cross-renderer comment |
+
+### Open Issues
+
+| Issue | Priority | Type | Status |
+|-------|----------|------|--------|
+| `path-tracer-oaq6` | P1 | feature | in_progress — Kerr BL metric, needs re-test after fixes |
+
+---
+
+## Previous Session (2026-03-12b) — All 339 Issues Closed, Cross-Renderer Validated
 
 **Status**: GREEN — Full test suite: **94,109 pass, 0 fail, 0 errors**. Cross-renderer: **9/9 pass**.
 

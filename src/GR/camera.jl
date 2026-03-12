@@ -68,6 +68,61 @@ function static_observer_tetrad(m::Schwarzschild, x::SVec4d)::Tuple{SVec4d, SMat
 end
 
 """
+    static_observer_tetrad(m::Kerr{BoyerLindquist}, x::SVec4d) -> Tuple{SVec4d, SMat4d}
+
+Construct tetrad for a static observer at position x in Kerr Boyer-Lindquist coordinates.
+Only valid outside the ergosphere (r > r_ergo(θ) where g_tt < 0).
+
+The tetrad handles the g_tφ cross-term: the azimuthal leg e_3 has both t and φ
+components to maintain orthogonality with the timelike leg.
+"""
+function static_observer_tetrad(m::Kerr{BoyerLindquist}, x::SVec4d)::Tuple{SVec4d, SMat4d}
+    M, a = m.M, m.a
+    r, θ = x[2], x[3]
+    sinθ = sin(θ)
+    cosθ = cos(θ)
+    sin2θ = max(sinθ * sinθ, 1e-10)
+
+    Σ = _kerr_Σ(r, a, cosθ)
+    Δ = _kerr_Δ(r, M, a)
+
+    g_tt = -(1.0 - 2.0 * M * r / Σ)
+    g_tφ = -2.0 * M * a * r * sin2θ / Σ
+    g_rr = Σ / Δ
+    g_θθ = Σ
+
+    # e_0: static observer 4-velocity u^μ = (1/√(-g_tt), 0, 0, 0)
+    sqrt_neg_gtt = sqrt(max(-g_tt, 1e-20))
+    u = SVec4d(1.0 / sqrt_neg_gtt, 0.0, 0.0, 0.0)
+
+    # e_1: radial (toward BH)
+    e1 = SVec4d(0.0, 1.0 / sqrt(g_rr), 0.0, 0.0)
+
+    # e_2: polar
+    e2 = SVec4d(0.0, 0.0, 1.0 / sqrt(g_θθ), 0.0)
+
+    # e_3: azimuthal — must be orthogonal to e_0 through the g_tφ cross-term
+    # g(e_0, e_3) = 0 ⟹ e_3^t = -(g_tφ/g_tt) × e_3^φ
+    # g(e_3, e_3) = 1 ⟹ e_3^φ = 1/√(g_φφ - g_tφ²/g_tt)
+    # where g_φφ - g_tφ²/g_tt = -Δ sin²θ / g_tt = Σ Δ sin²θ / (Σ - 2Mr)
+    γ_φφ = -Δ * sin2θ / g_tt  # effective azimuthal metric
+    e3_φ = 1.0 / sqrt(max(γ_φφ, 1e-20))
+    e3_t = -(g_tφ / g_tt) * e3_φ
+    e3 = SVec4d(e3_t, 0.0, 0.0, e3_φ)
+
+    e0 = u
+    # Column-major: column a = tetrad leg e_a (matches pixel_to_momentum e[:, col])
+    tetrad = SMat4d(
+        e0[1], e0[2], e0[3], e0[4],
+        e1[1], e1[2], e1[3], e1[4],
+        e2[1], e2[2], e2[3], e2[4],
+        e3[1], e3[2], e3[3], e3[4]
+    )
+
+    (u, tetrad)
+end
+
+"""
     static_camera(m, r, θ, φ, fov, resolution) -> GRCamera
 
 Convenience constructor for a static observer camera at (r, θ, φ).

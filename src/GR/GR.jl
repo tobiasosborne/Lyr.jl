@@ -84,7 +84,7 @@ export metric_inverse_partials, hamiltonian, hamiltonian_rhs
 export Minkowski
 export Schwarzschild, SchwarzschildCoordinates, EddingtonFinkelstein
 export SchwarzschildKS, ks_to_sky_angles
-export Kerr, BoyerLindquist, KerrSchild, ergosphere_radius, isco_prograde
+export Kerr, BoyerLindquist, KerrSchild, ergosphere_radius, isco_prograde, isco_retrograde, inner_horizon_radius
 export WeakField
 export VolumetricMatter, ThickDisk, evaluate_density, emission_absorption, disk_temperature
 export horizon_radius, photon_sphere_radius, isco_radius
