@@ -568,7 +568,7 @@ function _trace_ss(ray::Ray, pvols, accs, bg::NTuple{3,Float64}, rng, lights)::N
                 1.0
             end
 
-            cos_theta = -dot(ray.direction, light_dir)
+            cos_theta = dot(ray.direction, light_dir)
             phase = evaluate(pv.pf, cos_theta)
             scale = throughput * transmittance * phase * pv.emission_scale
             acc_r += emit_r * light_intensity[1] * scale
@@ -696,7 +696,7 @@ function _trace_ms_opt(ray::Ray, scene::Scene, pvols, accs,
                 light_dir, light_intensity, light_dist = _light_contribution(light, hit_pos)
                 shadow_ray = Ray_prenorm(hit_pos + 0.01 * light_dir, light_dir)
                 transmittance = _shadow_transmittance(shadow_ray, pvols, accs, light_dist, rng)
-                cos_theta = -dot(current_ray.direction, light_dir)
+                cos_theta = dot(current_ray.direction, light_dir)
                 phase = evaluate(pv.pf, cos_theta)
                 scale = throughput * transmittance * phase * pv.emission_scale
                 acc_r += emit_r * light_intensity[1] * scale
