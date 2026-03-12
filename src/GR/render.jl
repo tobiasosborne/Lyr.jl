@@ -58,11 +58,16 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
                      disk::Union{ThinDisk, Nothing},
                      sky::Union{CelestialSphere, Nothing},
                      i::Int, j::Int)::NTuple{3, Float64}
-    p0 = pixel_to_momentum(cam, i, j)
-    initial = GeodesicState(cam.position, p0)
+    _trace_pixel_thin_with_p0(cam, config, disk, sky, pixel_to_momentum(cam, i, j))
+end
 
+"""Internal: thin-disk trace with pre-computed initial momentum (for supersampling)."""
+function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
+                                    disk::Union{ThinDisk, Nothing},
+                                    sky::Union{CelestialSphere, Nothing},
+                                    p0::SVec4d)::NTuple{3, Float64}
     m = cam.metric
-    x, p = initial.x, initial.p
+    x, p = cam.position, p0
     dl_base = config.integrator.step_size
     cfg = config.integrator
     stepper = cfg.stepper
@@ -70,15 +75,13 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
+    initial = GeodesicState(x, p0)
     prev_state = initial
 
     for step in 1:cfg.max_steps
-        # Adaptive step
         dl = M_val > 0.0 ? adaptive_step(dl_base, x[2], M_val) : dl_base
-
         x_new, p_new = _do_step(m, x, p, dl, stepper)
 
-        # Null-cone re-projection
         if renorm_interval > 0 && step % renorm_interval == 0
             p_new = renormalize_null(m, x_new, p_new)
         end
@@ -91,17 +94,11 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
             if crossing !== nothing
                 r_cross, _ = crossing
                 intensity = disk_emissivity(disk, r_cross)
-
                 if config.use_redshift
                     u_emit = keplerian_four_velocity(m, r_cross)
-                    r_obs = _coord_r(m, cam.position)
-                    f_obs = 1.0 - 2.0 * m.M / r_obs
-                    u_obs = SVec4d(1.0 / sqrt(max(f_obs, 1e-10)), 0.0, 0.0, 0.0)
-                    z_plus_1 = redshift_factor(p_new, u_emit, p0, u_obs)
+                    z_plus_1 = redshift_factor(p_new, u_emit, p0, cam.four_velocity)
                     intensity = intensity / z_plus_1^3
                 end
-
-                # Boost by 5× for visibility (emissivity r^{-3} is very faint)
                 return blackbody_color(clamp(intensity * 5.0, 0.0, 2.0))
             end
         end
@@ -111,12 +108,11 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         r = x[2]
 
         # ── Termination ──
-        if r <= horizon_radius(m) * cfg.r_min_factor
-            return (0.0, 0.0, 0.0)  # black hole shadow
+        if r <= rh * cfg.r_min_factor
+            return (0.0, 0.0, 0.0)
         end
 
         if r >= cfg.r_max
-            # Escaped — look up sky
             θ, φ = x[3], x[4]
             if sky !== nothing
                 return sphere_lookup(sky, θ, φ)
@@ -130,7 +126,6 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
         end
     end
 
-    # Max steps exhausted — ray didn't clearly resolve. Use sky at final position.
     θ_f, φ_f = x[3], x[4]
     if sky !== nothing
         return sphere_lookup(sky, θ_f, φ_f)
@@ -170,12 +165,11 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
-    # Observer 4-velocity (static observer at camera position)
-    r_obs = _coord_r(m, cam.position)
-    f_obs = 1.0 - 2.0 * m.M / r_obs
-    u_obs = SVec4d(1.0 / sqrt(max(f_obs, 1e-10)), 0.0, 0.0, 0.0)
+    # Observer 4-velocity (from camera tetrad — exact for any metric)
+    u_obs = cam.four_velocity
 
-    I_acc = 0.0   # accumulated intensity
+    # RGB accumulation (Planck-colored emission)
+    R_acc, G_acc, B_acc = 0.0, 0.0, 0.0
     τ_acc = 0.0   # accumulated optical depth
     density_threshold = 1e-12
 
@@ -189,29 +183,46 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
             p_new = renormalize_null(m, x_new, p_new)
         end
 
+        # ── Pole termination: if θ drifts near a BL pole, metric is unreliable ──
+        θ_new = x_new[3]
+        if θ_new < 1e-3 || θ_new > π - 1e-3
+            bg = _sky_color(m, sky, x_new, config.background)
+            return _volumetric_final_color(R_acc, G_acc, B_acc, τ_acc, bg)
+        end
+
         # ── Accumulate emission/absorption ──
         r_new = _coord_r(m, x_new)
         if vol.inner_radius <= r_new <= vol.outer_radius
             r_d, θ_d, φ_d = _to_spherical(m, x_new)
             ρ = evaluate_density(vol.density_source, r_d, θ_d, φ_d)
             if ρ > density_threshold
-                T = disk_temperature(r_new, vol.inner_radius)
-                j, α = emission_absorption(ρ, T)
+                # NT temperature (Kelvin) for Planck color
+                T_emit = disk_temperature_nt(r_d, m.M, vol.r_isco; T_inner=vol.T_inner)
+                # Normalized temperature for emission magnitude
+                T_norm = disk_temperature(r_d, vol.inner_radius)
+                jj, α = emission_absorption(ρ, T_norm)
                 dl_proper = abs(dl)
 
+                z_plus_1 = 1.0
                 if config.use_redshift
                     z_plus_1 = volumetric_redshift(m, x_new, p_new, p0, u_obs)
-                    j = j / z_plus_1^3
+                    jj = jj / z_plus_1^3
                 end
 
+                # Planck color at observed temperature
+                T_obs = T_emit / max(z_plus_1, 0.01)
+                color = planck_to_rgb(T_obs)
+
                 dτ = α * dl_proper
-                dI = j * dl_proper * exp(-τ_acc)
+                dI = jj * dl_proper * exp(-τ_acc)
                 τ_acc += dτ
-                I_acc += dI
+                R_acc += color[1] * dI
+                G_acc += color[2] * dI
+                B_acc += color[3] * dI
 
                 # Early exit: optically thick — background fully attenuated
                 if τ_acc > 8.0
-                    return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
+                    return _volumetric_final_color(R_acc, G_acc, B_acc, τ_acc, (0.0, 0.0, 0.0))
                 end
             end
         end
@@ -220,36 +231,35 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
 
         # ── Termination ──
         if r_new <= rh * cfg.r_min_factor
-            return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
+            return _volumetric_final_color(R_acc, G_acc, B_acc, τ_acc, (0.0, 0.0, 0.0))
         end
 
         if r_new >= cfg.r_max
             bg = _sky_color(m, sky, x, config.background)
-            return _volumetric_final_color(I_acc, τ_acc, bg)
+            return _volumetric_final_color(R_acc, G_acc, B_acc, τ_acc, bg)
         end
 
         if is_singular(m, x)
-            return _volumetric_final_color(I_acc, τ_acc, (0.0, 0.0, 0.0))
+            return _volumetric_final_color(R_acc, G_acc, B_acc, τ_acc, (0.0, 0.0, 0.0))
         end
     end
 
     bg = _sky_color(m, sky, x, config.background)
-    _volumetric_final_color(I_acc, τ_acc, bg)
+    _volumetric_final_color(R_acc, G_acc, B_acc, τ_acc, bg)
 end
 
-"""Map accumulated intensity + optical depth to final HDR RGB, blending with background."""
-function _volumetric_final_color(I_acc::Float64, τ_acc::Float64,
+"""Map accumulated RGB emission + optical depth to final color, blending with background."""
+function _volumetric_final_color(R_acc::Float64, G_acc::Float64, B_acc::Float64,
+                                  τ_acc::Float64,
                                   bg::NTuple{3, Float64})::NTuple{3, Float64}
-    I_acc <= 0.0 && return bg
-    # blackbody_color maps intensity to an RGB color ramp (cold→hot).
-    # I_acc already encodes the integrated brightness, so we use it directly
-    # as the color — no additional multiplication by I_acc.
-    disk_color = blackbody_color(clamp(I_acc, 0.0, 5.0))
-    # Beer-Lambert: background attenuated by accumulated optical depth
     transmittance = exp(-τ_acc)
-    (disk_color[1] + bg[1] * transmittance,
-     disk_color[2] + bg[2] * transmittance,
-     disk_color[3] + bg[3] * transmittance)
+    r = R_acc + bg[1] * transmittance
+    g = G_acc + bg[2] * transmittance
+    b = B_acc + bg[3] * transmittance
+    # Reinhard tone mapping for HDR → [0,1]
+    (clamp(r / (1.0 + r), 0.0, 1.0),
+     clamp(g / (1.0 + g), 0.0, 1.0),
+     clamp(b / (1.0 + b), 0.0, 1.0))
 end
 
 """Look up sky color from escaped ray position."""
@@ -355,10 +365,9 @@ end
 # Sub-pixel variants for supersampling
 @inline function _trace_one_sub(cam, config, matter::VolumetricMatter, sky, i, j, dx, dy)
     p0 = pixel_to_momentum(cam, i, j, dx, dy)
-    # Inline the volumetric trace with custom initial momentum
     _trace_pixel_with_p0(cam, config, matter, sky, p0)
 end
 @inline function _trace_one_sub(cam, config, matter::Union{ThinDisk, Nothing}, sky, i, j, dx, dy)
-    # ThinDisk path doesn't need sub-pixel (aliasing is less severe)
-    trace_pixel(cam, config, matter, sky, i, j)
+    p0 = pixel_to_momentum(cam, i, j, dx, dy)
+    _trace_pixel_thin_with_p0(cam, config, matter, sky, p0)
 end

@@ -55,7 +55,8 @@ function static_observer_tetrad(m::Schwarzschild, x::SVec4d)::Tuple{SVec4d, SMat
     e0 = u
     e1 = SVec4d(0.0, sqrtf, 0.0, 0.0)       # radial
     e2 = SVec4d(0.0, 0.0, 1.0 / r, 0.0)     # polar
-    e3 = SVec4d(0.0, 0.0, 0.0, 1.0 / (r * sinθ))  # azimuthal
+    sinθ_safe = max(abs(sinθ), 1e-3)
+    e3 = SVec4d(0.0, 0.0, 0.0, 1.0 / (r * sinθ_safe))  # azimuthal
 
     tetrad = SMat4d(
         e0[1], e1[1], e2[1], e3[1],
@@ -81,7 +82,7 @@ function static_observer_tetrad(m::Kerr{BoyerLindquist}, x::SVec4d)::Tuple{SVec4
     r, θ = x[2], x[3]
     sinθ = sin(θ)
     cosθ = cos(θ)
-    sin2θ = max(sinθ * sinθ, 1e-10)
+    sin2θ = max(sinθ * sinθ, 1e-6)
 
     Σ = _kerr_Σ(r, a, cosθ)
     Δ = _kerr_Δ(r, M, a)

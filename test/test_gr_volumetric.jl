@@ -118,6 +118,18 @@
         @test vol.density_source === disk
         @test vol.inner_radius == 6.0
         @test vol.outer_radius == 30.0
+        @test vol.r_isco == 6.0       # defaults to inner_radius
+        @test vol.T_inner == 10000.0  # default temperature
+    end
+
+    @testset "VolumetricMatter 6-arg construction" begin
+        m = Schwarzschild(1.0)
+        disk = ThickDisk(3.0, 15.0, 0.1, 2.0)
+        vol = VolumetricMatter(m, disk, 3.0, 15.0, 3.0, 8000.0)
+        @test vol.r_isco == 3.0
+        @test vol.T_inner == 8000.0
+        @test vol.inner_radius == 3.0
+        @test vol.outer_radius == 15.0
     end
 
     @testset "VolumetricMatter type parameterization" begin

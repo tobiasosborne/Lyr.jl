@@ -49,7 +49,7 @@ function metric(s::Schwarzschild{SchwarzschildCoordinates}, x::SVector{4})
     f = 1.0 - 2.0 * s.M / r
     r2 = r * r
     # Clamp sin²θ away from zero to avoid coordinate singularity at poles
-    sin2θ = max(sin(θ)^2, 1e-10)
+    sin2θ = max(sin(θ)^2, 1e-6)
     z = zero(r)
 
     @SMatrix [
@@ -65,7 +65,7 @@ function metric_inverse(s::Schwarzschild{SchwarzschildCoordinates}, x::SVector{4
     f = 1.0 - 2.0 * s.M / r
     inv_r2 = 1 / (r * r)
     # Clamp sin²θ away from zero to avoid coordinate singularity at poles
-    sin2θ = max(sin(θ)^2, 1e-10)
+    sin2θ = max(sin(θ)^2, 1e-6)
     z = zero(r)
 
     @SMatrix [
@@ -100,7 +100,7 @@ function metric_inverse_partials(s::Schwarzschild{SchwarzschildCoordinates},
     f = 1.0 - rs / r
     r2 = r * r
     r3 = r2 * r
-    sin2θ = max(sin(θ)^2, 1e-10)
+    sin2θ = max(sin(θ)^2, 1e-6)
 
     zero4 = zeros(SMat4d)
 
@@ -124,7 +124,7 @@ function metric_inverse_partials(s::Schwarzschild{SchwarzschildCoordinates},
     # d/dθ [1/(r² sin²θ)] = -2 cosθ / (r² sin³θ)
     sinθ = sin(θ)
     cosθ = cos(θ)
-    sinθ_safe = max(abs(sinθ), 1e-5) * sign(sinθ + 1e-20)
+    sinθ_safe = max(abs(sinθ), 1e-3) * sign(sinθ + 1e-20)
     d_dθ = SMat4d(
         0.0, 0.0, 0.0,                        0.0,
         0.0, 0.0, 0.0,                        0.0,

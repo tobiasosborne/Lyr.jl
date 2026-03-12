@@ -86,7 +86,7 @@ function metric(k::Kerr{BoyerLindquist}, x::SVector{4})
 
     sinθ = sin(θ)
     cosθ = cos(θ)
-    sin2θ = max(sinθ * sinθ, 1e-10)
+    sin2θ = max(sinθ * sinθ, 1e-6)
 
     Σ = _kerr_Σ(r, a, cosθ)
     Δ = _kerr_Δ(r, M, a)
@@ -113,7 +113,7 @@ function metric_inverse(k::Kerr{BoyerLindquist}, x::SVector{4})
 
     sinθ = sin(θ)
     cosθ = cos(θ)
-    sin2θ = max(sinθ * sinθ, 1e-10)
+    sin2θ = max(sinθ * sinθ, 1e-6)
 
     Σ = _kerr_Σ(r, a, cosθ)
     Δ = _kerr_Δ(r, M, a)

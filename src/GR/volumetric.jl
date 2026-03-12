@@ -24,7 +24,13 @@ struct VolumetricMatter{M<:MetricSpace, D} <: MatterSource
     density_source::D
     inner_radius::Float64
     outer_radius::Float64
+    r_isco::Float64
+    T_inner::Float64
 end
+
+# Backward-compatible 4-arg constructor
+VolumetricMatter(metric::M, density_source::D, inner_radius::Float64, outer_radius::Float64) where {M<:MetricSpace, D} =
+    VolumetricMatter(metric, density_source, inner_radius, outer_radius, inner_radius, 10000.0)
 
 # ─────────────────────────────────────────────────────────────────────
 # ThickDisk — analytic density source
