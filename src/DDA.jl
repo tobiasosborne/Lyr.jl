@@ -1,6 +1,20 @@
 # DDA.jl - Amanatides-Woo 3D Digital Differential Analyzer
 
 """
+    _safe_floor_int32(x::Float64) -> Int32
+
+Floor `x` and convert to Int32, clamping to Int32 range for non-finite or out-of-range values.
+Prevents `InexactError: Int32(Inf)` on edge-case rays (e.g., axis-parallel rays at volume boundaries).
+"""
+@inline function _safe_floor_int32(x::Float64)::Int32
+    y = floor(x)
+    isfinite(y) || return y != y ? Int32(0) : (y > 0.0 ? typemax(Int32) : typemin(Int32))
+    y > 2.147483647e9 && return typemax(Int32)
+    y < -2.147483648e9 && return typemin(Int32)
+    Int32(y)
+end
+
+"""
     DDAState
 
 State for the Amanatides-Woo 3D-DDA traversal.
@@ -34,10 +48,11 @@ function dda_init(ray::Ray, tmin::Float64, voxel_size::Float64=1.0)::DDAState
     p = ray.origin + (tmin + 1e-9) * ray.direction
 
     # Current voxel (floor to grid)
+    # Use _safe_floor_int32 to handle edge-case rays where position overflows Int32
     ijk = Coord(
-        Int32(floor(p[1] * inv_vs)),
-        Int32(floor(p[2] * inv_vs)),
-        Int32(floor(p[3] * inv_vs))
+        _safe_floor_int32(p[1] * inv_vs),
+        _safe_floor_int32(p[2] * inv_vs),
+        _safe_floor_int32(p[3] * inv_vs)
     )
 
     # Step direction per axis

@@ -596,6 +596,12 @@ end
     (light.direction, light.intensity, Inf)
 end
 
+@inline function _light_contribution(::ConstantEnvironmentLight, ::SVec3d)
+    # Environment lights contribute via _escape_radiance (ray escape), not direct lighting.
+    # Return zero intensity to skip — proper implementation would need hemisphere sampling.
+    (SVec3d(0.0, 0.0, 1.0), SVec3d(0.0, 0.0, 0.0), Inf)
+end
+
 # ============================================================================
 # Multi-scatter path tracer
 # ============================================================================

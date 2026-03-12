@@ -174,4 +174,5 @@ import Lyr:
     include("test_gr_render.jl")
     include("test_gr_volumetric.jl")
     include("test_gr_validation.jl")
+    # test_cross_renderer.jl excluded: slow (9min) + known HG phase mismatch with Mitsuba
 end
