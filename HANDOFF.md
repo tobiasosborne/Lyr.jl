@@ -4,7 +4,103 @@
 
 ---
 
-## Latest Session (2026-03-12g) — Full-Scale Code Review (58 Issues Filed)
+## Latest Session (2026-03-12h) — Session Recovery + Uncommitted Matter/Planck Work
+
+**Status**: GREEN — Recovering uncommitted work from prematurely terminated session. **Tests NOT re-run this session** (user request). All code was written and tested in session 2026-03-12f but never committed.
+
+### What Happened
+
+Session 2026-03-12f (Volumetric Planck Pipeline) and 2026-03-12g (Code Review) terminated without committing 4 modified files. This session recovered them from the working tree.
+
+### Uncommitted Changes Recovered
+
+1. **`src/GR/GR.jl`** — 2 new export lines
+   - `novikov_thorne_flux`, `disk_temperature_nt` (matter exports)
+   - `planck_to_rgb`, `planck_to_xyz`, `xyz_to_srgb`, `srgb_gamma`, `scale_rgb` (redshift exports)
+
+2. **`src/GR/matter.jl`** — Novikov-Thorne accretion physics (+37 lines)
+   - `ThinDisk` struct extended with `r_isco::Float64` and `T_inner::Float64` fields
+   - Backward-compatible 2-arg constructor: `ThinDisk(inner, outer)` → defaults `r_isco=inner`, `T_inner=10000.0`
+   - `novikov_thorne_flux(r, M, r_isco)` — Page & Thorne 1974 zeroth-order: `F ∝ (1 - √(r_isco/r)) / r³`
+   - `disk_temperature_nt(r, M, r_isco; T_inner=10000.0)` — NT temp profile `T ∝ (F/F_max)^{1/4}`, peak at `r_peak ≈ (49/36) r_isco`
+
+3. **`test/test_gr_matter.jl`** — 6 new testsets (+54 lines)
+   - ThinDisk backward compat: 2-arg and 4-arg constructors, field defaults
+   - Novikov-Thorne flux: zero at/below ISCO, positive above, monotonic decay
+   - Novikov-Thorne temperature: zero at/below ISCO, ≤ T_inner, custom T_inner, decreasing at large r
+
+4. **`test/test_gr_redshift.jl`** — 5 new testsets (+55 lines)
+   - `scale_rgb`: identity at scale=1, zero at scale=0, clamping at scale=2, negative clamping
+   - `planck_to_rgb`: Sun (5778K) → yellowish-white, cool (3000K) → red-dominant, hot (15000K) → blue-white, zero/negative → black
+   - `planck_to_xyz`: positive tristimulus at 5778K, zero at 0K
+   - `xyz_to_srgb`: D65 white point → near (1,1,1)
+   - `srgb_gamma`: boundary values, mid-tone boost
+
+### Beads Issue Tracker State
+
+- **Total**: 400 issues (342 closed, 58 open)
+- **In progress**: 0 (nothing currently claimed)
+- **Ready to work**: 48 (no blockers)
+- **Blocked**: 10 (waiting on upstream fixes)
+
+### What the Next Agent Should Do
+
+**Option A — Fix P0 Bug (recommended start):**
+```bash
+bd show path-tracer-ffab    # P0: thin-disk hardcodes Boyer-Lindquist, breaks KS coords
+bd update path-tracer-ffab --status=in_progress
+```
+The thin-disk renderer in `src/GR/render.jl` hardcodes `x[2]` as radius (Boyer-Lindquist assumption) in 6 locations. When using Kerr-Schild coordinates, `x[2]` is the Cartesian x-component, not the spherical radius. Fix: use `_coord_r(m, x)` dispatch (already used by the volumetric path). Locations: `render.jl`, `matter.jl:check_disk_crossing`, `integrator.jl`.
+
+**Option B — Fix Washed-Out Volumetric Colors:**
+The Planck-colored volumetric disk (session 2026-03-12f) renders white/grey instead of showing temperature gradients. Root causes:
+- Reinhard tone mapping `r/(1+r)` over-compresses — try `1 - exp(-exposure * r)` or `clamp(r * gain, 0, 1)`
+- Emission magnitude uses normalized `disk_temperature` separately from Kelvin `disk_temperature_nt` — the magnitude doesn't encode luminosity differences, so all steps contribute similar brightness
+- Fix: use `disk_temperature_nt` for both magnitude and color with normalization
+
+**Option C — Fix P1 Bugs:**
+```bash
+bd show path-tracer-ydmy    # Schwarzschild tetrad transposed vs Kerr/KS
+bd show path-tracer-y1hu    # Delta tracking uses raw density instead of sigma_t/sigma_maj
+bd show path-tracer-thj7    # Kerr ForwardDiff 10-20x slower than analytic
+```
+
+### Dependency DAG (unchanged from 2026-03-12g)
+
+```
+BL fix (ffab) ──→ KS tests (iflm)
+Tetrad fix (ydmy) ┘
+BL fix (ffab) ──→ GeodesicState alloc (yptd)
+Delta tracking fix (y1hu) → VolumeIntegrator tests (fgzb)
+DDA step opt (bno4) ──┐
+node_dda merge (nqsh) ┴──→ HDDA consolidation (hecg)
+Kerr partials (thj7) → Hamiltonian redundancy (11ov)
+```
+
+### Key Files for Reference
+
+| File | Purpose |
+|------|---------|
+| `src/GR/matter.jl` | ThinDisk, CelestialSphere, Keplerian 4-vel, Novikov-Thorne, disk crossing |
+| `src/GR/redshift.jl` | Redshift factor, Planck→sRGB pipeline, doppler/volumetric redshift |
+| `src/GR/render.jl` | GR rendering pipeline (thin-disk + volumetric paths) |
+| `src/GR/volumetric.jl` | VolumetricMatter, ThickDisk, emission-absorption |
+| `reviews/*.md` | 7 expert code review reports from session 2026-03-12g |
+| `docs/api_reference.md` | Full API signatures, gotchas, source file map |
+
+### Commands for Next Agent
+
+```bash
+bd ready                        # 48 unblocked issues
+bd show path-tracer-ffab        # P0 critical bug
+bd blocked                      # 10 blocked issues
+bd stats                        # Project health overview
+julia --project -e 'using Pkg; Pkg.test()'  # Full test suite (~3 min)
+```
+
+---
+
+## Previous Session (2026-03-12g) — Full-Scale Code Review (58 Issues Filed)
 
 **Status**: GREEN — No code changes. Full suite still 94,325 pass. **58 new beads issues filed from 7-agent code review.**
 

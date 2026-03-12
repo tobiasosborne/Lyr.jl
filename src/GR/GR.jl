@@ -99,9 +99,11 @@ export GRCamera, static_observer_tetrad, static_camera, pixel_to_momentum
 export MatterSource, ThinDisk, CelestialSphere
 export disk_emissivity, keplerian_four_velocity, check_disk_crossing
 export sphere_lookup, checkerboard_sphere
+export novikov_thorne_flux, disk_temperature_nt
 
 # Redshift
 export redshift_factor, temperature_shift, blackbody_color, doppler_color, volumetric_redshift
+export planck_to_rgb, planck_to_xyz, xyz_to_srgb, srgb_gamma, scale_rgb
 
 # Render
 export GRRenderConfig, gr_render_image

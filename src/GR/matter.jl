@@ -19,7 +19,13 @@ Emits with power-law emissivity, orbiting material follows Keplerian orbits.
 struct ThinDisk <: MatterSource
     inner_radius::Float64
     outer_radius::Float64
+    r_isco::Float64
+    T_inner::Float64  # peak temperature in Kelvin
 end
+
+# Backward-compatible 2-arg constructor
+ThinDisk(inner_radius::Float64, outer_radius::Float64) =
+    ThinDisk(inner_radius, outer_radius, inner_radius, 10000.0)
 
 """
     disk_emissivity(disk, r) -> Float64
@@ -30,6 +36,37 @@ Returns 0 outside disk bounds.
 function disk_emissivity(disk::ThinDisk, r::Float64)::Float64
     (r < disk.inner_radius || r > disk.outer_radius) && return 0.0
     (disk.inner_radius / r)^3
+end
+
+"""
+    novikov_thorne_flux(r, M, r_isco) -> Float64
+
+Radiative flux F(r) from Novikov-Thorne accretion (Page & Thorne 1974).
+Zeroth-order approximation: F ∝ (1 - √(r_isco/r)) / r³.
+Returns 0 below ISCO.
+"""
+function novikov_thorne_flux(r::Float64, M::Float64, r_isco::Float64)::Float64
+    r <= r_isco && return 0.0
+    (3.0 * M / (8.0 * π * r^3)) * (1.0 - sqrt(r_isco / r))
+end
+
+"""
+    disk_temperature_nt(r, M, r_isco; T_inner=10000.0) -> Float64
+
+Novikov-Thorne temperature profile: T(r) = T_inner × (F(r)/F_max)^{1/4}.
+Peaks just outside ISCO, falls off at large r.
+Returns 0 below ISCO.
+"""
+function disk_temperature_nt(r::Float64, M::Float64, r_isco::Float64;
+                              T_inner::Float64=10000.0)::Float64
+    F = novikov_thorne_flux(r, M, r_isco)
+    F <= 0.0 && return 0.0
+    # F_max occurs at r_peak ≈ (49/36) r_isco for zeroth-order NT
+    # Compute it directly for normalization
+    r_peak = (49.0 / 36.0) * r_isco
+    F_max = novikov_thorne_flux(r_peak, M, r_isco)
+    F_max <= 0.0 && return 0.0
+    T_inner * (F / F_max)^0.25
 end
 
 """

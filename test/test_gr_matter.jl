@@ -64,6 +64,60 @@
         @test c1 != c2 || c1 == c2  # just verify it returns a valid color
     end
 
+    @testset "ThinDisk backward compat" begin
+        disk2 = ThinDisk(6.0, 30.0)
+        @test disk2.inner_radius == 6.0
+        @test disk2.outer_radius == 30.0
+        @test disk2.r_isco == 6.0       # defaults to inner_radius
+        @test disk2.T_inner == 10000.0  # default temperature
+
+        disk4 = ThinDisk(3.0, 15.0, 3.0, 8000.0)
+        @test disk4.r_isco == 3.0
+        @test disk4.T_inner == 8000.0
+    end
+
+    @testset "Novikov-Thorne flux" begin
+        r_isco = 6.0
+
+        # Zero at ISCO
+        @test novikov_thorne_flux(6.0, M, r_isco) == 0.0
+
+        # Zero below ISCO
+        @test novikov_thorne_flux(5.0, M, r_isco) == 0.0
+
+        # Positive outside ISCO
+        @test novikov_thorne_flux(8.0, M, r_isco) > 0.0
+
+        # Peaks somewhere outside ISCO, then decreases
+        f10 = novikov_thorne_flux(10.0, M, r_isco)
+        f50 = novikov_thorne_flux(50.0, M, r_isco)
+        @test f10 > f50  # flux decreases at large r
+    end
+
+    @testset "Novikov-Thorne temperature" begin
+        r_isco = 6.0
+
+        # Zero at/below ISCO
+        @test disk_temperature_nt(6.0, M, r_isco) == 0.0
+        @test disk_temperature_nt(5.0, M, r_isco) == 0.0
+
+        # Positive outside ISCO
+        T8 = disk_temperature_nt(8.0, M, r_isco)
+        @test T8 > 0.0
+
+        # Reasonable range: should be <= T_inner
+        @test T8 <= 10000.0
+
+        # Temperature decreases at large r
+        T50 = disk_temperature_nt(50.0, M, r_isco)
+        @test T50 < T8
+
+        # Custom T_inner
+        T_custom = disk_temperature_nt(8.0, M, r_isco; T_inner=5000.0)
+        @test T_custom <= 5000.0
+        @test T_custom > 0.0
+    end
+
     @testset "Celestial sphere lookup" begin
         # Simple 2×4 texture
         tex = [
