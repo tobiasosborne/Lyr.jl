@@ -4,7 +4,66 @@
 
 ---
 
-## Latest Session (2026-03-12h) — Session Recovery + Uncommitted Matter/Planck Work
+## Latest Session (2026-03-16) — 12 Issues Resolved: Correctness + Performance + Test Reliability
+
+**Status**: GREEN — 94,329 tests pass, 0 fail. 12 issues closed (354 total closed, 46 open).
+
+### What Was Done
+
+**5 Correctness Bugs Fixed (1 commit):**
+- **P0 (ffab)**: Thin-disk renderer no longer hardcodes Boyer-Lindquist — uses `_coord_r`, metric-dispatched `check_disk_crossing`, 3-arg `keplerian_four_velocity`. Verlet θ-regularization guarded for KS.
+- **P1 (ydmy)**: Schwarzschild tetrad layout fixed to legs-as-columns (matching Kerr/KS).
+- **P1 (y1hu)**: Delta/ratio tracking acceptance uses proper Woodcock formula `sigma_t/sigma_maj`. `sigma_maj` now computed from grid max_density × sigma_scale.
+- **P2 (4fmn)**: Doppler intensity exponent `(1+z)^-3` → `(1+z)^-4` for broadband RGB.
+- **P2 (4mwp)**: `renormalize_null` p_t=0 edge case picks larger-magnitude root.
+
+**2 Major Performance Wins:**
+- **P1 (thj7)**: Analytic Kerr inverse metric partials — 60ns vs ~600-1200ns ForwardDiff (**10-20x speedup**, zero allocations). Machine-precision match at all test points.
+- **P2 (r73c)**: Planck→RGB LUT (2048 entries, log-spaced) — 2.5ns vs 1μs (**400x speedup**), 0.03% max error.
+
+**3 Quick Fixes:**
+- **P3 (yo2i)**: sRGB matrix coefficients to full IEC 61966-2-1 7-digit precision.
+- **P3 (8jsv)**: `sinθ_safe` sign discontinuity near θ=π fixed.
+- **P4 (8nnf)**: Removed unused `patch_area` variable in `denoise_nlm`.
+
+**1 Dependency Cleanup:**
+- **P3 (5oo4)**: Removed OrdinaryDiffEq from `[deps]` — never imported, saves precompilation time.
+
+**1 Test Reliability Fix:**
+- **P2 (0c2t)**: 13 test files updated — silent `if isfile()` guards replaced with `@test_skip`. Missing fixtures now visible in test output.
+
+### What the Next Agent Should Do
+
+**Phase 2 — High-Impact Performance (from code review):**
+```bash
+bd show path-tracer-c6jb    # GR stepper dispatches on Symbol instead of type
+bd show path-tracer-bno4    # DDA step creates 2 immutable structs with 6 branches
+bd show path-tracer-nqsh    # node_dda duplicates local coordinate computation
+bd show path-tracer-kixv    # sample_quadratic creates new ValueAccessor per call
+```
+
+**Phase 3 — Type Stability:**
+```bash
+bd show path-tracer-ns5d    # RootNode Union-typed Dict
+bd show path-tracer-he6c    # VolumeEntry allows Nothing nanogrid
+bd show path-tracer-qt4m    # Scene lights Vector{AbstractLight}
+```
+
+**Phase 4 — Remaining Correctness:**
+```bash
+bd show path-tracer-ika3    # CSG narrow-band gaps at intersection seams
+```
+
+### Commands
+```bash
+bd ready           # 41 unblocked issues
+bd stats           # Project health
+julia --project -e 'using Pkg; Pkg.test()'  # Full suite (~12 min)
+```
+
+---
+
+## Previous Session (2026-03-12h) — Session Recovery + Uncommitted Matter/Planck Work
 
 **Status**: GREEN — Recovering uncommitted work from prematurely terminated session. **Tests NOT re-run this session** (user request). All code was written and tested in session 2026-03-12f but never committed.
 
