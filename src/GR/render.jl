@@ -6,6 +6,34 @@
 
 # Coordinate-system dispatch: convert to spherical
 # Note: _coord_r is defined in integrator.jl (loaded first, shared with matter.jl)
+
+# Bare SVec4d disk crossing (avoids GeodesicState allocation in thin-disk inner loop)
+@inline function _check_disk_crossing_bare(m::MetricSpace, x_prev::SVec4d, x_curr::SVec4d,
+                                            disk::ThinDisk)
+    equator = π / 2.0
+    if (x_prev[3] - equator) * (x_curr[3] - equator) < 0.0
+        frac = (equator - x_prev[3]) / (x_curr[3] - x_prev[3])
+        r_cross = x_prev[2] + frac * (x_curr[2] - x_prev[2])
+        if disk.inner_radius <= r_cross <= disk.outer_radius
+            return (r_cross, frac)
+        end
+    end
+    nothing
+end
+
+@inline function _check_disk_crossing_bare(::SchwarzschildKS, x_prev::SVec4d, x_curr::SVec4d,
+                                            disk::ThinDisk)
+    if x_prev[4] * x_curr[4] < 0.0
+        frac = -x_prev[4] / (x_curr[4] - x_prev[4])
+        x_cross = x_prev + frac * (x_curr - x_prev)
+        r_cross = sqrt(x_cross[2]^2 + x_cross[3]^2 + x_cross[4]^2)
+        if disk.inner_radius <= r_cross <= disk.outer_radius
+            return (r_cross, frac)
+        end
+    end
+    nothing
+end
+
 @inline _to_spherical(::MetricSpace, x::SVec4d) = (x[2], x[3], x[4])  # BL: (r, θ, φ)
 @inline function _to_spherical(::SchwarzschildKS, x::SVec4d)
     r = sqrt(x[2]^2 + x[3]^2 + x[4]^2)
@@ -73,8 +101,7 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
     rh = horizon_radius(m)
     M_val = rh / 2.0
 
-    initial = GeodesicState(x, p0)
-    prev_state = initial
+    x_prev = x
 
     for step in 1:cfg.max_steps
         r = _coord_r(m, x)
@@ -85,16 +112,14 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
             p_new = renormalize_null(m, x_new, p_new)
         end
 
-        curr_state = GeodesicState(x_new, p_new)
-
         # ── Check disk crossing ──
         if disk !== nothing
-            crossing = check_disk_crossing(m, prev_state, curr_state, disk)
+            crossing = _check_disk_crossing_bare(m, x_prev, x_new, disk)
             if crossing !== nothing
                 r_cross, frac = crossing
                 intensity = disk_emissivity(disk, r_cross)
                 if config.use_redshift
-                    x_cross = prev_state.x + frac * (curr_state.x - prev_state.x)
+                    x_cross = x_prev + frac * (x_new - x_prev)
                     u_emit = keplerian_four_velocity(m, r_cross, x_cross)
                     z_plus_1 = redshift_factor(p_new, u_emit, p0, cam.four_velocity)
                     intensity = intensity / z_plus_1^4
@@ -103,8 +128,8 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
             end
         end
 
+        x_prev = x
         x, p = x_new, p_new
-        prev_state = curr_state
         r = _coord_r(m, x)
 
         # ── Termination ──
