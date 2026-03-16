@@ -195,10 +195,10 @@ Convert CIE XYZ to linear sRGB using IEC 61966-2-1 matrix.
 Returns unclamped linear RGB (may be negative for out-of-gamut colors).
 """
 @inline function xyz_to_srgb(X::Float64, Y::Float64, Z::Float64)::NTuple{3, Float64}
-    # sRGB D65 matrix (IEC 61966-2-1)
-    r =  3.2406 * X - 1.5372 * Y - 0.4986 * Z
-    g = -0.9689 * X + 1.8758 * Y + 0.0415 * Z
-    b =  0.0557 * X - 0.2040 * Y + 1.0570 * Z
+    # sRGB D65 matrix (IEC 61966-2-1, full precision)
+    r =  3.2406255 * X - 1.5372080 * Y - 0.4986286 * Z
+    g = -0.9689307 * X + 1.8757561 * Y + 0.0415175 * Z
+    b =  0.0557101 * X - 0.2040211 * Y + 1.0569959 * Z
     (r, g, b)
 end
 

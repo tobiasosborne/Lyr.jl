@@ -124,7 +124,7 @@ function metric_inverse_partials(s::Schwarzschild{SchwarzschildCoordinates},
     # d/dθ [1/(r² sin²θ)] = -2 cosθ / (r² sin³θ)
     sinθ = sin(θ)
     cosθ = cos(θ)
-    sinθ_safe = max(abs(sinθ), 1e-3) * sign(sinθ + 1e-20)
+    sinθ_safe = max(abs(sinθ), 1e-3) * (sinθ >= 0.0 ? 1.0 : -1.0)
     d_dθ = SMat4d(
         0.0, 0.0, 0.0,                        0.0,
         0.0, 0.0, 0.0,                        0.0,

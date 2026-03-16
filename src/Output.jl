@@ -114,7 +114,6 @@ function denoise_nlm(pixels::Matrix{NTuple{3, T}};
     height, width = size(pixels)
     result = similar(pixels)
     inv_h2 = one(T) / (h * h)
-    patch_area = T((2 * patch_radius + 1)^2)
 
     Threads.@threads for j in 1:width
       for i in 1:height
