@@ -103,7 +103,7 @@ export novikov_thorne_flux, disk_temperature_nt
 
 # Redshift
 export redshift_factor, temperature_shift, blackbody_color, doppler_color, volumetric_redshift
-export planck_to_rgb, planck_to_xyz, xyz_to_srgb, srgb_gamma, scale_rgb
+export planck_to_rgb, planck_to_rgb_fast, planck_to_xyz, xyz_to_srgb, srgb_gamma, scale_rgb
 
 # Render
 export GRRenderConfig, gr_render_image

@@ -232,3 +232,43 @@ function planck_to_rgb(T_kelvin::Float64)::NTuple{3, Float64}
      clamp(srgb_gamma(max(g_lin, 0.0)), 0.0, 1.0),
      clamp(srgb_gamma(max(b_lin, 0.0)), 0.0, 1.0))
 end
+
+# ─────────────────────────────────────────────────────────────────────
+# Planck RGB lookup table — replaces 81 exp() calls with lerp
+# ─────────────────────────────────────────────────────────────────────
+
+const _PLANCK_LUT_N = 2048
+const _PLANCK_LUT_LOG_T_MIN = log(500.0)     # K (cool red)
+const _PLANCK_LUT_LOG_T_MAX = log(100000.0)  # K (hot blue-white)
+const _PLANCK_LUT_INV_DLT = (_PLANCK_LUT_N - 1) / (_PLANCK_LUT_LOG_T_MAX - _PLANCK_LUT_LOG_T_MIN)
+
+const _PLANCK_LUT = let
+    lut = Vector{NTuple{3, Float64}}(undef, _PLANCK_LUT_N)
+    for i in 1:_PLANCK_LUT_N
+        logT = _PLANCK_LUT_LOG_T_MIN + (i - 1) / (_PLANCK_LUT_N - 1) * (_PLANCK_LUT_LOG_T_MAX - _PLANCK_LUT_LOG_T_MIN)
+        lut[i] = planck_to_rgb(exp(logT))
+    end
+    lut
+end
+
+"""
+    planck_to_rgb_fast(T_kelvin) -> NTuple{3, Float64}
+
+LUT-accelerated Planck→sRGB for the volumetric inner loop.
+Log-spaced 2048-entry table with linear interpolation. Max error < 0.005 per channel.
+"""
+@inline function planck_to_rgb_fast(T_kelvin::Float64)::NTuple{3, Float64}
+    T_kelvin <= 0.0 && return (0.0, 0.0, 0.0)
+    logT = log(clamp(T_kelvin, 500.0, 100000.0))
+    t = (logT - _PLANCK_LUT_LOG_T_MIN) * _PLANCK_LUT_INV_DLT
+    i = unsafe_trunc(Int, t)
+    i = clamp(i, 0, _PLANCK_LUT_N - 2)
+    f = t - i
+    @inbounds begin
+        a = _PLANCK_LUT[i + 1]
+        b = _PLANCK_LUT[i + 2]
+    end
+    (a[1] + f * (b[1] - a[1]),
+     a[2] + f * (b[2] - a[2]),
+     a[3] + f * (b[3] - a[3]))
+end

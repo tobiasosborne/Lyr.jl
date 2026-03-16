@@ -201,7 +201,7 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
 
                 # Planck color at observed temperature
                 T_obs = T_emit / max(z_plus_1, 0.01)
-                color = planck_to_rgb(T_obs)
+                color = planck_to_rgb_fast(T_obs)
 
                 dτ = α * dl_proper
                 dI = jj * dl_proper * exp(-τ_acc)
