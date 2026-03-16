@@ -60,7 +60,11 @@ using Lyr
     # Integration tests on sphere.vdb
     sphere_path = joinpath(@__DIR__, "fixtures", "samples", "sphere.vdb")
 
-    if isfile(sphere_path)
+    if !isfile(sphere_path)
+        @testset "sphere.vdb integration tests" begin
+            @test_skip "fixture not found: $sphere_path"
+        end
+    else
         vdb = parse_vdb(sphere_path)
         grid = vdb.grids[1]
 
@@ -155,7 +159,11 @@ using Lyr
     # Test on cube.vdb as well
     cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
 
-    if isfile(cube_path)
+    if !isfile(cube_path)
+        @testset "cube.vdb integration tests" begin
+            @test_skip "fixture not found: $cube_path"
+        end
+    else
         vdb = parse_vdb(cube_path)
         grid = vdb.grids[1]
 
@@ -188,7 +196,10 @@ using Lyr
         # that DDA might step over. Verify find_surface still works on all fixtures.
         for fixture in ["cube.vdb", "sphere.vdb", "icosahedron.vdb", "torus.vdb"]
             path = joinpath(@__DIR__, "fixtures", "samples", fixture)
-            isfile(path) || continue
+            if !isfile(path)
+                @test_skip "fixture not found: $path"
+                continue
+            end
 
             vdb = parse_vdb(path)
             grid = vdb.grids[1]

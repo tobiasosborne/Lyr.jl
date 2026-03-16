@@ -691,122 +691,122 @@ const FIXTURES_DIR = joinpath(@__DIR__, "fixtures", "samples")
 
     @testset "Round-trip cube.vdb" begin
         cube_path = joinpath(FIXTURES_DIR, "cube.vdb")
-        if isfile(cube_path)
-            # Parse original
-            orig = parse_vdb(cube_path)
-            @test length(orig.grids) >= 1
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
+        # Parse original
+        orig = parse_vdb(cube_path)
+        @test length(orig.grids) >= 1
 
-            for orig_grid in orig.grids
-                # Write to buffer
-                buf = write_vdb_to_buffer(orig_grid)
+        for orig_grid in orig.grids
+            # Write to buffer
+            buf = write_vdb_to_buffer(orig_grid)
 
-                # Re-parse
-                reread = parse_vdb(buf)
-                @test length(reread.grids) == 1
-                new_grid = reread.grids[1]
+            # Re-parse
+            reread = parse_vdb(buf)
+            @test length(reread.grids) == 1
+            new_grid = reread.grids[1]
 
-                # Compare grid names
-                @test new_grid.name == orig_grid.name
+            # Compare grid names
+            @test new_grid.name == orig_grid.name
 
-                # Compare backgrounds
-                @test new_grid.tree.background == orig_grid.tree.background
+            # Compare backgrounds
+            @test new_grid.tree.background == orig_grid.tree.background
 
-                # Compare leaf counts
-                @test leaf_count(new_grid.tree) == leaf_count(orig_grid.tree)
+            # Compare leaf counts
+            @test leaf_count(new_grid.tree) == leaf_count(orig_grid.tree)
 
-                # Compare active voxel counts
-                @test active_voxel_count(new_grid.tree) == active_voxel_count(orig_grid.tree)
+            # Compare active voxel counts
+            @test active_voxel_count(new_grid.tree) == active_voxel_count(orig_grid.tree)
 
-                # Compare actual values at every active voxel
-                new_acc = ValueAccessor(new_grid.tree)
+            # Compare actual values at every active voxel
+            new_acc = ValueAccessor(new_grid.tree)
 
-                mismatch_count = 0
-                for (c, val) in active_voxels(orig_grid.tree)
-                    new_val = get_value(new_acc, c)
-                    if new_val != val
-                        mismatch_count += 1
-                    end
+            mismatch_count = 0
+            for (c, val) in active_voxels(orig_grid.tree)
+                new_val = get_value(new_acc, c)
+                if new_val != val
+                    mismatch_count += 1
                 end
-                @test mismatch_count == 0
             end
-        else
-            @warn "cube.vdb not found at $cube_path, skipping round-trip test"
+            @test mismatch_count == 0
         end
     end
 
     @testset "Round-trip sphere.vdb" begin
         sphere_path = joinpath(FIXTURES_DIR, "sphere.vdb")
-        if isfile(sphere_path)
-            # Parse original
-            orig = parse_vdb(sphere_path)
-            @test length(orig.grids) >= 1
+        if !isfile(sphere_path)
+            @test_skip "fixture not found: $sphere_path"
+            return
+        end
+        # Parse original
+        orig = parse_vdb(sphere_path)
+        @test length(orig.grids) >= 1
 
-            for orig_grid in orig.grids
-                # Write to buffer
-                buf = write_vdb_to_buffer(orig_grid)
+        for orig_grid in orig.grids
+            # Write to buffer
+            buf = write_vdb_to_buffer(orig_grid)
 
-                # Re-parse
-                reread = parse_vdb(buf)
-                @test length(reread.grids) == 1
-                new_grid = reread.grids[1]
+            # Re-parse
+            reread = parse_vdb(buf)
+            @test length(reread.grids) == 1
+            new_grid = reread.grids[1]
 
-                # Compare grid names
-                @test new_grid.name == orig_grid.name
+            # Compare grid names
+            @test new_grid.name == orig_grid.name
 
-                # Compare backgrounds
-                @test new_grid.tree.background == orig_grid.tree.background
+            # Compare backgrounds
+            @test new_grid.tree.background == orig_grid.tree.background
 
-                # Compare leaf counts
-                @test leaf_count(new_grid.tree) == leaf_count(orig_grid.tree)
+            # Compare leaf counts
+            @test leaf_count(new_grid.tree) == leaf_count(orig_grid.tree)
 
-                # Compare active voxel counts
-                @test active_voxel_count(new_grid.tree) == active_voxel_count(orig_grid.tree)
+            # Compare active voxel counts
+            @test active_voxel_count(new_grid.tree) == active_voxel_count(orig_grid.tree)
 
-                # Compare values at every active voxel
-                new_acc = ValueAccessor(new_grid.tree)
+            # Compare values at every active voxel
+            new_acc = ValueAccessor(new_grid.tree)
 
-                mismatch_count = 0
-                for (c, val) in active_voxels(orig_grid.tree)
-                    new_val = get_value(new_acc, c)
-                    if new_val != val
-                        mismatch_count += 1
-                    end
+            mismatch_count = 0
+            for (c, val) in active_voxels(orig_grid.tree)
+                new_val = get_value(new_acc, c)
+                if new_val != val
+                    mismatch_count += 1
                 end
-                @test mismatch_count == 0
             end
-        else
-            @warn "sphere.vdb not found at $sphere_path, skipping round-trip test"
+            @test mismatch_count == 0
         end
     end
 
     @testset "Round-trip torus.vdb" begin
         torus_path = joinpath(FIXTURES_DIR, "torus.vdb")
-        if isfile(torus_path)
-            orig = parse_vdb(torus_path)
-            @test length(orig.grids) >= 1
+        if !isfile(torus_path)
+            @test_skip "fixture not found: $torus_path"
+            return
+        end
+        orig = parse_vdb(torus_path)
+        @test length(orig.grids) >= 1
 
-            for orig_grid in orig.grids
-                buf = write_vdb_to_buffer(orig_grid)
-                reread = parse_vdb(buf)
-                @test length(reread.grids) == 1
-                new_grid = reread.grids[1]
+        for orig_grid in orig.grids
+            buf = write_vdb_to_buffer(orig_grid)
+            reread = parse_vdb(buf)
+            @test length(reread.grids) == 1
+            new_grid = reread.grids[1]
 
-                @test new_grid.name == orig_grid.name
-                @test new_grid.tree.background == orig_grid.tree.background
-                @test leaf_count(new_grid.tree) == leaf_count(orig_grid.tree)
-                @test active_voxel_count(new_grid.tree) == active_voxel_count(orig_grid.tree)
+            @test new_grid.name == orig_grid.name
+            @test new_grid.tree.background == orig_grid.tree.background
+            @test leaf_count(new_grid.tree) == leaf_count(orig_grid.tree)
+            @test active_voxel_count(new_grid.tree) == active_voxel_count(orig_grid.tree)
 
-                new_acc = ValueAccessor(new_grid.tree)
-                mismatch_count = 0
-                for (c, val) in active_voxels(orig_grid.tree)
-                    if get_value(new_acc, c) != val
-                        mismatch_count += 1
-                    end
+            new_acc = ValueAccessor(new_grid.tree)
+            mismatch_count = 0
+            for (c, val) in active_voxels(orig_grid.tree)
+                if get_value(new_acc, c) != val
+                    mismatch_count += 1
                 end
-                @test mismatch_count == 0
             end
-        else
-            @warn "torus.vdb not found at $torus_path, skipping round-trip test"
+            @test mismatch_count == 0
         end
     end
 

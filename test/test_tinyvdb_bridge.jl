@@ -71,7 +71,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_grid uses grid_class from metadata" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
-            @warn "cube.vdb not found, skipping"
+            @test_skip "fixture not found: $cube_path"
             return
         end
         tiny = TinyVDB.parse_tinyvdb(cube_path)
@@ -83,7 +83,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_grid - smoke.vdb fog volume class" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
         if !isfile(smoke_path)
-            @warn "smoke.vdb not found, skipping"
+            @test_skip "fixture not found: $smoke_path"
             return
         end
         tiny = TinyVDB.parse_tinyvdb(smoke_path)
@@ -94,7 +94,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_file - cube.vdb" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
-            @warn "cube.vdb not found, skipping"
+            @test_skip "fixture not found: $cube_path"
             return
         end
         tiny = TinyVDB.parse_tinyvdb(cube_path)
@@ -112,7 +112,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_file - grids sorted by name" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
         if !isfile(smoke_path)
-            @warn "smoke.vdb not found, skipping"
+            @test_skip "fixture not found: $smoke_path"
             return
         end
         tiny = TinyVDB.parse_tinyvdb(smoke_path)
@@ -125,7 +125,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "is_tinyvdb_compatible - cube.vdb" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
-            @warn "cube.vdb not found, skipping"
+            @test_skip "fixture not found: $cube_path"
             return
         end
         bytes = read(cube_path)
@@ -142,7 +142,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "convert_tinyvdb_grid - cube.vdb end-to-end" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
-            @warn "cube.vdb not found, skipping integration test"
+            @test_skip "fixture not found: $cube_path"
             return
         end
 
@@ -191,7 +191,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
         @testset "end-to-end: $filename" begin
             path = joinpath(@__DIR__, "fixtures", "samples", filename)
             if !isfile(path)
-                @warn "$filename not found, skipping"
+                @test_skip "fixture not found: $path"
                 continue
             end
 
@@ -232,7 +232,7 @@ using Lyr.TinyVDB: TinyVDB, NodeMask, set_on!
     @testset "render cube.vdb" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
         if !isfile(cube_path)
-            @warn "cube.vdb not found, skipping render test"
+            @test_skip "fixture not found: $cube_path"
             return
         end
 

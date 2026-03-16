@@ -46,15 +46,17 @@ using Lyr
 
     @testset "VolumeEntry construction" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf)
-            entry = VolumeEntry(grid, mat)
-            @test entry.nanogrid === nothing
-            @test entry.grid === grid
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
         end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf)
+        entry = VolumeEntry(grid, mat)
+        @test entry.nanogrid === nothing
+        @test entry.grid === grid
     end
 
     @testset "Scene construction" begin
@@ -62,38 +64,42 @@ using Lyr
         light = DirectionalLight((0.577, 0.577, 0.577))
 
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf)
-            vol = VolumeEntry(grid, mat)
-
-            scene = Scene(cam, light, vol)
-            @test length(scene.lights) == 1
-            @test length(scene.volumes) == 1
-            @test scene.background == SVec3d(0.0, 0.0, 0.0)
-
-            # With custom background
-            scene2 = Scene(cam, AbstractLight[light], [vol];
-                          background=(0.1, 0.1, 0.15))
-            @test scene2.background == SVec3d(0.1, 0.1, 0.15)
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
         end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf)
+        vol = VolumeEntry(grid, mat)
+
+        scene = Scene(cam, light, vol)
+        @test length(scene.lights) == 1
+        @test length(scene.volumes) == 1
+        @test scene.background == SVec3d(0.0, 0.0, 0.0)
+
+        # With custom background
+        scene2 = Scene(cam, AbstractLight[light], [vol];
+                      background=(0.1, 0.1, 0.15))
+        @test scene2.background == SVec3d(0.1, 0.1, 0.15)
     end
 
     @testset "Scene does not copy grid data" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf)
-            vol = VolumeEntry(grid, mat)
-            cam = Camera((10.0, 5.0, 10.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 60.0)
-            scene = Scene(cam, DirectionalLight((1.0, 1.0, 1.0)), vol)
-
-            # Grid should be the same object (no copy)
-            @test scene.volumes[1].grid === grid
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
         end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf)
+        vol = VolumeEntry(grid, mat)
+        cam = Camera((10.0, 5.0, 10.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 60.0)
+        scene = Scene(cam, DirectionalLight((1.0, 1.0, 1.0)), vol)
+
+        # Grid should be the same object (no copy)
+        @test scene.volumes[1].grid === grid
     end
 end

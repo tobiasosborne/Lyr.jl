@@ -146,7 +146,9 @@ using Lyr
     @testset "Sphere Tracing" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
 
-        if isfile(cube_path)
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+        else
             vdb = parse_vdb(cube_path)
             grid = vdb.grids[1]
 
@@ -165,7 +167,9 @@ using Lyr
 
         sphere_path = joinpath(@__DIR__, "fixtures", "samples", "sphere.vdb")
 
-        if isfile(sphere_path)
+        if !isfile(sphere_path)
+            @test_skip "fixture not found: $sphere_path"
+        else
             vdb = parse_vdb(sphere_path)
             grid = vdb.grids[1]
 
@@ -213,116 +217,122 @@ using Lyr
 
     @testset "Anti-Aliasing (samples_per_pixel)" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
 
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            cam = Camera((10.0, 5.0, 10.0), (-3.0, -3.0, -3.0), (0.0, 1.0, 0.0), 60.0)
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        cam = Camera((10.0, 5.0, 10.0), (-3.0, -3.0, -3.0), (0.0, 1.0, 0.0), 60.0)
 
-            @testset "spp=1 is default (identical to original)" begin
-                p1 = Lyr.render_image(grid, cam, 8, 8)
-                p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=1)
-                @test p1 == p2
-            end
+        @testset "spp=1 is default (identical to original)" begin
+            p1 = Lyr.render_image(grid, cam, 8, 8)
+            p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=1)
+            @test p1 == p2
+        end
 
-            @testset "spp=4 produces valid output" begin
-                pixels = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4)
-                @test size(pixels) == (8, 8)
-                @test all(p -> all(c -> 0.0 <= c <= 1.0, p), pixels)
-            end
+        @testset "spp=4 produces valid output" begin
+            pixels = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4)
+            @test size(pixels) == (8, 8)
+            @test all(p -> all(c -> 0.0 <= c <= 1.0, p), pixels)
+        end
 
-            @testset "spp=4 is deterministic with same seed" begin
-                p1 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
-                p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
-                @test p1 == p2
-            end
+        @testset "spp=4 is deterministic with same seed" begin
+            p1 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
+            p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(123))
+            @test p1 == p2
+        end
 
-            @testset "different seeds produce different outputs" begin
-                p1 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(1))
-                p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(999))
-                @test p1 != p2
-            end
+        @testset "different seeds produce different outputs" begin
+            p1 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(1))
+            p2 = Lyr.render_image(grid, cam, 8, 8; samples_per_pixel=4, seed=UInt64(999))
+            @test p1 != p2
         end
     end
 
     @testset "Gamma Correction" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
 
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            cam = Camera((10.0, 5.0, 10.0), (-3.0, -3.0, -3.0), (0.0, 1.0, 0.0), 60.0)
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        cam = Camera((10.0, 5.0, 10.0), (-3.0, -3.0, -3.0), (0.0, 1.0, 0.0), 60.0)
 
-            @testset "gamma=1.0 is default (no change)" begin
-                p1 = Lyr.render_image(grid, cam, 8, 8)
-                p2 = Lyr.render_image(grid, cam, 8, 8; gamma=1.0)
-                @test p1 == p2
-            end
+        @testset "gamma=1.0 is default (no change)" begin
+            p1 = Lyr.render_image(grid, cam, 8, 8)
+            p2 = Lyr.render_image(grid, cam, 8, 8; gamma=1.0)
+            @test p1 == p2
+        end
 
-            @testset "gamma=2.2 produces darker midtones" begin
-                p_linear = Lyr.render_image(grid, cam, 8, 8; gamma=1.0)
-                p_gamma = Lyr.render_image(grid, cam, 8, 8; gamma=2.2)
+        @testset "gamma=2.2 produces darker midtones" begin
+            p_linear = Lyr.render_image(grid, cam, 8, 8; gamma=1.0)
+            p_gamma = Lyr.render_image(grid, cam, 8, 8; gamma=2.2)
 
-                # Find pixels that are not background and not fully bright/dark
-                mid_found = false
-                for i in eachindex(p_linear)
-                    r_lin = p_linear[i][1]
-                    r_gam = p_gamma[i][1]
-                    if 0.1 < r_lin < 0.9
-                        # Gamma < 1/gamma makes midtones brighter: x^(1/2.2) > x for x in (0,1)
-                        @test r_gam >= r_lin - 1e-10
-                        mid_found = true
-                    end
+            # Find pixels that are not background and not fully bright/dark
+            mid_found = false
+            for i in eachindex(p_linear)
+                r_lin = p_linear[i][1]
+                r_gam = p_gamma[i][1]
+                if 0.1 < r_lin < 0.9
+                    # Gamma < 1/gamma makes midtones brighter: x^(1/2.2) > x for x in (0,1)
+                    @test r_gam >= r_lin - 1e-10
+                    mid_found = true
                 end
-                @test mid_found  # Ensure we actually tested some midtone pixels
             end
+            @test mid_found  # Ensure we actually tested some midtone pixels
+        end
 
-            @testset "gamma correction clamps to [0,1]" begin
-                pixels = Lyr.render_image(grid, cam, 8, 8; gamma=2.2)
-                @test all(p -> all(c -> 0.0 <= c <= 1.0, p), pixels)
-            end
+        @testset "gamma correction clamps to [0,1]" begin
+            pixels = Lyr.render_image(grid, cam, 8, 8; gamma=2.2)
+            @test all(p -> all(c -> 0.0 <= c <= 1.0, p), pixels)
         end
     end
 
     @testset "Full Render Pipeline" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
 
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
 
-            target = (-3.0, -3.0, -3.0)
+        target = (-3.0, -3.0, -3.0)
 
-            @testset "render_image produces correct dimensions" begin
-                cam = Camera(
-                    (10.0, 5.0, 10.0),
-                    target,
-                    (0.0, 1.0, 0.0),
-                    60.0
-                )
+        @testset "render_image produces correct dimensions" begin
+            cam = Camera(
+                (10.0, 5.0, 10.0),
+                target,
+                (0.0, 1.0, 0.0),
+                60.0
+            )
 
-                pixels = Lyr.render_image(grid, cam, 32, 24)
+            pixels = Lyr.render_image(grid, cam, 32, 24)
 
-                @test size(pixels) == (24, 32)  # height x width
-            end
+            @test size(pixels) == (24, 32)  # height x width
+        end
 
-            @testset "render_image completes without error" begin
-                # With sparse narrow-band level sets, most rays will miss
-                # and return background color. This test verifies the
-                # pipeline doesn't crash.
-                cam = Camera(
-                    (10.0, 5.0, 10.0),
-                    target,
-                    (0.0, 1.0, 0.0),
-                    60.0
-                )
+        @testset "render_image completes without error" begin
+            # With sparse narrow-band level sets, most rays will miss
+            # and return background color. This test verifies the
+            # pipeline doesn't crash.
+            cam = Camera(
+                (10.0, 5.0, 10.0),
+                target,
+                (0.0, 1.0, 0.0),
+                60.0
+            )
 
-                pixels = Lyr.render_image(grid, cam, 8, 8)
+            pixels = Lyr.render_image(grid, cam, 8, 8)
 
-                # Verify we got a result (all pixels should be valid tuples)
-                @test size(pixels) == (8, 8)
-                @test all(p -> p isa NTuple{3, Float64}, pixels)
-            end
+            # Verify we got a result (all pixels should be valid tuples)
+            @test size(pixels) == (8, 8)
+            @test all(p -> p isa NTuple{3, Float64}, pixels)
         end
     end
 end

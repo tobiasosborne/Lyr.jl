@@ -79,7 +79,10 @@
 
     @testset "VDBFile show with real file" begin
         cube_path = joinpath(SAMPLE_DIR, "cube.vdb")
-        isfile(cube_path) || return
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
         vdb = parse_vdb(cube_path)
         s = sprint(show, vdb)
         @test occursin("VDBFile", s)

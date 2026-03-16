@@ -17,86 +17,92 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
 @testset "GPU Kernel" begin
     @testset "_gpu_get_value correctness vs NanoValueAccessor" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-            acc = NanoValueAccessor(nanogrid)
-            buf = nanogrid.buffer
-            bg = Float32(nano_background(nanogrid))
-            header_T_size = Int32(sizeof(eltype(grid.tree.background)))
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        acc = NanoValueAccessor(nanogrid)
+        buf = nanogrid.buffer
+        bg = Float32(nano_background(nanogrid))
+        header_T_size = Int32(sizeof(eltype(grid.tree.background)))
 
-            # Test random coordinates inside the active bounding box
-            bbox = nano_bbox(nanogrid)
-            for _ in 1:200
-                x = Int32(rand(bbox.min.x:bbox.max.x))
-                y = Int32(rand(bbox.min.y:bbox.max.y))
-                z = Int32(rand(bbox.min.z:bbox.max.z))
-                expected = Float32(get_value(acc, coord(x, y, z)))
-                actual = _gpu_get_value(buf, bg, x, y, z, header_T_size)
-                @test actual == expected
-            end
+        # Test random coordinates inside the active bounding box
+        bbox = nano_bbox(nanogrid)
+        for _ in 1:200
+            x = Int32(rand(bbox.min.x:bbox.max.x))
+            y = Int32(rand(bbox.min.y:bbox.max.y))
+            z = Int32(rand(bbox.min.z:bbox.max.z))
+            expected = Float32(get_value(acc, coord(x, y, z)))
+            actual = _gpu_get_value(buf, bg, x, y, z, header_T_size)
+            @test actual == expected
+        end
 
-            # Test coordinates outside bounds (should return background)
-            for off in [Int32(1000), Int32(-1000)]
-                val = _gpu_get_value(buf, bg, off, off, off, header_T_size)
-                @test val == bg
-            end
+        # Test coordinates outside bounds (should return background)
+        for off in [Int32(1000), Int32(-1000)]
+            val = _gpu_get_value(buf, bg, off, off, off, header_T_size)
+            @test val == bg
         end
     end
 
     @testset "_gpu_get_value correctness with smoke volume" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-        if isfile(smoke_path)
-            vdb = parse_vdb(smoke_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-            acc = NanoValueAccessor(nanogrid)
-            buf = nanogrid.buffer
-            bg = Float32(nano_background(nanogrid))
-            header_T_size = Int32(sizeof(eltype(grid.tree.background)))
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        acc = NanoValueAccessor(nanogrid)
+        buf = nanogrid.buffer
+        bg = Float32(nano_background(nanogrid))
+        header_T_size = Int32(sizeof(eltype(grid.tree.background)))
 
-            bbox = nano_bbox(nanogrid)
-            for _ in 1:200
-                x = Int32(rand(bbox.min.x:bbox.max.x))
-                y = Int32(rand(bbox.min.y:bbox.max.y))
-                z = Int32(rand(bbox.min.z:bbox.max.z))
-                expected = Float32(get_value(acc, coord(x, y, z)))
-                actual = _gpu_get_value(buf, bg, x, y, z, header_T_size)
-                @test actual == expected
-            end
+        bbox = nano_bbox(nanogrid)
+        for _ in 1:200
+            x = Int32(rand(bbox.min.x:bbox.max.x))
+            y = Int32(rand(bbox.min.y:bbox.max.y))
+            z = Int32(rand(bbox.min.z:bbox.max.z))
+            expected = Float32(get_value(acc, coord(x, y, z)))
+            actual = _gpu_get_value(buf, bg, x, y, z, header_T_size)
+            @test actual == expected
         end
     end
 
     @testset "_gpu_get_value_trilinear: smooth interpolation" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-            buf = nanogrid.buffer
-            bg = Float32(nano_background(nanogrid))
-            header_T_size = Int32(sizeof(eltype(grid.tree.background)))
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        buf = nanogrid.buffer
+        bg = Float32(nano_background(nanogrid))
+        header_T_size = Int32(sizeof(eltype(grid.tree.background)))
 
-            # At integer coordinates, trilinear should equal nearest-neighbor
-            bbox = nano_bbox(nanogrid)
-            for _ in 1:50
-                x = Int32(rand((bbox.min.x + 1):(bbox.max.x - 1)))
-                y = Int32(rand((bbox.min.y + 1):(bbox.max.y - 1)))
-                z = Int32(rand((bbox.min.z + 1):(bbox.max.z - 1)))
-                nn = _gpu_get_value(buf, bg, x, y, z, header_T_size)
-                tri = _gpu_get_value_trilinear(buf, bg, Float32(x), Float32(y), Float32(z), header_T_size)
-                @test tri ≈ nn atol=1e-6
-            end
+        # At integer coordinates, trilinear should equal nearest-neighbor
+        bbox = nano_bbox(nanogrid)
+        for _ in 1:50
+            x = Int32(rand((bbox.min.x + 1):(bbox.max.x - 1)))
+            y = Int32(rand((bbox.min.y + 1):(bbox.max.y - 1)))
+            z = Int32(rand((bbox.min.z + 1):(bbox.max.z - 1)))
+            nn = _gpu_get_value(buf, bg, x, y, z, header_T_size)
+            tri = _gpu_get_value_trilinear(buf, bg, Float32(x), Float32(y), Float32(z), header_T_size)
+            @test tri ≈ nn atol=1e-6
+        end
 
-            # At fractional coordinates, trilinear should be between neighbors
-            for _ in 1:50
-                x = Float32(rand((bbox.min.x + 1):(bbox.max.x - 2))) + rand(Float32)
-                y = Float32(rand((bbox.min.y + 1):(bbox.max.y - 2))) + rand(Float32)
-                z = Float32(rand((bbox.min.z + 1):(bbox.max.z - 2))) + rand(Float32)
-                val = _gpu_get_value_trilinear(buf, bg, x, y, z, header_T_size)
-                @test isfinite(val)
-            end
+        # At fractional coordinates, trilinear should be between neighbors
+        for _ in 1:50
+            x = Float32(rand((bbox.min.x + 1):(bbox.max.x - 2))) + rand(Float32)
+            y = Float32(rand((bbox.min.y + 1):(bbox.max.y - 2))) + rand(Float32)
+            z = Float32(rand((bbox.min.z + 1):(bbox.max.z - 2))) + rand(Float32)
+            val = _gpu_get_value_trilinear(buf, bg, x, y, z, header_T_size)
+            @test isfinite(val)
         end
     end
 
@@ -151,117 +157,127 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
 
     @testset "gpu_render_volume: smoke test on CPU backend" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-        if isfile(smoke_path)
-            vdb = parse_vdb(smoke_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-
-            cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf; sigma_scale=5.0)
-            vol = VolumeEntry(grid, nanogrid, mat)
-            light = DirectionalLight((0.577, 0.577, 0.577))
-            scene = Scene(cam, light, vol)
-
-            pixels = gpu_render_volume(nanogrid, scene, 16, 16; spp=1)
-
-            @test size(pixels) == (16, 16)
-            @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), pixels)
-            @test all(p -> all(isfinite, p), pixels)
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
         end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf; sigma_scale=5.0)
+        vol = VolumeEntry(grid, nanogrid, mat)
+        light = DirectionalLight((0.577, 0.577, 0.577))
+        scene = Scene(cam, light, vol)
+
+        pixels = gpu_render_volume(nanogrid, scene, 16, 16; spp=1)
+
+        @test size(pixels) == (16, 16)
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), pixels)
+        @test all(p -> all(isfinite, p), pixels)
     end
 
     @testset "gpu_render_volume: multi-spp convergence" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-        if isfile(smoke_path)
-            vdb = parse_vdb(smoke_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-
-            cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf; sigma_scale=5.0)
-            vol = VolumeEntry(grid, nanogrid, mat)
-            light = DirectionalLight((0.577, 0.577, 0.577))
-            scene = Scene(cam, light, vol)
-
-            # Higher spp should still produce valid output
-            pixels = gpu_render_volume(nanogrid, scene, 8, 8; spp=4, seed=UInt64(123))
-
-            @test size(pixels) == (8, 8)
-            @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), pixels)
-            @test all(p -> all(isfinite, p), pixels)
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
         end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf; sigma_scale=5.0)
+        vol = VolumeEntry(grid, nanogrid, mat)
+        light = DirectionalLight((0.577, 0.577, 0.577))
+        scene = Scene(cam, light, vol)
+
+        # Higher spp should still produce valid output
+        pixels = gpu_render_volume(nanogrid, scene, 8, 8; spp=4, seed=UInt64(123))
+
+        @test size(pixels) == (8, 8)
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), pixels)
+        @test all(p -> all(isfinite, p), pixels)
     end
 
     @testset "gpu_render_volume: deterministic with same seed" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-        if isfile(smoke_path)
-            vdb = parse_vdb(smoke_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-
-            cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf; sigma_scale=5.0)
-            vol = VolumeEntry(grid, nanogrid, mat)
-            scene = Scene(cam, DirectionalLight((0.577, 0.577, 0.577)), vol)
-
-            p1 = gpu_render_volume(nanogrid, scene, 4, 4; spp=1, seed=UInt64(42))
-            p2 = gpu_render_volume(nanogrid, scene, 4, 4; spp=1, seed=UInt64(42))
-            @test p1 == p2
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
         end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf; sigma_scale=5.0)
+        vol = VolumeEntry(grid, nanogrid, mat)
+        scene = Scene(cam, DirectionalLight((0.577, 0.577, 0.577)), vol)
+
+        p1 = gpu_render_volume(nanogrid, scene, 4, 4; spp=1, seed=UInt64(42))
+        p2 = gpu_render_volume(nanogrid, scene, 4, 4; spp=1, seed=UInt64(42))
+        @test p1 == p2
     end
 
     @testset "gpu_render_volume: cube.vdb smoke test" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-
-            cam = Camera((50.0, 50.0, -100.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 60.0)
-            tf = tf_smoke()
-            mat = VolumeMaterial(tf; sigma_scale=1.0)
-            vol = VolumeEntry(grid, nanogrid, mat)
-            light = DirectionalLight((0.577, 0.577, 0.577))
-            scene = Scene(cam, light, vol)
-
-            pixels = gpu_render_volume(nanogrid, scene, 8, 8; spp=1)
-            @test size(pixels) == (8, 8)
-            @test all(p -> all(isfinite, p), pixels)
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
         end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+
+        cam = Camera((50.0, 50.0, -100.0), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 60.0)
+        tf = tf_smoke()
+        mat = VolumeMaterial(tf; sigma_scale=1.0)
+        vol = VolumeEntry(grid, nanogrid, mat)
+        light = DirectionalLight((0.577, 0.577, 0.577))
+        scene = Scene(cam, light, vol)
+
+        pixels = gpu_render_volume(nanogrid, scene, 8, 8; spp=1)
+        @test size(pixels) == (8, 8)
+        @test all(p -> all(isfinite, p), pixels)
     end
 
     @testset "gpu_volume_march_cpu! uses scene background color" begin
         cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-        if isfile(cube_path)
-            vdb = parse_vdb(cube_path)
-            grid = vdb.grids[1]
-            nanogrid = build_nanogrid(grid.tree)
-            tf = tf_smoke()
+        if !isfile(cube_path)
+            @test_skip "fixture not found: $cube_path"
+            return
+        end
+        vdb = parse_vdb(cube_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        tf = tf_smoke()
 
-            # Camera pointing away from the volume — all rays miss
-            cam = Camera((1000.0, 1000.0, 1000.0), (2000.0, 2000.0, 2000.0),
-                         (0.0, 1.0, 0.0), 40.0)
+        # Camera pointing away from the volume — all rays miss
+        cam = Camera((1000.0, 1000.0, 1000.0), (2000.0, 2000.0, 2000.0),
+                     (0.0, 1.0, 0.0), 40.0)
 
-            bg = (0.3, 0.5, 0.7)
-            output = Matrix{NTuple{3, Float32}}(undef, 4, 4)
-            gpu_volume_march_cpu!(output, nanogrid, cam, tf, 4, 4;
-                                  background=bg)
+        bg = (0.3, 0.5, 0.7)
+        output = Matrix{NTuple{3, Float32}}(undef, 4, 4)
+        gpu_volume_march_cpu!(output, nanogrid, cam, tf, 4, 4;
+                              background=bg)
 
-            # All pixels should be the background color (transmittance=1.0 for miss rays)
-            for px in output
-                @test px[1] ≈ Float32(0.3) atol=0.01
-                @test px[2] ≈ Float32(0.5) atol=0.01
-                @test px[3] ≈ Float32(0.7) atol=0.01
-            end
+        # All pixels should be the background color (transmittance=1.0 for miss rays)
+        for px in output
+            @test px[1] ≈ Float32(0.3) atol=0.01
+            @test px[2] ≈ Float32(0.5) atol=0.01
+            @test px[3] ≈ Float32(0.7) atol=0.01
+        end
 
-            # Default background should be black
-            gpu_volume_march_cpu!(output, nanogrid, cam, tf, 4, 4)
-            for px in output
-                @test px == (0.0f0, 0.0f0, 0.0f0)
-            end
+        # Default background should be black
+        gpu_volume_march_cpu!(output, nanogrid, cam, tf, 4, 4)
+        for px in output
+            @test px == (0.0f0, 0.0f0, 0.0f0)
         end
     end
 end

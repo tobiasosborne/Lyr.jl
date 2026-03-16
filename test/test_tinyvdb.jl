@@ -1369,78 +1369,79 @@ end
 
 @testset "TinyVDB End-to-End: cube.vdb" begin
     cube_path = joinpath(@__DIR__, "fixtures", "samples", "cube.vdb")
-    if isfile(cube_path)
-        @testset "parse_tinyvdb succeeds" begin
-            vdb = parse_tinyvdb(cube_path)
+    if !isfile(cube_path)
+        @test_skip "fixture not found: $cube_path"
+        return
+    end
 
-            @test vdb.header.file_version >= UInt32(222)
-            @test !isempty(vdb.grids)
-        end
+    @testset "parse_tinyvdb succeeds" begin
+        vdb = parse_tinyvdb(cube_path)
 
-        @testset "grid structure is plausible" begin
-            vdb = parse_tinyvdb(cube_path)
+        @test vdb.header.file_version >= UInt32(222)
+        @test !isempty(vdb.grids)
+    end
 
-            # Should have at least one grid
-            @test length(vdb.grids) >= 1
+    @testset "grid structure is plausible" begin
+        vdb = parse_tinyvdb(cube_path)
 
-            # Get the first grid
-            grid = first(values(vdb.grids))
+        # Should have at least one grid
+        @test length(vdb.grids) >= 1
 
-            # Root should have children
-            @test grid.root.num_children > 0
+        # Get the first grid
+        grid = first(values(vdb.grids))
 
-            # Count leaves
-            leaf_count = 0
-            for (_, i2) in grid.root.children
-                for (_, child) in i2.children
-                    if child isa InternalNodeData
-                        leaf_count += length(child.children)
-                    end
+        # Root should have children
+        @test grid.root.num_children > 0
+
+        # Count leaves
+        leaf_count = 0
+        for (_, i2) in grid.root.children
+            for (_, child) in i2.children
+                if child isa InternalNodeData
+                    leaf_count += length(child.children)
                 end
             end
-            @test leaf_count > 0
         end
+        @test leaf_count > 0
+    end
 
-        @testset "grid has class metadata" begin
-            vdb = parse_tinyvdb(cube_path)
-            grid = first(values(vdb.grids))
-            @test grid.grid_class == "level set"
-        end
+    @testset "grid has class metadata" begin
+        vdb = parse_tinyvdb(cube_path)
+        grid = first(values(vdb.grids))
+        @test grid.grid_class == "level set"
+    end
 
-        @testset "leaf values are plausible SDF" begin
-            vdb = parse_tinyvdb(cube_path)
-            grid = first(values(vdb.grids))
+    @testset "leaf values are plausible SDF" begin
+        vdb = parse_tinyvdb(cube_path)
+        grid = first(values(vdb.grids))
 
-            # Collect some leaf values
-            all_ok = true
-            sample_count = 0
-            for (_, i2) in grid.root.children
-                for (_, i1_any) in i2.children
-                    i1 = i1_any::InternalNodeData
-                    for (_, leaf_any) in i1.children
-                        leaf = leaf_any::LeafNodeData
-                        if !isempty(leaf.values)
-                            @test length(leaf.values) == 512
-                            # SDF values should be finite, not NaN
-                            for v in leaf.values
-                                if !isfinite(v)
-                                    all_ok = false
-                                end
+        # Collect some leaf values
+        all_ok = true
+        sample_count = 0
+        for (_, i2) in grid.root.children
+            for (_, i1_any) in i2.children
+                i1 = i1_any::InternalNodeData
+                for (_, leaf_any) in i1.children
+                    leaf = leaf_any::LeafNodeData
+                    if !isempty(leaf.values)
+                        @test length(leaf.values) == 512
+                        # SDF values should be finite, not NaN
+                        for v in leaf.values
+                            if !isfinite(v)
+                                all_ok = false
                             end
-                            sample_count += 1
                         end
-                        sample_count >= 10 && break
+                        sample_count += 1
                     end
                     sample_count >= 10 && break
                 end
                 sample_count >= 10 && break
             end
-
-            @test all_ok  # No NaN or Inf values
-            @test sample_count >= 1  # We found at least one leaf with values
+            sample_count >= 10 && break
         end
-    else
-        @warn "cube.vdb not found at $cube_path, skipping end-to-end test"
+
+        @test all_ok  # No NaN or Inf values
+        @test sample_count >= 1  # We found at least one leaf with values
     end
 end
 
@@ -1472,51 +1473,52 @@ end
 
 @testset "TinyVDB End-to-End: smoke.vdb" begin
     smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-    if isfile(smoke_path)
-        @testset "parse_tinyvdb succeeds" begin
-            vdb = parse_tinyvdb(smoke_path)
-            @test haskey(vdb.grids, "density")
-        end
+    if !isfile(smoke_path)
+        @test_skip "fixture not found: $smoke_path"
+        return
+    end
 
-        @testset "grid structure is plausible" begin
-            vdb = parse_tinyvdb(smoke_path)
-            grid = vdb.grids["density"]
-            @test grid.root.num_children >= 1
-            @test grid.voxel_size > 0.0
-        end
+    @testset "parse_tinyvdb succeeds" begin
+        vdb = parse_tinyvdb(smoke_path)
+        @test haskey(vdb.grids, "density")
+    end
 
-        @testset "grid has fog volume class" begin
-            vdb = parse_tinyvdb(smoke_path)
-            grid = vdb.grids["density"]
-            @test grid.grid_class == "fog volume"
-        end
+    @testset "grid structure is plausible" begin
+        vdb = parse_tinyvdb(smoke_path)
+        grid = vdb.grids["density"]
+        @test grid.root.num_children >= 1
+        @test grid.voxel_size > 0.0
+    end
 
-        @testset "leaf values are valid" begin
-            vdb = parse_tinyvdb(smoke_path)
-            grid = vdb.grids["density"]
-            # Fog volume: density values should be in [0, 1] range mostly
-            sample_count = 0
-            all_finite = true
-            for (_, i2) in grid.root.children
-                for (_, i1) in i2.children
-                    for (_, leaf) in i1.children
-                        if leaf isa TinyVDB.LeafNodeData && !isempty(leaf.values)
-                            sample_count += 1
-                            if any(!isfinite, leaf.values)
-                                all_finite = false
-                            end
-                            sample_count >= 10 && break
+    @testset "grid has fog volume class" begin
+        vdb = parse_tinyvdb(smoke_path)
+        grid = vdb.grids["density"]
+        @test grid.grid_class == "fog volume"
+    end
+
+    @testset "leaf values are valid" begin
+        vdb = parse_tinyvdb(smoke_path)
+        grid = vdb.grids["density"]
+        # Fog volume: density values should be in [0, 1] range mostly
+        sample_count = 0
+        all_finite = true
+        for (_, i2) in grid.root.children
+            for (_, i1) in i2.children
+                for (_, leaf) in i1.children
+                    if leaf isa TinyVDB.LeafNodeData && !isempty(leaf.values)
+                        sample_count += 1
+                        if any(!isfinite, leaf.values)
+                            all_finite = false
                         end
+                        sample_count >= 10 && break
                     end
-                    sample_count >= 10 && break
                 end
                 sample_count >= 10 && break
             end
-            @test all_finite
-            @test sample_count >= 1
+            sample_count >= 10 && break
         end
-    else
-        @warn "smoke.vdb not found at $smoke_path, skipping end-to-end test"
+        @test all_finite
+        @test sample_count >= 1
     end
 end
 

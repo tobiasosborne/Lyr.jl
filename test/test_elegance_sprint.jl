@@ -330,7 +330,7 @@ end
 @testset "sphere_trace surface hit" begin
     sphere_path = joinpath(@__DIR__, "fixtures", "samples", "sphere.vdb")
     if !isfile(sphere_path)
-        @warn "Skipping sphere_trace tests: sphere.vdb not found"
+        @test_skip "fixture not found: $sphere_path"
         return
     end
 
@@ -477,7 +477,10 @@ end
 
     @testset "truncated real file at various fractions" begin
         sphere_path = joinpath(@__DIR__, "fixtures", "samples", "sphere.vdb")
-        isfile(sphere_path) || return
+        if !isfile(sphere_path)
+            @test_skip "fixture not found: $sphere_path"
+            return
+        end
 
         full = read(sphere_path)
 

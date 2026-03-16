@@ -83,55 +83,59 @@
     @testset "Coverage matches NanoVolumeRayIntersector leaf hits" begin
         # Use real VDB file for thorough coverage test
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-        if isfile(smoke_path)
-            vdb = parse_vdb(smoke_path)
-            grid = vdb.grids[1]
-            nano = build_nanogrid(grid.tree)
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nano = build_nanogrid(grid.tree)
 
-            test_rays = [
-                Ray(SVec3d(50.0, 50.0, -100.0), SVec3d(0.0, 0.0, 1.0)),   # +Z
-                Ray(SVec3d(-100.0, 50.0, 50.0), SVec3d(1.0, 0.0, 0.0)),   # +X
-                Ray(SVec3d(50.0, -100.0, 50.0), SVec3d(0.0, 1.0, 0.0)),   # +Y
-                Ray(SVec3d(50.0, 50.0, 50.0), SVec3d(1.0, 1.0, 1.0)),     # diagonal
-            ]
+        test_rays = [
+            Ray(SVec3d(50.0, 50.0, -100.0), SVec3d(0.0, 0.0, 1.0)),   # +Z
+            Ray(SVec3d(-100.0, 50.0, 50.0), SVec3d(1.0, 0.0, 0.0)),   # +X
+            Ray(SVec3d(50.0, -100.0, 50.0), SVec3d(0.0, 1.0, 0.0)),   # +Y
+            Ray(SVec3d(50.0, 50.0, 50.0), SVec3d(1.0, 1.0, 1.0)),     # diagonal
+        ]
 
-            for ray in test_rays
-                leaf_hits = collect(Lyr.NanoVolumeRayIntersector(nano, ray))
-                spans = collect(Lyr.NanoVolumeHDDA(nano, ray))
+        for ray in test_rays
+            leaf_hits = collect(Lyr.NanoVolumeRayIntersector(nano, ray))
+            spans = collect(Lyr.NanoVolumeHDDA(nano, ray))
 
-                # Every leaf hit must be contained within some span
-                for lh in leaf_hits
-                    covered = any(s -> s.t0 <= lh.t_enter + 1e-6 &&
-                                       lh.t_exit <= s.t1 + 1e-6, spans)
-                    @test covered
-                end
-
-                # Every span must overlap at least one leaf hit
-                for s in spans
-                    overlaps = any(lh -> lh.t_enter < s.t1 + 1e-6 &&
-                                         lh.t_exit > s.t0 - 1e-6, leaf_hits)
-                    @test overlaps
-                end
-
-                # Spans should be fewer or equal to leaf hits (merging)
-                @test length(spans) <= length(leaf_hits)
+            # Every leaf hit must be contained within some span
+            for lh in leaf_hits
+                covered = any(s -> s.t0 <= lh.t_enter + 1e-6 &&
+                                   lh.t_exit <= s.t1 + 1e-6, spans)
+                @test covered
             end
+
+            # Every span must overlap at least one leaf hit
+            for s in spans
+                overlaps = any(lh -> lh.t_enter < s.t1 + 1e-6 &&
+                                     lh.t_exit > s.t0 - 1e-6, leaf_hits)
+                @test overlaps
+            end
+
+            # Spans should be fewer or equal to leaf hits (merging)
+            @test length(spans) <= length(leaf_hits)
         end
     end
 
     @testset "Spans are front-to-back ordered" begin
         smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
-        if isfile(smoke_path)
-            vdb = parse_vdb(smoke_path)
-            grid = vdb.grids[1]
-            nano = build_nanogrid(grid.tree)
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nano = build_nanogrid(grid.tree)
 
-            ray = Ray(SVec3d(50.0, 50.0, -100.0), SVec3d(0.0, 0.0, 1.0))
-            spans = collect(Lyr.NanoVolumeHDDA(nano, ray))
+        ray = Ray(SVec3d(50.0, 50.0, -100.0), SVec3d(0.0, 0.0, 1.0))
+        spans = collect(Lyr.NanoVolumeHDDA(nano, ray))
 
-            for i in 2:length(spans)
-                @test spans[i].t0 >= spans[i-1].t1 - 1e-6
-            end
+        for i in 2:length(spans)
+            @test spans[i].t0 >= spans[i-1].t1 - 1e-6
         end
     end
 

@@ -220,22 +220,24 @@
     @testset "Multiple grid types" begin
         # Test with sphere.vdb (level set, likely Float32)
         sphere_path = joinpath(@__DIR__, "fixtures", "samples", "sphere.vdb")
-        if isfile(sphere_path)
-            sphere_file = parse_vdb(read(sphere_path))
-            for grid in sphere_file.grids
-                T = eltype(grid.tree.table).types[1] isa DataType ? Float32 : Float32
-                nanogrid = build_nanogrid(grid.tree)
+        if !isfile(sphere_path)
+            @test_skip "fixture not found: $sphere_path"
+            return
+        end
+        sphere_file = parse_vdb(read(sphere_path))
+        for grid in sphere_file.grids
+            T = eltype(grid.tree.table).types[1] isa DataType ? Float32 : Float32
+            nanogrid = build_nanogrid(grid.tree)
 
-                @test nano_leaf_count(nanogrid) == leaf_count(grid.tree)
-                @test active_voxel_count(nanogrid) == active_voxel_count(grid.tree)
+            @test nano_leaf_count(nanogrid) == leaf_count(grid.tree)
+            @test active_voxel_count(nanogrid) == active_voxel_count(grid.tree)
 
-                # Spot-check a few active voxels
-                n = 0
-                for (c, v) in active_voxels(grid.tree)
-                    @test get_value(nanogrid, c) == v
-                    n += 1
-                    n >= 100 && break
-                end
+            # Spot-check a few active voxels
+            n = 0
+            for (c, v) in active_voxels(grid.tree)
+                @test get_value(nanogrid, c) == v
+                n += 1
+                n >= 100 && break
             end
         end
     end
