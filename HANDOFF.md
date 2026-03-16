@@ -6,7 +6,7 @@
 
 ## Latest Session (2026-03-16) — 12 Issues Resolved: Correctness + Performance + Test Reliability
 
-**Status**: GREEN — 94,329 tests pass, 0 fail. 12 issues closed (354 total closed, 46 open).
+**Status**: GREEN — 94,329 tests pass, 0 fail. 23 issues closed this session (363 total closed, 37 open).
 
 ### What Was Done
 
@@ -30,33 +30,51 @@
 - **P3 (5oo4)**: Removed OrdinaryDiffEq from `[deps]` — never imported, saves precompilation time.
 
 **1 Test Reliability Fix:**
-- **P2 (0c2t)**: 13 test files updated — silent `if isfile()` guards replaced with `@test_skip`. Missing fixtures now visible in test output.
+- **P2 (0c2t)**: 13 test files updated — silent `if isfile()` guards replaced with `@test_skip`.
+
+**5 More Performance Optimizations:**
+- **P2 (bno4)**: DDA step uses single-axis indexed updates instead of 6 branches.
+- **P2 (nqsh)**: node_dda_query fuses inside+child_index, eliminating duplicate coord computation.
+- **P2 (11ov)**: Hamiltonian drift check interval-based (not every step).
+- **P3 (kixv)**: sample_quadratic accepts pre-existing accessor.
+- **P3 (yptd)**: Thin-disk inner loop uses bare SVec4d, eliminating GeodesicState allocation.
+
+**4 More Fixes:**
+- **P2 (ika3)**: CSG narrow-band gaps fixed with 1-voxel dilation at seams.
+- **P3 (ii5j)**: write_ppm switched to binary P6 (~4x smaller, 10-100x faster).
+- **P3 (52ip)**: Volumetric GR uses proper spatial length sqrt(|g_{ij} dx^i dx^j|).
+- **P3 (1zw7)**: Adaptive step quadratic profile for better photon sphere resolution.
+
+**3 Cleanup:**
+- **P3 (5oo4)**: Removed unused OrdinaryDiffEq dependency.
+- **P3 (yo2i/8jsv/8nnf)**: sRGB precision, sinθ sign, unused variable.
+- **P4 (aoxj)**: Planck integration trapezoidal rule.
 
 ### What the Next Agent Should Do
 
-**Phase 2 — High-Impact Performance (from code review):**
-```bash
-bd show path-tracer-c6jb    # GR stepper dispatches on Symbol instead of type
-bd show path-tracer-bno4    # DDA step creates 2 immutable structs with 6 branches
-bd show path-tracer-nqsh    # node_dda duplicates local coordinate computation
-bd show path-tracer-kixv    # sample_quadratic creates new ValueAccessor per call
-```
-
-**Phase 3 — Type Stability:**
+**Phase 1 — Type Stability (biggest remaining wins):**
 ```bash
 bd show path-tracer-ns5d    # RootNode Union-typed Dict
 bd show path-tracer-he6c    # VolumeEntry allows Nothing nanogrid
 bd show path-tracer-qt4m    # Scene lights Vector{AbstractLight}
+bd show path-tracer-c6jb    # GR stepper dispatches on Symbol instead of type
 ```
 
-**Phase 4 — Remaining Correctness:**
+**Phase 2 — Refactoring:**
 ```bash
-bd show path-tracer-ika3    # CSG narrow-band gaps at intersection seams
+bd show path-tracer-hecg    # P1: HDDA state machine copy-pasted 6-12 times
+bd show path-tracer-l77u    # Accessors.jl tree iterator trio — 3 copies
+```
+
+**Phase 3 — Test Coverage:**
+```bash
+bd show path-tracer-fgzb    # VolumeIntegrator.jl has no unit tests
+bd show path-tracer-fj1a    # ImageCompare.jl has zero unit tests
 ```
 
 ### Commands
 ```bash
-bd ready           # 41 unblocked issues
+bd ready           # 32 unblocked issues
 bd stats           # Project health
 julia --project -e 'using Pkg; Pkg.test()'  # Full suite (~12 min)
 ```
