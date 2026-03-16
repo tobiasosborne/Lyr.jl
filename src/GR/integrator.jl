@@ -68,11 +68,12 @@ Far from the BH (r > 10M), steps grow up to dl_base for speed.
 """
 function adaptive_step(dl_base::Float64, r::Float64, M::Float64)::Float64
     rh = 2.0 * M
-    # Scale factor: ratio of (r - horizon) to some reference distance
-    # Minimum scale 0.1 (near horizon), maximum 1.0 (far field)
-    # The floor at 0.1 ensures rays near the photon sphere still make
-    # progress through the strong-field region without exhausting step budget.
-    scale = clamp((r - rh) / (8.0 * M), 0.1, 1.0)
+    # Quadratic refinement near horizon: concentrates steps in the strong-field
+    # region (2M < r < 4M) where geodesic curvature is highest.
+    # At photon sphere r=3M: scale = ((3M-2M)/(6M))^2 = 1/36 ≈ 0.028 → clamped to 0.05
+    # At r=5M: scale = ((5M-2M)/(6M))^2 = 0.25
+    # At r=8M: scale = 1.0 (far field)
+    scale = clamp(((r - rh) / (6.0 * M))^2, 0.05, 1.0)
     dl_base * scale
 end
 

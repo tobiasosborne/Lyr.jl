@@ -252,23 +252,19 @@ function write_ppm(filename::String, pixels::Matrix{NTuple{3, T}}) where T <: Ab
     height, width = size(pixels)
 
     open(filename, "w") do io
-        println(io, "P3")
-        println(io, "$width $height")
-        println(io, "255")
-
+        # P6 binary format: ~4x smaller, 10-100x faster than P3 text
+        write(io, "P6\n$width $height\n255\n")
+        buf = Vector{UInt8}(undef, width * 3)
         for y in 1:height
-            for x in 1:width
+            idx = 1
+            @inbounds for x in 1:width
                 r, g, b = pixels[y, x]
-                # Clamp and convert to 0-255
-                ri = clamp(round(Int, r * 255), 0, 255)
-                gi = clamp(round(Int, g * 255), 0, 255)
-                bi = clamp(round(Int, b * 255), 0, 255)
-                if x > 1
-                    write(io, ' ')
-                end
-                print(io, ri, ' ', gi, ' ', bi)
+                buf[idx]     = UInt8(clamp(round(Int, r * 255), 0, 255))
+                buf[idx + 1] = UInt8(clamp(round(Int, g * 255), 0, 255))
+                buf[idx + 2] = UInt8(clamp(round(Int, b * 255), 0, 255))
+                idx += 3
             end
-            write(io, '\n')
+            write(io, buf)
         end
     end
 end

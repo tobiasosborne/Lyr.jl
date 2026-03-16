@@ -191,7 +191,14 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
                 # Normalized temperature for emission magnitude
                 T_norm = disk_temperature(r_d, vol.inner_radius)
                 jj, α = emission_absorption(ρ, T_norm)
-                dl_proper = abs(dl)
+                # Spatial proper length: sqrt(|g_{ij} dx^i dx^j|)
+                dx = x_new - x
+                g = metric(m, x_new)
+                dl_sq = zero(Float64)
+                for i in 2:4, j in 2:4
+                    dl_sq += g[i, j] * dx[i] * dx[j]
+                end
+                dl_proper = sqrt(abs(dl_sq))
 
                 z_plus_1 = 1.0
                 if config.use_redshift

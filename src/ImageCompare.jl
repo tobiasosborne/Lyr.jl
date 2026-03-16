@@ -10,61 +10,59 @@ Read an ASCII P3 PPM file (as written by `write_ppm`).
 Returns a `height × width` matrix of `(R, G, B)` tuples with channels in [0, 1].
 """
 function read_ppm(path::String)::Matrix{NTuple{3, Float64}}
-    lines = readlines(path)
-    idx = 1
+    open(path, "r") do io
+        # Read header lines, skipping comments
+        magic = _ppm_readline(io)
+        magic in ("P3", "P6") || throw(ArgumentError("Expected P3 or P6 PPM, got: $magic"))
+        dims = split(_ppm_readline(io))
+        width = parse(Int, dims[1])
+        height = parse(Int, dims[2])
+        maxval = parse(Float64, _ppm_readline(io))
+        inv_maxval = 1.0 / maxval
 
-    # Skip comments, find magic
-    while idx <= length(lines) && (isempty(strip(lines[idx])) || startswith(strip(lines[idx]), "#"))
-        idx += 1
-    end
-    magic = strip(lines[idx])
-    magic == "P3" || throw(ArgumentError("Expected P3 PPM, got: $magic"))
-    idx += 1
+        pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
 
-    # Skip comments, find dimensions
-    while idx <= length(lines) && (isempty(strip(lines[idx])) || startswith(strip(lines[idx]), "#"))
-        idx += 1
-    end
-    dims = split(strip(lines[idx]))
-    width = parse(Int, dims[1])
-    height = parse(Int, dims[2])
-    idx += 1
-
-    # Skip comments, find maxval
-    while idx <= length(lines) && (isempty(strip(lines[idx])) || startswith(strip(lines[idx]), "#"))
-        idx += 1
-    end
-    maxval = parse(Float64, strip(lines[idx]))
-    idx += 1
-
-    # Collect all remaining tokens
-    tokens = String[]
-    while idx <= length(lines)
-        line = strip(lines[idx])
-        if !isempty(line) && !startswith(line, "#")
-            append!(tokens, split(line))
+        if magic == "P6"
+            # Binary: read raw bytes after header
+            buf = Vector{UInt8}(undef, width * 3)
+            for y in 1:height
+                readbytes!(io, buf, width * 3)
+                idx = 1
+                @inbounds for x in 1:width
+                    r = Float64(buf[idx]) * inv_maxval
+                    g = Float64(buf[idx + 1]) * inv_maxval
+                    b = Float64(buf[idx + 2]) * inv_maxval
+                    pixels[y, x] = (r, g, b)
+                    idx += 3
+                end
+            end
+        else
+            # P3 text: parse remaining tokens
+            text = read(io, String)
+            tokens = split(text)
+            ti = 1
+            for y in 1:height
+                for x in 1:width
+                    r = parse(Int, tokens[ti]) * inv_maxval
+                    g = parse(Int, tokens[ti + 1]) * inv_maxval
+                    b = parse(Int, tokens[ti + 2]) * inv_maxval
+                    pixels[y, x] = (r, g, b)
+                    ti += 3
+                end
+            end
         end
-        idx += 1
+
+        pixels
     end
+end
 
-    expected = width * height * 3
-    length(tokens) >= expected || throw(ArgumentError(
-        "PPM has $(length(tokens)) color values, expected $expected"))
-
-    inv_maxval = 1.0 / maxval
-    pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
-    ti = 1
-    for y in 1:height
-        for x in 1:width
-            r = parse(Int, tokens[ti]) * inv_maxval
-            g = parse(Int, tokens[ti + 1]) * inv_maxval
-            b = parse(Int, tokens[ti + 2]) * inv_maxval
-            pixels[y, x] = (r, g, b)
-            ti += 3
-        end
+"""Read next non-comment, non-empty line from PPM stream."""
+function _ppm_readline(io::IO)::String
+    while !eof(io)
+        line = strip(readline(io))
+        !isempty(line) && !startswith(line, "#") && return line
     end
-
-    pixels
+    throw(ArgumentError("Unexpected end of PPM header"))
 end
 
 """
