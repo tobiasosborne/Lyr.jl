@@ -155,7 +155,86 @@ function coordinate_bounds(k::Kerr{BoyerLindquist})
 end
 
 # ─────────────────────────────────────────────────────────────────────
-# metric_inverse_partials: uses ForwardDiff default from metric.jl
-# (analytic partials for Kerr are very tedious — ForwardDiff is correct
-# and fast enough via StaticArrays autodiff)
+# Analytic ∂g^{αβ}/∂x^μ for Kerr Boyer-Lindquist
+#
+# 5 nonzero inverse metric components: gtt, gtφ, grr, gθθ, gφφ.
+# Static + axisymmetric ⟹ only ∂/∂r and ∂/∂θ are nonzero.
 # ─────────────────────────────────────────────────────────────────────
+
+function metric_inverse_partials(k::Kerr{BoyerLindquist},
+                                  x::SVec4d)::NTuple{4, SMat4d}
+    M, a = k.M, k.a
+    r, θ = x[2], x[3]
+    a2 = a * a
+
+    sinθ = sin(θ)
+    cosθ = cos(θ)
+    sin2θ = max(sinθ * sinθ, 1e-6)
+    sinθ_safe = max(abs(sinθ), 1e-3)
+
+    Σ = r * r + a2 * cosθ * cosθ
+    Δ = r * r - 2.0 * M * r + a2
+    r2a2 = r * r + a2
+    A = r2a2 * r2a2 - Δ * a2 * sin2θ
+    ΣΔ = Σ * Δ
+
+    inv_ΣΔ2 = 1.0 / (ΣΔ * ΣΔ)
+    inv_Σ2 = 1.0 / (Σ * Σ)
+
+    # Intermediate derivatives
+    dΣ_dr = 2.0 * r
+    dΣ_dθ = -2.0 * a2 * sinθ * cosθ
+    dΔ_dr = 2.0 * r - 2.0 * M
+
+    dA_dr = 4.0 * r * r2a2 - dΔ_dr * a2 * sin2θ
+    dA_dθ = -Δ * 2.0 * a2 * sinθ * cosθ
+
+    d_ΣΔ_dr = dΣ_dr * Δ + Σ * dΔ_dr
+    d_ΣΔ_dθ = dΣ_dθ * Δ
+
+    # gtt = -A / (ΣΔ)
+    dgtt_dr = -(dA_dr * ΣΔ - A * d_ΣΔ_dr) * inv_ΣΔ2
+    dgtt_dθ = -(dA_dθ * ΣΔ - A * d_ΣΔ_dθ) * inv_ΣΔ2
+
+    # gtφ = -2Mar / (ΣΔ)
+    dgtφ_dr = -2.0 * M * a * (ΣΔ - r * d_ΣΔ_dr) * inv_ΣΔ2
+    dgtφ_dθ = 2.0 * M * a * r * d_ΣΔ_dθ * inv_ΣΔ2
+
+    # grr = Δ / Σ
+    dgrr_dr = (dΔ_dr * Σ - Δ * dΣ_dr) * inv_Σ2
+    dgrr_dθ = -Δ * dΣ_dθ * inv_Σ2
+
+    # gθθ = 1 / Σ
+    dgθθ_dr = -dΣ_dr * inv_Σ2
+    dgθθ_dθ = -dΣ_dθ * inv_Σ2
+
+    # gφφ = (Δ - a²sin²θ) / (ΣΔsin²θ)
+    N = Δ - a2 * sin2θ
+    D = ΣΔ * sin2θ
+    inv_D2 = 1.0 / (D * D)
+    dN_dr = dΔ_dr
+    dN_dθ = -2.0 * a2 * sinθ * cosθ
+    dD_dr = d_ΣΔ_dr * sin2θ
+    dD_dθ = d_ΣΔ_dθ * sin2θ + ΣΔ * 2.0 * sinθ * cosθ
+    dgφφ_dr = (dN_dr * D - N * dD_dr) * inv_D2
+    dgφφ_dθ = (dN_dθ * D - N * dD_dθ) * inv_D2
+
+    zero4 = zeros(SMat4d)
+
+    # Column-major: col1=(row1,row2,row3,row4), col2=..., etc.
+    d_dr = SMat4d(
+        dgtt_dr, 0.0, 0.0, dgtφ_dr,
+        0.0, dgrr_dr, 0.0, 0.0,
+        0.0, 0.0, dgθθ_dr, 0.0,
+        dgtφ_dr, 0.0, 0.0, dgφφ_dr
+    )
+
+    d_dθ = SMat4d(
+        dgtt_dθ, 0.0, 0.0, dgtφ_dθ,
+        0.0, dgrr_dθ, 0.0, 0.0,
+        0.0, 0.0, dgθθ_dθ, 0.0,
+        dgtφ_dθ, 0.0, 0.0, dgφφ_dθ
+    )
+
+    (zero4, d_dr, d_dθ, zero4)
+end
