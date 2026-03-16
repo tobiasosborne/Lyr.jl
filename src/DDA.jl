@@ -105,18 +105,13 @@ Advance the DDA by one voxel. Returns the axis crossed (1, 2, or 3).
         axis = tmax[2] < tmax[3] ? 2 : 3
     end
 
-    # Advance ijk and tmax along chosen axis
+    # Advance ijk and tmax along chosen axis — single indexed update
     ijk = state.ijk
-    state.ijk = Coord(
-        axis == 1 ? ijk[1] + state.step[1] : ijk[1],
-        axis == 2 ? ijk[2] + state.step[2] : ijk[2],
-        axis == 3 ? ijk[3] + state.step[3] : ijk[3]
-    )
-    state.tmax = SVec3d(
-        axis == 1 ? tmax[1] + state.tdelta[1] : tmax[1],
-        axis == 2 ? tmax[2] + state.tdelta[2] : tmax[2],
-        axis == 3 ? tmax[3] + state.tdelta[3] : tmax[3]
-    )
+    new_val = ijk[axis] + state.step[axis]
+    state.ijk = axis == 1 ? Coord(new_val, ijk.y, ijk.z) :
+                axis == 2 ? Coord(ijk.x, new_val, ijk.z) :
+                            Coord(ijk.x, ijk.y, new_val)
+    state.tmax = Base.setindex(tmax, tmax[axis] + state.tdelta[axis], axis)
 
     axis
 end
@@ -159,34 +154,31 @@ function node_dda_init(ray::Ray, tmin::Float64, origin::Coord,
 end
 
 """
-    node_dda_child_index(ndda::NodeDDA) -> Int
+    node_dda_query(ndda::NodeDDA) -> Tuple{Bool, Int}
 
-Compute the linear child index (0-based) for the current DDA position within the node.
-Uses bit-shift logic matching `internal1_child_index`/`internal2_child_index`.
+Combined bounds check + child index computation. Returns `(inside, child_index)`.
+Computes local coordinates once instead of duplicating across two functions.
 """
-@inline function node_dda_child_index(ndda::NodeDDA)::Int
-    # DDA ijk is in child-grid coordinates (index_space / child_size).
-    # Convert to local child coordinates within this node.
-    cs = ndda.child_size
-    lx = ndda.state.ijk[1] - ndda.origin[1] ÷ cs
-    ly = ndda.state.ijk[2] - ndda.origin[2] ÷ cs
-    lz = ndda.state.ijk[3] - ndda.origin[3] ÷ cs
-    dim = Int(ndda.dim)
-    Int(lx) * dim * dim + Int(ly) * dim + Int(lz)
-end
-
-"""
-    node_dda_inside(ndda::NodeDDA) -> Bool
-
-Check if the DDA is still within the node's child grid.
-"""
-@inline function node_dda_inside(ndda::NodeDDA)::Bool
+@inline function node_dda_query(ndda::NodeDDA)::Tuple{Bool, Int}
     cs = ndda.child_size
     lx = ndda.state.ijk[1] - ndda.origin[1] ÷ cs
     ly = ndda.state.ijk[2] - ndda.origin[2] ÷ cs
     lz = ndda.state.ijk[3] - ndda.origin[3] ÷ cs
     dim = ndda.dim
-    Int32(0) <= lx < dim && Int32(0) <= ly < dim && Int32(0) <= lz < dim
+    inside = Int32(0) <= lx < dim && Int32(0) <= ly < dim && Int32(0) <= lz < dim
+    idx = Int(lx) * Int(dim) * Int(dim) + Int(ly) * Int(dim) + Int(lz)
+    (inside, idx)
+end
+
+# Convenience wrappers (kept for backward compatibility with VolumeHDDA/VRI)
+@inline function node_dda_child_index(ndda::NodeDDA)::Int
+    _, idx = node_dda_query(ndda)
+    idx
+end
+
+@inline function node_dda_inside(ndda::NodeDDA)::Bool
+    inside, _ = node_dda_query(ndda)
+    inside
 end
 
 """
@@ -247,8 +239,9 @@ function _dda_internal2!(results::Vector{LeafIntersection{T}}, ray::Ray,
     # DDA through 32³ child grid at stride 128
     ndda = node_dda_init(ray, tmin, o, Int32(32), Int32(128))
 
-    while node_dda_inside(ndda)
-        child_idx = node_dda_child_index(ndda)
+    while true
+        inside, child_idx = node_dda_query(ndda)
+        !inside && break
 
         if is_on(node.child_mask, child_idx)
             idx = count_on_before(node.child_mask, child_idx) + 1
@@ -275,8 +268,9 @@ function _dda_internal1!(results::Vector{LeafIntersection{T}}, ray::Ray,
     # DDA through 16³ child grid at stride 8
     ndda = node_dda_init(ray, tmin, o, Int32(16), Int32(8))
 
-    while node_dda_inside(ndda)
-        child_idx = node_dda_child_index(ndda)
+    while true
+        inside, child_idx = node_dda_query(ndda)
+        !inside && break
 
         if is_on(node.child_mask, child_idx)
             idx = count_on_before(node.child_mask, child_idx) + 1
@@ -386,9 +380,10 @@ State machine phases:
 function _vri_advance(ray::Ray, state::VRIState{T})::Union{Tuple{LeafIntersection{T}, VRIState{T}}, Nothing} where T
     while true
         # Phase 1: Drain current I1 DDA for leaf hits
-        while state.i1_ndda !== nothing && node_dda_inside(state.i1_ndda)
+        while state.i1_ndda !== nothing
             ndda = state.i1_ndda
-            child_idx = node_dda_child_index(ndda)
+            inside, child_idx = node_dda_query(ndda)
+            !inside && break
 
             if is_on(state.i1_node.child_mask, child_idx)
                 idx = count_on_before(state.i1_node.child_mask, child_idx) + 1
@@ -413,9 +408,10 @@ function _vri_advance(ray::Ray, state::VRIState{T})::Union{Tuple{LeafIntersectio
 
         # Phase 2: Step I2 DDA to find next I1 child with AABB hit
         found_i1 = false
-        while state.i2_ndda !== nothing && node_dda_inside(state.i2_ndda)
+        while state.i2_ndda !== nothing
             ndda = state.i2_ndda
-            child_idx = node_dda_child_index(ndda)
+            inside, child_idx = node_dda_query(ndda)
+            !inside && break
 
             if is_on(state.i2_node.child_mask, child_idx)
                 idx = count_on_before(state.i2_node.child_mask, child_idx) + 1

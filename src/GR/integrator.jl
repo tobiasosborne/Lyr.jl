@@ -285,12 +285,16 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
             break
         end
 
-        H = abs(hamiltonian(m, x, p))
-        h_max = max(h_max, H)
-        if H > config.h_tolerance
-            reason = HAMILTONIAN_DRIFT
-            n_steps = step
-            break
+        # Hamiltonian drift check — same interval as renormalization (avoids
+        # redundant metric_inverse evaluation on every step)
+        if renorm_interval > 0 && step % renorm_interval == 0
+            H = abs(hamiltonian(m, x, p))
+            h_max = max(h_max, H)
+            if H > config.h_tolerance
+                reason = HAMILTONIAN_DRIFT
+                n_steps = step
+                break
+            end
         end
 
         if config.record_interval > 0 && step % config.record_interval == 0
