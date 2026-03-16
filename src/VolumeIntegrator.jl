@@ -19,7 +19,9 @@ struct _PrecomputedVolume{T}
     nanogrid::NanoGrid{T}
     bmin::SVec3d
     bmax::SVec3d
-    sigma_maj::Float64
+    sigma_maj::Float64        # majorant: max_density * sigma_scale
+    sigma_scale::Float64      # user extinction coefficient
+    accept_scale::Float64     # sigma_scale / sigma_maj = 1/max_density
     albedo::Float64
     emission_scale::Float64
     tf::TransferFunction
@@ -31,8 +33,17 @@ end
     bbox = nano_bbox(nano)
     bmin = SVec3d(Float64(bbox.min.x), Float64(bbox.min.y), Float64(bbox.min.z))
     bmax = SVec3d(Float64(bbox.max.x), Float64(bbox.max.y), Float64(bbox.max.z))
-    _PrecomputedVolume(nano, bmin, bmax,
-                       vol.material.sigma_scale,
+    # Compute majorant from grid maximum density (Woodcock tracking requirement)
+    max_density = zero(Float64)
+    for (_, v) in active_voxels(vol.grid.tree)
+        d = Float64(v)
+        d > max_density && (max_density = d)
+    end
+    max_density = max(max_density, Float64(1e-10))
+    sigma_scale = vol.material.sigma_scale
+    sigma_maj = max_density * sigma_scale
+    accept_scale = sigma_scale / sigma_maj  # = 1/max_density
+    _PrecomputedVolume(nano, bmin, bmax, sigma_maj, sigma_scale, accept_scale,
                        vol.material.scattering_albedo,
                        vol.material.emission_scale,
                        vol.material.transfer_function,
@@ -48,15 +59,17 @@ end
 # delta_tracking_step and ratio_tracking. This keeps ALL state on the stack.
 
 """
-    delta_tracking_step(ray, nanogrid, acc, t_enter, t_exit, sigma_maj, albedo, rng)
+    delta_tracking_step(ray, nanogrid, acc, t_enter, t_exit, sigma_maj, albedo, rng, accept_scale=1.0)
 
 Take one delta tracking step along a ray through a volume.
+`accept_scale` = sigma_scale / sigma_maj (= 1/max_density). Acceptance probability
+is `density * accept_scale` per Woodcock tracking (Woodcock et al. 1965).
 
 Returns `(t, :scattered)`, `(t, :absorbed)`, or `(t_exit, :escaped)`.
 """
 function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                              t_enter::Float64, t_exit::Float64, sigma_maj::Float64,
-                             albedo::Float64, rng) where T
+                             albedo::Float64, rng, accept_scale::Float64=1.0) where T
     reset!(acc)
     t = t_enter
     buf = nanogrid.buffer
@@ -150,7 +163,7 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
                                 t >= span_end && break
                                 pos = ray.origin + t * ray.direction
                                 density = max(0.0, get_value_trilinear(acc, pos))
-                                if rand(rng) < clamp(density, 0.0, 1.0)
+                                if rand(rng) < min(density * accept_scale, 1.0)
                                     return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
                                 end
                             end
@@ -174,7 +187,7 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
                             t >= span_end && break
                             pos = ray.origin + t * ray.direction
                             density = max(0.0, get_value_trilinear(acc, pos))
-                            if rand(rng) < clamp(density, 0.0, 1.0)
+                            if rand(rng) < min(density * accept_scale, 1.0)
                                 return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
                             end
                         end
@@ -196,7 +209,7 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
                         t >= span_end && break
                         pos = ray.origin + t * ray.direction
                         density = max(0.0, get_value_trilinear(acc, pos))
-                        if rand(rng) < clamp(density, 0.0, 1.0)
+                        if rand(rng) < min(density * accept_scale, 1.0)
                             return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
                         end
                     end
@@ -218,7 +231,7 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
                 t >= span_end && break
                 pos = ray.origin + t * ray.direction
                 density = max(0.0, get_value_trilinear(acc, pos))
-                if rand(rng) < clamp(density, 0.0, 1.0)
+                if rand(rng) < min(density * accept_scale, 1.0)
                     return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
                 end
             end
@@ -243,13 +256,14 @@ end
 # ============================================================================
 
 """
-    ratio_tracking(ray, nanogrid, acc, t0, t1, sigma_maj, rng) -> Float64
+    ratio_tracking(ray, nanogrid, acc, t0, t1, sigma_maj, rng, accept_scale=1.0) -> Float64
 
 Estimate transmittance along a ray segment [t0, t1] via ratio tracking.
+`accept_scale` = sigma_scale / sigma_maj (= 1/max_density).
 """
 function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                         t0::Float64, t1::Float64,
-                        sigma_maj::Float64, rng)::Float64 where T
+                        sigma_maj::Float64, rng, accept_scale::Float64=1.0)::Float64 where T
     reset!(acc)
     T_acc = 1.0
     t = t0
@@ -337,7 +351,7 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                                 t >= span_end && break
                                 pos = ray.origin + t * ray.direction
                                 density = max(0.0, get_value_trilinear(acc, pos))
-                                T_acc *= (1.0 - clamp(density, 0.0, 1.0))
+                                T_acc *= max(0.0, 1.0 - density * accept_scale)
                                 T_acc < 1e-10 && return 0.0
                             end
                             span_t0 = -1.0
@@ -359,7 +373,7 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                             t >= span_end && break
                             pos = ray.origin + t * ray.direction
                             density = max(0.0, get_value_trilinear(acc, pos))
-                            T_acc *= (1.0 - clamp(density, 0.0, 1.0))
+                            T_acc *= max(0.0, 1.0 - density * accept_scale)
                             T_acc < 1e-10 && return 0.0
                         end
                         span_t0 = -1.0
@@ -377,7 +391,7 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                         t >= span_end && break
                         pos = ray.origin + t * ray.direction
                         density = max(0.0, get_value_trilinear(acc, pos))
-                        T_acc *= (1.0 - clamp(density, 0.0, 1.0))
+                        T_acc *= max(0.0, 1.0 - density * accept_scale)
                         T_acc < 1e-10 && return 0.0
                     end
                     span_t0 = -1.0
@@ -396,7 +410,7 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                 t >= span_end && break
                 pos = ray.origin + t * ray.direction
                 density = max(0.0, get_value_trilinear(acc, pos))
-                T_acc *= (1.0 - clamp(density, 0.0, 1.0))
+                T_acc *= max(0.0, 1.0 - density * accept_scale)
                 T_acc < 1e-10 && return 0.0
             end
             span_t0 = -1.0
@@ -467,7 +481,7 @@ function _march_ea(ray::Ray, pvols, accs, bg::NTuple{3,Float64},
 
     for (vi, pv) in enumerate(pvols)
         nacc = accs[vi]; reset!(nacc)
-        tf = pv.tf; sigma_scale = pv.sigma_maj; emission_scale = pv.emission_scale
+        tf = pv.tf; sigma_scale = pv.sigma_scale; emission_scale = pv.emission_scale
         steps_remaining = max_steps
 
         foreach_hdda_span(pv.nanogrid, ray) do span_t0, span_t1
@@ -546,7 +560,7 @@ function _trace_ss(ray::Ray, pvols, accs, bg::NTuple{3,Float64}, rng, lights)::N
 
         t_hit, event = delta_tracking_step(ray, pv.nanogrid, accs[vi],
                                             t_enter, t_exit,
-                                            pv.sigma_maj, pv.albedo, rng)
+                                            pv.sigma_maj, pv.albedo, rng, pv.accept_scale)
         event == :escaped && continue
 
         hit_pos = ray.origin + t_hit * ray.direction
@@ -563,7 +577,7 @@ function _trace_ss(ray::Ray, pvols, accs, bg::NTuple{3,Float64}, rng, lights)::N
             transmittance = if shadow_hit !== nothing
                 st0, st1 = shadow_hit
                 st1 = min(st1, light_dist)
-                ratio_tracking(shadow_ray, pv.nanogrid, accs[vi], st0, st1, pv.sigma_maj, rng)
+                ratio_tracking(shadow_ray, pv.nanogrid, accs[vi], st0, st1, pv.sigma_maj, rng, pv.accept_scale)
             else
                 1.0
             end
@@ -609,9 +623,9 @@ end
 function _delta_tracking_collision(ray::Ray, nanogrid::NanoGrid,
                                    acc::NanoValueAccessor,
                                    t_enter::Float64, t_exit::Float64,
-                                   sigma_maj::Float64, rng)
-    # Reuse delta_tracking_step with albedo=1.0 (always scatter, never absorb)
-    t, event = delta_tracking_step(ray, nanogrid, acc, t_enter, t_exit, sigma_maj, 1.0, rng)
+                                   sigma_maj::Float64, rng,
+                                   accept_scale::Float64=1.0)
+    t, event = delta_tracking_step(ray, nanogrid, acc, t_enter, t_exit, sigma_maj, 1.0, rng, accept_scale)
     (t, event == :scattered)
 end
 
@@ -632,7 +646,7 @@ function _shadow_transmittance(shadow_ray::Ray, pvols, accs,
         t0, t1 = hit
         t1 = min(t1, max_dist)
         t0 >= t1 && continue
-        T *= ratio_tracking(shadow_ray, pv.nanogrid, accs[vi], t0, t1, pv.sigma_maj, rng)
+        T *= ratio_tracking(shadow_ray, pv.nanogrid, accs[vi], t0, t1, pv.sigma_maj, rng, pv.accept_scale)
         T < 1e-10 && return 0.0
     end
     return T
@@ -681,7 +695,7 @@ function _trace_ms_opt(ray::Ray, scene::Scene, pvols, accs,
 
             t_hit, found = _delta_tracking_collision(current_ray, pv.nanogrid,
                                                       accs[vi], t_enter, t_exit,
-                                                      pv.sigma_maj, rng)
+                                                      pv.sigma_maj, rng, pv.accept_scale)
             !found && continue
 
             hit_pos = current_ray.origin + t_hit * current_ray.direction

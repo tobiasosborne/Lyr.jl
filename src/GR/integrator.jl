@@ -45,6 +45,17 @@ function IntegratorConfig(;
 end
 
 # ─────────────────────────────────────────────────────────────────────
+# Coordinate dispatch helpers (used by integrator, matter, render)
+# ─────────────────────────────────────────────────────────────────────
+
+@inline _coord_r(::MetricSpace, x::SVec4d) = x[2]
+@inline _coord_r(::SchwarzschildKS, x::SVec4d) = sqrt(x[2]^2 + x[3]^2 + x[4]^2)
+
+# BL-type coordinates need θ-regularization at poles; Cartesian KS does not
+@inline _uses_polar_coords(::MetricSpace) = true
+@inline _uses_polar_coords(::SchwarzschildKS) = false
+
+# ─────────────────────────────────────────────────────────────────────
 # Adaptive step sizing
 # ─────────────────────────────────────────────────────────────────────
 
@@ -126,13 +137,16 @@ function verlet_step(m::MetricSpace{4}, x::SVec4d, p::SVec4d, dl::Float64)::Tupl
     x_new = x + dl * (ginv * p_half)
 
     # Polar regularization: reflect θ at 0 and π to avoid coordinate singularity
-    θ_new = x_new[3]
-    if θ_new < 0.0
-        x_new = SVec4d(x_new[1], x_new[2], -θ_new, x_new[4] + π)
-        p_half = SVec4d(p_half[1], p_half[2], -p_half[3], p_half[4])
-    elseif θ_new > π
-        x_new = SVec4d(x_new[1], x_new[2], 2π - θ_new, x_new[4] + π)
-        p_half = SVec4d(p_half[1], p_half[2], -p_half[3], p_half[4])
+    # Only for BL-type coordinates — Cartesian KS has no pole singularity
+    if _uses_polar_coords(m)
+        θ_new = x_new[3]
+        if θ_new < 0.0
+            x_new = SVec4d(x_new[1], x_new[2], -θ_new, x_new[4] + π)
+            p_half = SVec4d(p_half[1], p_half[2], -p_half[3], p_half[4])
+        elseif θ_new > π
+            x_new = SVec4d(x_new[1], x_new[2], 2π - θ_new, x_new[4] + π)
+            p_half = SVec4d(p_half[1], p_half[2], -p_half[3], p_half[4])
+        end
     end
 
     # Half-step in momentum at new position (unrolled)
@@ -197,7 +211,12 @@ function renormalize_null(m::MetricSpace{4}, x::SVec4d, p::SVec4d)::SVec4d
     # Two roots — pick the one with the same sign as the original p_t
     pt1 = (-B + sqrt_disc) / (2.0 * A)
     pt2 = (-B - sqrt_disc) / (2.0 * A)
-    pt_new = (sign(p[1]) == sign(pt1)) ? pt1 : pt2
+    pt_new = if p[1] != 0.0
+        sign(p[1]) == sign(pt1) ? pt1 : pt2
+    else
+        # p_t = 0: pick the larger magnitude root (physical branch)
+        abs(pt1) > abs(pt2) ? pt1 : pt2
+    end
 
     SVec4d(pt_new, p[2], p[3], p[4])
 end
@@ -237,7 +256,7 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
 
     for step in 1:config.max_steps
         # Adaptive step size based on distance from BH
-        r = x[2]
+        r = _coord_r(m, x)
         M_val = rh / 2.0  # extract M from horizon radius
         dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
 
@@ -245,7 +264,7 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
         if renorm_interval > 0 && step % renorm_interval == 0
             p = renormalize_null(m, x, p)
         end
-        r = x[2]
+        r = _coord_r(m, x)
 
         # ── Termination checks ──
         if r <= rh * config.r_min_factor

@@ -78,8 +78,9 @@ Apply redshift/blueshift to a base color.
 Blueshift (z < 0) shifts toward blue, redshift (z > 0) toward red.
 """
 function doppler_color(base_color::NTuple{3, Float64}, z::Float64)::NTuple{3, Float64}
-    # Intensity scales as (1+z)^{-3} (Liouville invariant I_ν/ν³)
-    scale = 1.0 / (1.0 + z)^3
+    # Bolometric intensity scales as (1+z)^{-4} for broadband RGB
+    # (extra factor of (1+z) from frequency integration: dν_obs = dν_emit/(1+z))
+    scale = 1.0 / (1.0 + z)^4
     scale = clamp(scale, 0.0, 5.0)  # prevent blowup
     (clamp(base_color[1] * scale, 0.0, 1.0),
      clamp(base_color[2] * scale, 0.0, 1.0),

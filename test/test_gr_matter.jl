@@ -34,10 +34,10 @@
     @testset "Disk crossing detection" begin
         disk = ThinDisk(6.0, 30.0)
 
-        # Crossing from above equator to below
+        # Crossing from above equator to below (BL coordinates)
         prev = GeodesicState(SVec4d(0.0, 10.0, π/2 + 0.01, 0.0), SVec4d(0.0, 0.0, 0.0, 0.0))
         curr = GeodesicState(SVec4d(0.0, 10.0, π/2 - 0.01, 0.0), SVec4d(0.0, 0.0, 0.0, 0.0))
-        result = check_disk_crossing(prev, curr, disk)
+        result = check_disk_crossing(s, prev, curr, disk)
         @test result !== nothing
         r_cross, frac = result
         @test r_cross ≈ 10.0 atol=0.01
@@ -46,12 +46,28 @@
         # No crossing (both above equator)
         prev2 = GeodesicState(SVec4d(0.0, 10.0, π/2 + 0.02, 0.0), SVec4d(0.0, 0.0, 0.0, 0.0))
         curr2 = GeodesicState(SVec4d(0.0, 10.0, π/2 + 0.01, 0.0), SVec4d(0.0, 0.0, 0.0, 0.0))
-        @test check_disk_crossing(prev2, curr2, disk) === nothing
+        @test check_disk_crossing(s, prev2, curr2, disk) === nothing
 
         # Crossing but outside disk radius
         prev3 = GeodesicState(SVec4d(0.0, 3.0, π/2 + 0.01, 0.0), SVec4d(0.0, 0.0, 0.0, 0.0))
         curr3 = GeodesicState(SVec4d(0.0, 3.0, π/2 - 0.01, 0.0), SVec4d(0.0, 0.0, 0.0, 0.0))
-        @test check_disk_crossing(prev3, curr3, disk) === nothing
+        @test check_disk_crossing(s, prev3, curr3, disk) === nothing
+
+        # KS disk crossing: z-coordinate sign change
+        ks = SchwarzschildKS(M)
+        # Position at r=10 in equatorial plane, crossing z=0
+        prev_ks = GeodesicState(SVec4d(0.0, 10.0, 0.0, 0.1), SVec4d(0.0, 0.0, 0.0, 0.0))
+        curr_ks = GeodesicState(SVec4d(0.0, 10.0, 0.0, -0.1), SVec4d(0.0, 0.0, 0.0, 0.0))
+        result_ks = check_disk_crossing(ks, prev_ks, curr_ks, disk)
+        @test result_ks !== nothing
+        r_ks, frac_ks = result_ks
+        @test r_ks ≈ 10.0 atol=0.01
+        @test 0.0 < frac_ks < 1.0
+
+        # KS: no crossing (both above equatorial plane)
+        prev_ks2 = GeodesicState(SVec4d(0.0, 10.0, 0.0, 0.2), SVec4d(0.0, 0.0, 0.0, 0.0))
+        curr_ks2 = GeodesicState(SVec4d(0.0, 10.0, 0.0, 0.1), SVec4d(0.0, 0.0, 0.0, 0.0))
+        @test check_disk_crossing(ks, prev_ks2, curr_ks2, disk) === nothing
     end
 
     @testset "Checkerboard sphere" begin

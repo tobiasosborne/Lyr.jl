@@ -58,11 +58,12 @@ function static_observer_tetrad(m::Schwarzschild, x::SVec4d)::Tuple{SVec4d, SMat
     sinθ_safe = max(abs(sinθ), 1e-3)
     e3 = SVec4d(0.0, 0.0, 0.0, 1.0 / (r * sinθ_safe))  # azimuthal
 
+    # Column-major: column a = tetrad leg e_a (matches pixel_to_momentum e[:, col])
     tetrad = SMat4d(
-        e0[1], e1[1], e2[1], e3[1],
-        e0[2], e1[2], e2[2], e3[2],
-        e0[3], e1[3], e2[3], e3[3],
-        e0[4], e1[4], e2[4], e3[4]
+        e0[1], e0[2], e0[3], e0[4],
+        e1[1], e1[2], e1[3], e1[4],
+        e2[1], e2[2], e2[3], e2[4],
+        e3[1], e3[2], e3[3], e3[4]
     )
 
     (u, tetrad)

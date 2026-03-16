@@ -4,10 +4,8 @@
 # integrate geodesic backward in time, determine color from termination
 # condition (horizon → black, escaped → sky/background, disk → emissivity).
 
-# Coordinate-system dispatch: extract r and convert to spherical
-@inline _coord_r(::MetricSpace, x::SVec4d) = x[2]  # BL: r = x[2]
-@inline _coord_r(::SchwarzschildKS, x::SVec4d) = sqrt(x[2]^2 + x[3]^2 + x[4]^2)
-
+# Coordinate-system dispatch: convert to spherical
+# Note: _coord_r is defined in integrator.jl (loaded first, shared with matter.jl)
 @inline _to_spherical(::MetricSpace, x::SVec4d) = (x[2], x[3], x[4])  # BL: (r, θ, φ)
 @inline function _to_spherical(::SchwarzschildKS, x::SVec4d)
     r = sqrt(x[2]^2 + x[3]^2 + x[4]^2)
@@ -79,7 +77,8 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
     prev_state = initial
 
     for step in 1:cfg.max_steps
-        dl = M_val > 0.0 ? adaptive_step(dl_base, x[2], M_val) : dl_base
+        r = _coord_r(m, x)
+        dl = M_val > 0.0 ? adaptive_step(dl_base, r, M_val) : dl_base
         x_new, p_new = _do_step(m, x, p, dl, stepper)
 
         if renorm_interval > 0 && step % renorm_interval == 0
@@ -90,14 +89,15 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
 
         # ── Check disk crossing ──
         if disk !== nothing
-            crossing = check_disk_crossing(prev_state, curr_state, disk)
+            crossing = check_disk_crossing(m, prev_state, curr_state, disk)
             if crossing !== nothing
-                r_cross, _ = crossing
+                r_cross, frac = crossing
                 intensity = disk_emissivity(disk, r_cross)
                 if config.use_redshift
-                    u_emit = keplerian_four_velocity(m, r_cross)
+                    x_cross = prev_state.x + frac * (curr_state.x - prev_state.x)
+                    u_emit = keplerian_four_velocity(m, r_cross, x_cross)
                     z_plus_1 = redshift_factor(p_new, u_emit, p0, cam.four_velocity)
-                    intensity = intensity / z_plus_1^3
+                    intensity = intensity / z_plus_1^4
                 end
                 return blackbody_color(clamp(intensity * 5.0, 0.0, 2.0))
             end
@@ -105,7 +105,7 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
 
         x, p = x_new, p_new
         prev_state = curr_state
-        r = x[2]
+        r = _coord_r(m, x)
 
         # ── Termination ──
         if r <= rh * cfg.r_min_factor
@@ -113,12 +113,7 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
         end
 
         if r >= cfg.r_max
-            θ, φ = x[3], x[4]
-            if sky !== nothing
-                return sphere_lookup(sky, θ, φ)
-            else
-                return checkerboard_sphere(θ, φ)
-            end
+            return _sky_color(m, sky, x, config.background)
         end
 
         if is_singular(m, x)
@@ -126,12 +121,7 @@ function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
         end
     end
 
-    θ_f, φ_f = x[3], x[4]
-    if sky !== nothing
-        return sphere_lookup(sky, θ_f, φ_f)
-    else
-        return checkerboard_sphere(θ_f, φ_f)
-    end
+    return _sky_color(m, sky, x, config.background)
 end
 
 # ─────────────────────────────────────────────────────────────────────
@@ -206,7 +196,7 @@ function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
                 z_plus_1 = 1.0
                 if config.use_redshift
                     z_plus_1 = volumetric_redshift(m, x_new, p_new, p0, u_obs)
-                    jj = jj / z_plus_1^3
+                    jj = jj / z_plus_1^4
                 end
 
                 # Planck color at observed temperature

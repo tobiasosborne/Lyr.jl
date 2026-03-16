@@ -83,6 +83,9 @@ function keplerian_four_velocity(m::Schwarzschild, r::Float64)::SVec4d
     SVec4d(ut, 0.0, 0.0, uphi)
 end
 
+# 3-arg form: BL metrics ignore position (only need r)
+keplerian_four_velocity(m::Schwarzschild, r::Float64, ::SVec4d) = keplerian_four_velocity(m, r)
+
 """
     keplerian_four_velocity(m::Kerr{BoyerLindquist}, r) -> SVec4d
 
@@ -102,6 +105,9 @@ function keplerian_four_velocity(m::Kerr{BoyerLindquist}, r::Float64)::SVec4d
     ut = 1.0 / sqrt(max(denom, 1e-15))
     SVec4d(ut, 0.0, 0.0, Ω * ut)
 end
+
+# 3-arg form: BL metrics ignore position (only need r)
+keplerian_four_velocity(m::Kerr{BoyerLindquist}, r::Float64, ::SVec4d) = keplerian_four_velocity(m, r)
 
 """
     keplerian_four_velocity(m::SchwarzschildKS, r, x) -> SVec4d
@@ -123,24 +129,38 @@ function keplerian_four_velocity(m::SchwarzschildKS, r::Float64, x::SVec4d)::SVe
 end
 
 """
-    check_disk_crossing(prev::GeodesicState, curr::GeodesicState, disk::ThinDisk)
-        -> Union{Tuple{Float64, Float64}, Nothing}
+    check_disk_crossing(m, prev, curr, disk) -> Union{Tuple{Float64, Float64}, Nothing}
 
-Check if geodesic crossed the equatorial plane (θ = π/2) between two states.
+Check if geodesic crossed the equatorial plane between two states.
 Returns (r_crossing, interpolation_fraction) or nothing.
+
+Dispatches on metric: BL uses θ = π/2, KS uses z = 0.
 """
-function check_disk_crossing(prev::GeodesicState, curr::GeodesicState,
+function check_disk_crossing(::MetricSpace, prev::GeodesicState, curr::GeodesicState,
                              disk::ThinDisk)::Union{Tuple{Float64, Float64}, Nothing}
     θ_prev = prev.x[3]
     θ_curr = curr.x[3]
     equator = π / 2.0
 
-    # Check sign change around equator
     if (θ_prev - equator) * (θ_curr - equator) < 0.0
-        # Linear interpolation for crossing fraction
         frac = (equator - θ_prev) / (θ_curr - θ_prev)
         r_cross = prev.x[2] + frac * (curr.x[2] - prev.x[2])
+        if disk.inner_radius <= r_cross <= disk.outer_radius
+            return (r_cross, frac)
+        end
+    end
+    return nothing
+end
 
+function check_disk_crossing(::SchwarzschildKS, prev::GeodesicState, curr::GeodesicState,
+                             disk::ThinDisk)::Union{Tuple{Float64, Float64}, Nothing}
+    z_prev = prev.x[4]
+    z_curr = curr.x[4]
+
+    if z_prev * z_curr < 0.0
+        frac = -z_prev / (z_curr - z_prev)
+        x_cross = prev.x + frac * (curr.x - prev.x)
+        r_cross = sqrt(x_cross[2]^2 + x_cross[3]^2 + x_cross[4]^2)
         if disk.inner_radius <= r_cross <= disk.outer_radius
             return (r_cross, frac)
         end
