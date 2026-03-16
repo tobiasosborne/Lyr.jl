@@ -184,7 +184,7 @@ is_active(acc::ValueAccessor{T}, c::Coord) where T = _tree_probe(acc.tree, c)[2]
 
 # Tile region sizes for counting active voxels
 # VDB tree hierarchy: Root → Internal2(32³) → Internal1(16³) → Leaf(8³)
-const ROOT_TILE_VOXELS = 4096^3
+const ROOT_TILE_VOXELS = Int64(4096)^3
 const INTERNAL2_TILE_VOXELS = 128^3
 const INTERNAL1_TILE_VOXELS = 8^3
 
