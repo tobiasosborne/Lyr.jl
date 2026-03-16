@@ -178,12 +178,15 @@ function planck_to_xyz(T::Float64)::NTuple{3, Float64}
     T <= 0.0 && return (0.0, 0.0, 0.0)
     X, Y, Z = 0.0, 0.0, 0.0
     dλ = 5e-9  # 5nm step in meters
-    for (λ_nm, xbar, ybar, zbar) in _CIE_XYZ_5NM
+    n = length(_CIE_XYZ_5NM)
+    for (i, (λ_nm, xbar, ybar, zbar)) in enumerate(_CIE_XYZ_5NM)
         λ_m = λ_nm * 1e-9
         B = planck_spectral_radiance(λ_m, T)
-        X += B * xbar * dλ
-        Y += B * ybar * dλ
-        Z += B * zbar * dλ
+        # Trapezoidal rule: half-weight on first and last samples
+        w = (i == 1 || i == n) ? 0.5 * dλ : dλ
+        X += B * xbar * w
+        Y += B * ybar * w
+        Z += B * zbar * w
     end
     (X, Y, Z)
 end

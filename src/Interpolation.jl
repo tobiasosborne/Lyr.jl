@@ -117,6 +117,15 @@ Smoother than trilinear with C1 continuity. Falls back to nearest-neighbor
 at narrow band boundaries (where any of the 27 values equals ±background).
 """
 function sample_quadratic(tree::Tree{T}, ijk::SVec3d)::T where T
+    sample_quadratic(ValueAccessor(tree), tree.background, ijk)
+end
+
+"""
+    sample_quadratic(acc, bg, ijk) -> T
+
+Quadratic B-spline sampling with pre-existing accessor (avoids allocation per call).
+"""
+function sample_quadratic(acc::ValueAccessor{T}, bg::T, ijk::SVec3d)::T where T
     # Nearest grid point and fractional offsets ∈ [-0.5, 0.5]
     i0 = round(Int64, ijk[1])
     j0 = round(Int64, ijk[2])
@@ -129,16 +138,12 @@ function sample_quadratic(tree::Tree{T}, ijk::SVec3d)::T where T
     wx = _quad_weights(u)
     wy = _quad_weights(v)
     wz = _quad_weights(w)
-
-    # Accumulate 27-point weighted sum with accessor for cache coherence
-    acc = ValueAccessor(tree)
-    bg = tree.background
     result = zero(T)
     for di in -1:1
         for dj in -1:1
             for dk in -1:1
                 val = get_value(acc, coord(i0 + di, j0 + dj, k0 + dk))
-                _is_background(val, bg) && return sample_nearest(tree, ijk)
+                _is_background(val, bg) && return get_value(acc, coord(round(Int64, ijk[1]), round(Int64, ijk[2]), round(Int64, ijk[3])))
                 result += wx[di + 2] * wy[dj + 2] * wz[dk + 2] * val
             end
         end
