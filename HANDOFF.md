@@ -4,37 +4,57 @@
 
 ---
 
-## Latest Session (2026-03-17, evening) — 3 Refactoring Issues In Progress (Partial)
+## Latest Session (2026-03-17, evening) — 3 Refactors Done + QFT Scattering Viz Planned
 
-**Status**: YELLOW — 94,325 passed, 2 fail (pre-existing golden image mismatch), 1 error (pre-existing). Session cut short by Claude Code instability. Code changes committed but test failures need investigation.
+**Status**: YELLOW — 94,325 passed, 2 fail (pre-existing golden image mismatch), 1 error (pre-existing). Code changes committed and pushed. New feature project scoped: QFT Scattering Visualization Series (10 beads issues with dependency DAG).
 
 ### What Was Done
 
-**3 Code Changes (committed, tested with pre-existing failures only):**
-- **P3 (jirf)**: `_PrecomputedVolume.pf` changed from abstract `PhaseFunction` to `Union{IsotropicPhase, HenyeyGreensteinPhase}`. Enables Union splitting — eliminates dynamic dispatch in scatter loop. Verified: `fieldtype(Lyr._PrecomputedVolume{Float32}, :pf)` returns the Union type.
-- **P2 (lwp3)**: NanoVDB I1/I2 view dedup. `NanoI1View{T}` and `NanoI2View{T}` (identical struct + 7 methods each) unified into `NanoInternalView{T, L<:NodeLevel}` with `Level1`/`Level2` type params. Offset dispatch via `_cmask_off(::Type{Level1})` etc. `const NanoI1View{T} = NanoInternalView{T, Level1}` preserves backward compat. -54 net lines. Verified aliases work.
-- **P1 (hecg)**: HDDA span sampling dedup. Extracted `_delta_sample_span` and `_ratio_sample_span` @inline helpers. Replaced 4×9-line copy-paste blocks in `delta_tracking_step` and 4×7-line blocks in `ratio_tracking`. -54 net lines total across both functions.
+**3 Code Changes (committed in `8bb3e5d`, pushed):**
+- **P3 (jirf)**: `_PrecomputedVolume.pf` → `Union{IsotropicPhase, HenyeyGreensteinPhase}`. Union splitting eliminates dynamic dispatch in scatter loop.
+- **P2 (lwp3)**: NanoVDB I1/I2 view dedup. Unified into `NanoInternalView{T, L<:NodeLevel}` with `Level1`/`Level2` type params. -54 net lines.
+- **P1 (hecg)**: HDDA span sampling dedup. Extracted `_delta_sample_span`/`_ratio_sample_span` @inline helpers. 8 copy-paste sites → 2 helpers. -54 net lines.
 
-**Test result**: 94,325 passed, 2 failed, 1 errored. The 2 failures + 1 error are pre-existing (golden image mismatch from prior session). Full test output was truncated (`tail -30`) so specific failure names not captured — re-run with full output to confirm.
+**New Project: QFT Scattering Visualization Series (10 issues created):**
 
-### What Was NOT Done (planned but session ended)
+Six-scenario energy ladder: H-H elastic → H-H excitation → H-H ionization → e-e Coulomb → tree-level QED Møller scattering with virtual photon exchange.
 
-- **fj1a + emsz**: Close as already-tested (no code needed)
-- **eu65**: Unit tests for `adaptive_step` + `renormalize_null`
-- **fgzb**: Unit tests for VolumeIntegrator
-- Remaining issue triage
+All physics is analytic — Gaussian wavepackets convolved with known propagators (Peskin & Schroeder, Griffiths, Sakurai). No PDE solving, just FFT convolutions on 3D grids rendered through Lyr's volume pipeline.
+
+**Key requirement**: Every equation has a `EQ:TAG` in `docs/scattering_physics.md` that must string-match to implementation source comments.
+
+| ID | P | Title | Blocked by |
+|---|---|---|---|
+| `06zv` | P1 | EPIC: QFT Scattering Visualization Series | — |
+| `vkhv` | P1 | Ground truth physics reference document | 06zv |
+| `4pim` | P1 | Wavepacket + FFT convolution infrastructure | vkhv |
+| `qzxv` | P1 | Hydrogen atom eigenstates + MO reconstruction | vkhv |
+| `9ohr` | P2 | Scattering animation rendering pipeline | 4pim |
+| `dygj` | P2 | VIZ: H-H elastic scattering (scenarios 1-2) | qzxv, 4pim, 9ohr |
+| `qkc2` | P2 | VIZ: H-H excitation (scenario 3) | dygj |
+| `22lf` | P2 | VIZ: H-H ionization (scenario 4) | qkc2 |
+| `s6hk` | P2 | VIZ: e-e Coulomb scattering (scenario 5) | 4pim, 9ohr |
+| `tjyx` | P1 | VIZ: Tree-level QED Møller scattering (scenario 6) | s6hk, vkhv |
+
+**Critical path**: `06zv` → `vkhv` → `4pim` → `9ohr` → `s6hk` → `tjyx` (QED crown jewel)
 
 ### What the Next Agent Should Do
 
-1. **Verify test results**: Run `julia --project --threads=32 -e 'using Pkg; Pkg.test()'` WITHOUT `| tail` to see full failure details. Confirm all failures are pre-existing.
-2. **Close completed issues**: `bd close path-tracer-jirf path-tracer-lwp3 path-tracer-hecg` (code is done and tested).
-3. **Close already-tested issues**: `bd close path-tracer-fj1a path-tracer-emsz` (no code needed).
-4. **Write unit tests**: eu65 (GR integrator) and fgzb (VolumeIntegrator).
-5. **Regenerate golden images**: T10.4/T10.5 PPM format mismatch from `d49e014`.
+**Immediate (cleanup from this session):**
+1. Run `julia --project --threads=32 -e 'using Pkg; Pkg.test()'` (full output) — confirm 2 failures are pre-existing.
+2. `bd close path-tracer-jirf path-tracer-lwp3 path-tracer-hecg` — code done.
+3. `bd close path-tracer-fj1a path-tracer-emsz` — already tested, no code needed.
+4. Write unit tests: eu65 (GR integrator), fgzb (VolumeIntegrator).
+5. Regenerate golden images: T10.4/T10.5 PPM format mismatch.
 
-### Remaining Open Issues
+**Then (scattering viz project):**
+1. `bd update path-tracer-06zv --status=in_progress` — start epic.
+2. Start `vkhv`: write `docs/scattering_physics.md` with all equations + textbook refs.
+3. Follow the DAG from there.
+
 ```bash
-bd ready           # ~18 unblocked issues
+bd ready           # Shows unblocked issues
+bd blocked         # Shows dependency chain
 bd stats           # Project health
 ```
 
