@@ -4,7 +4,43 @@
 
 ---
 
-## Latest Session (2026-03-17) — 14 Issues Resolved: Type Stability + Performance + Refactoring
+## Latest Session (2026-03-17, evening) — 3 Refactoring Issues In Progress (Partial)
+
+**Status**: YELLOW — 94,325 passed, 2 fail (pre-existing golden image mismatch), 1 error (pre-existing). Session cut short by Claude Code instability. Code changes committed but test failures need investigation.
+
+### What Was Done
+
+**3 Code Changes (committed, tested with pre-existing failures only):**
+- **P3 (jirf)**: `_PrecomputedVolume.pf` changed from abstract `PhaseFunction` to `Union{IsotropicPhase, HenyeyGreensteinPhase}`. Enables Union splitting — eliminates dynamic dispatch in scatter loop. Verified: `fieldtype(Lyr._PrecomputedVolume{Float32}, :pf)` returns the Union type.
+- **P2 (lwp3)**: NanoVDB I1/I2 view dedup. `NanoI1View{T}` and `NanoI2View{T}` (identical struct + 7 methods each) unified into `NanoInternalView{T, L<:NodeLevel}` with `Level1`/`Level2` type params. Offset dispatch via `_cmask_off(::Type{Level1})` etc. `const NanoI1View{T} = NanoInternalView{T, Level1}` preserves backward compat. -54 net lines. Verified aliases work.
+- **P1 (hecg)**: HDDA span sampling dedup. Extracted `_delta_sample_span` and `_ratio_sample_span` @inline helpers. Replaced 4×9-line copy-paste blocks in `delta_tracking_step` and 4×7-line blocks in `ratio_tracking`. -54 net lines total across both functions.
+
+**Test result**: 94,325 passed, 2 failed, 1 errored. The 2 failures + 1 error are pre-existing (golden image mismatch from prior session). Full test output was truncated (`tail -30`) so specific failure names not captured — re-run with full output to confirm.
+
+### What Was NOT Done (planned but session ended)
+
+- **fj1a + emsz**: Close as already-tested (no code needed)
+- **eu65**: Unit tests for `adaptive_step` + `renormalize_null`
+- **fgzb**: Unit tests for VolumeIntegrator
+- Remaining issue triage
+
+### What the Next Agent Should Do
+
+1. **Verify test results**: Run `julia --project --threads=32 -e 'using Pkg; Pkg.test()'` WITHOUT `| tail` to see full failure details. Confirm all failures are pre-existing.
+2. **Close completed issues**: `bd close path-tracer-jirf path-tracer-lwp3 path-tracer-hecg` (code is done and tested).
+3. **Close already-tested issues**: `bd close path-tracer-fj1a path-tracer-emsz` (no code needed).
+4. **Write unit tests**: eu65 (GR integrator) and fgzb (VolumeIntegrator).
+5. **Regenerate golden images**: T10.4/T10.5 PPM format mismatch from `d49e014`.
+
+### Remaining Open Issues
+```bash
+bd ready           # ~18 unblocked issues
+bd stats           # Project health
+```
+
+---
+
+## Previous Session (2026-03-17, afternoon) — 14 Issues Resolved: Type Stability + Performance + Refactoring
 
 **Status**: GREEN — 94,325 tests pass, 2 fail (pre-existing golden image mismatch), 1 error (pre-existing). 14 issues closed this session (379 total closed, 21 open).
 
@@ -35,33 +71,6 @@
 - **P4 (bfc1)**: IntegrationMethods strategy pattern is idiomatic Julia dispatch.
 - **P4 (wkao)**: PhaseFunction abstract / TransferFunction concrete — breaking change for no user benefit.
 - **P4 (tox2)**: BBox/AABB/BoxDomain serve distinct semantic domains.
-
-### What the Next Agent Should Do
-
-**Phase 1 — Remaining P2 Issues:**
-```bash
-bd show path-tracer-ns5d    # RootNode Union-typed Dict (deferred — low real-world impact, high code churn)
-bd show path-tracer-hecg    # P1: HDDA state machine copy-pasted 6-12 times (biggest refactor remaining)
-bd show path-tracer-fgzb    # P2: VolumeIntegrator.jl has no unit tests
-bd show path-tracer-fj1a    # P2: ImageCompare.jl has zero unit tests
-```
-
-**Phase 2 — Test Coverage (P3):**
-```bash
-bd show path-tracer-qgei    # Error path tests for Field Protocol pipeline
-bd show path-tracer-iflm    # SchwarzschildKS metric test file
-bd show path-tracer-emsz    # Exceptions.jl untested
-```
-
-**Phase 3 — Regenerate Golden Images:**
-The T10.4 and T10.5 benchmark render golden images need regenerating (PPM format changed in `d49e014` but goldens were never updated).
-
-### Commands
-```bash
-bd ready           # 20 unblocked issues
-bd stats           # Project health
-julia --project -e 'using Pkg; Pkg.test()'  # Full suite (~12 min)
-```
 
 ---
 

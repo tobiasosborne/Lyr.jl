@@ -25,7 +25,7 @@ struct _PrecomputedVolume{T}
     albedo::Float64
     emission_scale::Float64
     tf::TransferFunction
-    pf::PhaseFunction
+    pf::Union{IsotropicPhase, HenyeyGreensteinPhase}
 end
 
 @inline function _precompute_volume(vol::VolumeEntry)
@@ -48,6 +48,49 @@ end
                        vol.material.emission_scale,
                        vol.material.transfer_function,
                        vol.material.phase_function)
+end
+
+# ============================================================================
+# Shared span-sampling inner loops (delta + ratio tracking)
+# ============================================================================
+#
+# Extracted from the HDDA state machine to eliminate copy-paste across 8 sites.
+# Must be @inline for zero overhead — these run millions of times per frame.
+
+"""
+Sample a span [t, span_end] via delta tracking. Returns `(t_new, event)` where
+event is `:scattered`, `:absorbed`, or `:none` (escaped span without collision).
+"""
+@inline function _delta_sample_span(ray::Ray, acc::NanoValueAccessor, t::Float64,
+                                    span_end::Float64, inv_sigma::Float64,
+                                    accept_scale::Float64, albedo::Float64, rng)
+    while t < span_end
+        t += randexp(rng) * inv_sigma
+        t >= span_end && return (t, :none)
+        pos = ray.origin + t * ray.direction
+        density = max(0.0, get_value_trilinear(acc, pos))
+        if rand(rng) < min(density * accept_scale, 1.0)
+            return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
+        end
+    end
+    (t, :none)
+end
+
+"""
+Sample a span [t, span_end] via ratio tracking. Returns `(t_new, T_acc, absorbed)`.
+"""
+@inline function _ratio_sample_span(ray::Ray, acc::NanoValueAccessor, t::Float64,
+                                    span_end::Float64, inv_sigma::Float64,
+                                    accept_scale::Float64, T_acc::Float64, rng)
+    while t < span_end
+        t += randexp(rng) * inv_sigma
+        t >= span_end && return (t, T_acc, false)
+        pos = ray.origin + t * ray.direction
+        density = max(0.0, get_value_trilinear(acc, pos))
+        T_acc *= max(0.0, 1.0 - density * accept_scale)
+        T_acc < 1e-10 && return (t, T_acc, true)
+    end
+    (t, T_acc, false)
 end
 
 # ============================================================================
@@ -144,29 +187,18 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
                     i1_ndda = node_dda_init(ray, tmin, i1_origin, Int32(16), Int32(8))
                     i1_t_entry = tmin
 
-                    # Phase 1: DDA through I1 cells
                     while node_dda_inside(i1_ndda)
                         i1_cidx = node_dda_child_index(i1_ndda)
                         i1_active = _buf_mask_is_on(buf, i1_off + _I1_CMASK_OFF, i1_cidx) ||
                                     _buf_mask_is_on(buf, i1_off + _I1_VMASK_OFF, i1_cidx)
 
                         if i1_active
-                            if span_t0 < 0.0
-                                span_t0 = i1_t_entry
-                            end
+                            span_t0 < 0.0 && (span_t0 = i1_t_entry)
                         elseif span_t0 >= 0.0
-                            # Span closed — run delta tracking on [span_t0, i1_t_entry]
                             span_end = min(i1_t_entry, t_exit)
                             t = max(t, span_t0)
-                            while t < span_end
-                                t += randexp(rng) * inv_sigma
-                                t >= span_end && break
-                                pos = ray.origin + t * ray.direction
-                                density = max(0.0, get_value_trilinear(acc, pos))
-                                if rand(rng) < min(density * accept_scale, 1.0)
-                                    return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
-                                end
-                            end
+                            t, ev = _delta_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, albedo, rng)
+                            ev !== :none && return (t, ev)
                             span_t0 = -1.0
                             t >= t_exit && return (t_exit, :escaped)
                         end
@@ -182,15 +214,8 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
                     if span_t0 >= 0.0
                         span_end = min(i2_t_entry, t_exit)
                         t = max(t, span_t0)
-                        while t < span_end
-                            t += randexp(rng) * inv_sigma
-                            t >= span_end && break
-                            pos = ray.origin + t * ray.direction
-                            density = max(0.0, get_value_trilinear(acc, pos))
-                            if rand(rng) < min(density * accept_scale, 1.0)
-                                return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
-                            end
-                        end
+                        t, ev = _delta_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, albedo, rng)
+                        ev !== :none && return (t, ev)
                         span_t0 = -1.0
                         t >= t_exit && return (t_exit, :escaped)
                     end
@@ -198,21 +223,12 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
             else
                 has_tile = _buf_mask_is_on(buf, i2_off + _I2_VMASK_OFF, cidx)
                 if has_tile
-                    if span_t0 < 0.0
-                        span_t0 = i2_t_entry
-                    end
+                    span_t0 < 0.0 && (span_t0 = i2_t_entry)
                 elseif span_t0 >= 0.0
                     span_end = min(i2_t_entry, t_exit)
                     t = max(t, span_t0)
-                    while t < span_end
-                        t += randexp(rng) * inv_sigma
-                        t >= span_end && break
-                        pos = ray.origin + t * ray.direction
-                        density = max(0.0, get_value_trilinear(acc, pos))
-                        if rand(rng) < min(density * accept_scale, 1.0)
-                            return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
-                        end
-                    end
+                    t, ev = _delta_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, albedo, rng)
+                    ev !== :none && return (t, ev)
                     span_t0 = -1.0
                     t >= t_exit && return (t_exit, :escaped)
                 end
@@ -226,15 +242,8 @@ function delta_tracking_step(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAcce
         if span_t0 >= 0.0
             span_end = min(i2_t_entry, t_exit)
             t = max(t, span_t0)
-            while t < span_end
-                t += randexp(rng) * inv_sigma
-                t >= span_end && break
-                pos = ray.origin + t * ray.direction
-                density = max(0.0, get_value_trilinear(acc, pos))
-                if rand(rng) < min(density * accept_scale, 1.0)
-                    return rand(rng) < albedo ? (t, :scattered) : (t, :absorbed)
-                end
-            end
+            t, ev = _delta_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, albedo, rng)
+            ev !== :none && return (t, ev)
             span_t0 = -1.0
             t >= t_exit && return (t_exit, :escaped)
         end
@@ -346,14 +355,8 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                         elseif span_t0 >= 0.0
                             span_end = min(i1_t_entry, t1)
                             t = max(t, span_t0)
-                            while t < span_end
-                                t += randexp(rng) * inv_sigma
-                                t >= span_end && break
-                                pos = ray.origin + t * ray.direction
-                                density = max(0.0, get_value_trilinear(acc, pos))
-                                T_acc *= max(0.0, 1.0 - density * accept_scale)
-                                T_acc < 1e-10 && return 0.0
-                            end
+                            t, T_acc, absorbed = _ratio_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, T_acc, rng)
+                            absorbed && return 0.0
                             span_t0 = -1.0
                         end
 
@@ -368,14 +371,8 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                     if span_t0 >= 0.0
                         span_end = min(i2_t_entry, t1)
                         t = max(t, span_t0)
-                        while t < span_end
-                            t += randexp(rng) * inv_sigma
-                            t >= span_end && break
-                            pos = ray.origin + t * ray.direction
-                            density = max(0.0, get_value_trilinear(acc, pos))
-                            T_acc *= max(0.0, 1.0 - density * accept_scale)
-                            T_acc < 1e-10 && return 0.0
-                        end
+                        t, T_acc, absorbed = _ratio_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, T_acc, rng)
+                        absorbed && return 0.0
                         span_t0 = -1.0
                     end
                 end
@@ -386,14 +383,8 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
                 elseif span_t0 >= 0.0
                     span_end = min(i2_t_entry, t1)
                     t = max(t, span_t0)
-                    while t < span_end
-                        t += randexp(rng) * inv_sigma
-                        t >= span_end && break
-                        pos = ray.origin + t * ray.direction
-                        density = max(0.0, get_value_trilinear(acc, pos))
-                        T_acc *= max(0.0, 1.0 - density * accept_scale)
-                        T_acc < 1e-10 && return 0.0
-                    end
+                    t, T_acc, absorbed = _ratio_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, T_acc, rng)
+                    absorbed && return 0.0
                     span_t0 = -1.0
                 end
             end
@@ -405,14 +396,8 @@ function ratio_tracking(ray::Ray, nanogrid::NanoGrid{T}, acc::NanoValueAccessor,
         if span_t0 >= 0.0
             span_end = min(i2_t_entry, t1)
             t = max(t, span_t0)
-            while t < span_end
-                t += randexp(rng) * inv_sigma
-                t >= span_end && break
-                pos = ray.origin + t * ray.direction
-                density = max(0.0, get_value_trilinear(acc, pos))
-                T_acc *= max(0.0, 1.0 - density * accept_scale)
-                T_acc < 1e-10 && return 0.0
-            end
+            t, T_acc, absorbed = _ratio_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, T_acc, rng)
+            absorbed && return 0.0
             span_t0 = -1.0
         end
     end

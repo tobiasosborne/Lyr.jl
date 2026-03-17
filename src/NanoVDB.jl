@@ -246,27 +246,26 @@ end
     nano_get_value(v, leaf_offset(c))
 end
 
-"""
-    NanoI1View{T}
+# ── Node level types for parameterized internal views ──
+abstract type NodeLevel end
+struct Level1 <: NodeLevel end  # I1: 16³, 64-word masks
+struct Level2 <: NodeLevel end  # I2: 32³, 512-word masks
 
-View into an Internal1 node in the NanoGrid buffer.
-
-Layout at `offset`:
-  +0:    origin         Coord    (12B)
-  +12:   child_mask     64×UInt64 (512B)
-  +524:  child_prefix   64×UInt32 (256B)
-  +780:  value_mask     64×UInt64 (512B)
-  +1292: value_prefix   64×UInt32 (256B)
-  +1548: child_count    UInt32   (4B)
-  +1552: tile_count     UInt32   (4B)
-  +1556: child_offsets  child_count×UInt32
-  +1556+child_count*4: tile_values  tile_count×T
 """
-struct NanoI1View{T}
+    NanoInternalView{T, L<:NodeLevel}
+
+Parameterized view into an internal node (I1 or I2) in the NanoGrid buffer.
+Level1 = 64-word masks (I1), Level2 = 512-word masks (I2).
+"""
+struct NanoInternalView{T, L<:NodeLevel}
     buf::Vector{UInt8}
     offset::Int
 end
 
+const NanoI1View{T} = NanoInternalView{T, Level1}
+const NanoI2View{T} = NanoInternalView{T, Level2}
+
+# ── I1 offset constants (64-word masks) ──
 const _I1_CMASK_OFF = 12
 const _I1_CPREFIX_OFF = 12 + 64 * 8         # 524
 const _I1_VMASK_OFF = 12 + 64 * 8 + 64 * 4  # 780
@@ -275,62 +274,7 @@ const _I1_CHILDCOUNT_OFF = _I1_VPREFIX_OFF + 64 * 4  # 1548
 const _I1_TILECOUNT_OFF = _I1_CHILDCOUNT_OFF + 4  # 1552
 const _I1_DATA_OFF = _I1_TILECOUNT_OFF + 4  # 1556
 
-@inline function nano_origin(v::NanoI1View)::Coord
-    _buf_load_coord(v.buf, v.offset)
-end
-
-@inline function nano_child_count(v::NanoI1View)::Int
-    Int(_buf_load(UInt32, v.buf, v.offset + _I1_CHILDCOUNT_OFF))
-end
-
-@inline function nano_tile_count(v::NanoI1View)::Int
-    Int(_buf_load(UInt32, v.buf, v.offset + _I1_TILECOUNT_OFF))
-end
-
-@inline function nano_has_child(v::NanoI1View, idx::Int)::Bool
-    _buf_mask_is_on(v.buf, v.offset + _I1_CMASK_OFF, idx)
-end
-
-@inline function nano_has_tile(v::NanoI1View, idx::Int)::Bool
-    !nano_has_child(v, idx) &&
-    _buf_mask_is_on(v.buf, v.offset + _I1_VMASK_OFF, idx)
-end
-
-@inline function nano_child_offset(v::NanoI1View, idx::Int)::Int
-    table_idx = _buf_count_on_before(v.buf, v.offset + _I1_CMASK_OFF,
-                                     v.offset + _I1_CPREFIX_OFF, idx)
-    Int(_buf_load(UInt32, v.buf, v.offset + _I1_DATA_OFF + table_idx * 4))
-end
-
-@inline function nano_tile_value(v::NanoI1View{T}, idx::Int)::T where T
-    cc = nano_child_count(v)
-    tile_idx = _buf_count_on_before(v.buf, v.offset + _I1_VMASK_OFF,
-                                    v.offset + _I1_VPREFIX_OFF, idx)
-    tile_data_pos = v.offset + _I1_DATA_OFF + cc * 4
-    _buf_load(T, v.buf, tile_data_pos + tile_idx * sizeof(T))
-end
-
-"""
-    NanoI2View{T}
-
-View into an Internal2 node in the NanoGrid buffer.
-
-Layout at `offset`:
-  +0:    origin          Coord     (12B)
-  +12:   child_mask      512×UInt64 (4096B)
-  +4108: child_prefix    512×UInt32 (2048B)
-  +6156: value_mask      512×UInt64 (4096B)
-  +10252: value_prefix   512×UInt32 (2048B)
-  +12300: child_count    UInt32    (4B)
-  +12304: tile_count     UInt32    (4B)
-  +12308: child_offsets  child_count×UInt32
-  +12308+child_count*4: tile_values  tile_count×T
-"""
-struct NanoI2View{T}
-    buf::Vector{UInt8}
-    offset::Int
-end
-
+# ── I2 offset constants (512-word masks) ──
 const _I2_CMASK_OFF = 12
 const _I2_CPREFIX_OFF = 12 + 512 * 8          # 4108
 const _I2_VMASK_OFF = 12 + 512 * 8 + 512 * 4  # 6156
@@ -339,38 +283,55 @@ const _I2_CHILDCOUNT_OFF = _I2_VPREFIX_OFF + 512 * 4  # 12300
 const _I2_TILECOUNT_OFF = _I2_CHILDCOUNT_OFF + 4  # 12304
 const _I2_DATA_OFF = _I2_TILECOUNT_OFF + 4  # 12308
 
-@inline function nano_origin(v::NanoI2View)::Coord
+# ── Level-dispatched offset accessors ──
+@inline _cmask_off(::Type{Level1}) = _I1_CMASK_OFF
+@inline _cmask_off(::Type{Level2}) = _I2_CMASK_OFF
+@inline _cprefix_off(::Type{Level1}) = _I1_CPREFIX_OFF
+@inline _cprefix_off(::Type{Level2}) = _I2_CPREFIX_OFF
+@inline _vmask_off(::Type{Level1}) = _I1_VMASK_OFF
+@inline _vmask_off(::Type{Level2}) = _I2_VMASK_OFF
+@inline _vprefix_off(::Type{Level1}) = _I1_VPREFIX_OFF
+@inline _vprefix_off(::Type{Level2}) = _I2_VPREFIX_OFF
+@inline _childcount_off(::Type{Level1}) = _I1_CHILDCOUNT_OFF
+@inline _childcount_off(::Type{Level2}) = _I2_CHILDCOUNT_OFF
+@inline _tilecount_off(::Type{Level1}) = _I1_TILECOUNT_OFF
+@inline _tilecount_off(::Type{Level2}) = _I2_TILECOUNT_OFF
+@inline _data_off(::Type{Level1}) = _I1_DATA_OFF
+@inline _data_off(::Type{Level2}) = _I2_DATA_OFF
+
+# ── Unified methods for NanoInternalView{T, L} ──
+@inline function nano_origin(v::NanoInternalView)::Coord
     _buf_load_coord(v.buf, v.offset)
 end
 
-@inline function nano_child_count(v::NanoI2View)::Int
-    Int(_buf_load(UInt32, v.buf, v.offset + _I2_CHILDCOUNT_OFF))
+@inline function nano_child_count(v::NanoInternalView{T, L})::Int where {T, L}
+    Int(_buf_load(UInt32, v.buf, v.offset + _childcount_off(L)))
 end
 
-@inline function nano_tile_count(v::NanoI2View)::Int
-    Int(_buf_load(UInt32, v.buf, v.offset + _I2_TILECOUNT_OFF))
+@inline function nano_tile_count(v::NanoInternalView{T, L})::Int where {T, L}
+    Int(_buf_load(UInt32, v.buf, v.offset + _tilecount_off(L)))
 end
 
-@inline function nano_has_child(v::NanoI2View, idx::Int)::Bool
-    _buf_mask_is_on(v.buf, v.offset + _I2_CMASK_OFF, idx)
+@inline function nano_has_child(v::NanoInternalView{T, L}, idx::Int)::Bool where {T, L}
+    _buf_mask_is_on(v.buf, v.offset + _cmask_off(L), idx)
 end
 
-@inline function nano_has_tile(v::NanoI2View, idx::Int)::Bool
+@inline function nano_has_tile(v::NanoInternalView{T, L}, idx::Int)::Bool where {T, L}
     !nano_has_child(v, idx) &&
-    _buf_mask_is_on(v.buf, v.offset + _I2_VMASK_OFF, idx)
+    _buf_mask_is_on(v.buf, v.offset + _vmask_off(L), idx)
 end
 
-@inline function nano_child_offset(v::NanoI2View, idx::Int)::Int
-    table_idx = _buf_count_on_before(v.buf, v.offset + _I2_CMASK_OFF,
-                                     v.offset + _I2_CPREFIX_OFF, idx)
-    Int(_buf_load(UInt32, v.buf, v.offset + _I2_DATA_OFF + table_idx * 4))
+@inline function nano_child_offset(v::NanoInternalView{T, L}, idx::Int)::Int where {T, L}
+    table_idx = _buf_count_on_before(v.buf, v.offset + _cmask_off(L),
+                                     v.offset + _cprefix_off(L), idx)
+    Int(_buf_load(UInt32, v.buf, v.offset + _data_off(L) + table_idx * 4))
 end
 
-@inline function nano_tile_value(v::NanoI2View{T}, idx::Int)::T where T
+@inline function nano_tile_value(v::NanoInternalView{T, L}, idx::Int)::T where {T, L}
     cc = nano_child_count(v)
-    tile_idx = _buf_count_on_before(v.buf, v.offset + _I2_VMASK_OFF,
-                                    v.offset + _I2_VPREFIX_OFF, idx)
-    tile_data_pos = v.offset + _I2_DATA_OFF + cc * 4
+    tile_idx = _buf_count_on_before(v.buf, v.offset + _vmask_off(L),
+                                    v.offset + _vprefix_off(L), idx)
+    tile_data_pos = v.offset + _data_off(L) + cc * 4
     _buf_load(T, v.buf, tile_data_pos + tile_idx * sizeof(T))
 end
 
