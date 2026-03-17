@@ -250,365 +250,202 @@ function active_bounding_box(tree::Tree{T})::Union{BBox, Nothing} where T
     min_coord === nothing ? nothing : BBox(min_coord, max_coord)
 end
 
-"""
-    ActiveVoxelsIterator{T}
+# =============================================================================
+# Shared tree iteration helpers
+# =============================================================================
 
-Iterator over active voxels in a tree. True lazy iteration - traverses tree on demand
-without collecting voxels upfront. Memory usage is O(1) regardless of voxel count.
-"""
-struct ActiveVoxelsIterator{T}
-    tree::Tree{T}
+"""Convert leaf-local voxel offset (0:511) to world coordinate."""
+@inline function _offset_to_coord(origin::Coord, offset::Int)
+    Coord(origin.x + Int32((offset >> 6) & 7),
+          origin.y + Int32((offset >> 3) & 7),
+          origin.z + Int32(offset & 7))
+end
+
+"""Collect root pairs for iteration. Returns empty vector for empty trees."""
+@inline function _collect_root_pairs(tree::Tree{T}) where T
+    collect(tree.table)
 end
 
 """
-    active_voxels(tree::Tree{T})
-
-Return an iterator over all active voxels as (Coord, T) pairs.
+Advance through tree to the next leaf node, starting from the given position.
+Returns `(leaf, root_idx, i2_idx, next_i1_idx)` or `nothing`.
 """
-active_voxels(tree::Tree{T}) where T = ActiveVoxelsIterator{T}(tree)
-
-Base.IteratorSize(::Type{ActiveVoxelsIterator{T}}) where T = Base.SizeUnknown()
-Base.eltype(::Type{ActiveVoxelsIterator{T}}) where T = Tuple{Coord, T}
-
-# State for lazy tree traversal - tracks position at each level
-# State tuple: (root_pairs, root_idx, i2_idx, i1_idx, leaf_mask_state)
-# where indices are into the respective tables, and leaf_mask_state is for on_indices
-
-function Base.iterate(it::ActiveVoxelsIterator{T}, state=nothing) where T
-    if state === nothing
-        # Initialize: collect root entries (typically very few - O(1) to O(10))
-        root_pairs = collect(it.tree.table)
-        isempty(root_pairs) && return nothing
-        # Start with first root entry, first I2 child, first I1 child, first voxel
-        return _advance_voxels(root_pairs, 1, 1, 1, nothing)
-    else
-        root_pairs, root_idx, i2_idx, i1_idx, leaf_state = state
-        return _advance_voxels(root_pairs, root_idx, i2_idx, i1_idx, leaf_state)
-    end
-end
-
-# Advance to next voxel, handling all level transitions
-function _advance_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
-                         root_idx::Int, i2_idx::Int, i1_idx::Int,
-                         leaf_state) where T
+function _next_leaf(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
+                    root_idx::Int, i2_idx::Int, i1_idx::Int) where T
     while root_idx <= length(root_pairs)
         entry = root_pairs[root_idx].second
-
-        # Skip tiles at root level (TODO: could iterate tile voxels if needed)
         if entry isa Tile{T}
-            root_idx += 1
-            i2_idx = 1
-            i1_idx = 1
-            leaf_state = nothing
-            continue
+            root_idx += 1; i2_idx = 1; i1_idx = 1; continue
         end
-
         node2 = entry::InternalNode2{T}
-        n_i2_children = length(node2.children)
-
-        while i2_idx <= n_i2_children
+        while i2_idx <= length(node2.children)
             node1 = node2.children[i2_idx]
-            n_i1_children = length(node1.children)
-
-            while i1_idx <= n_i1_children
-                leaf = node1.children[i1_idx]
-
-                # Iterate voxels in this leaf
-                leaf_iter = on_indices(leaf.value_mask)
-                iter_result = leaf_state === nothing ? iterate(leaf_iter) : iterate(leaf_iter, leaf_state)
-
-                if iter_result !== nothing
-                    offset, next_leaf_state = iter_result
-                    # Compute coordinate from leaf origin + offset (OpenVDB: x*64 + y*8 + z)
-                    lz = offset & 7
-                    ly = (offset >> 3) & 7
-                    lx = (offset >> 6) & 7
-                    c = Coord(leaf.origin.x + Int32(lx),
-                              leaf.origin.y + Int32(ly),
-                              leaf.origin.z + Int32(lz))
-                    val = leaf.values[offset + 1]
-                    return ((c, val), (root_pairs, root_idx, i2_idx, i1_idx, next_leaf_state))
-                end
-
-                # Move to next leaf
-                i1_idx += 1
-                leaf_state = nothing
+            if i1_idx <= length(node1.children)
+                return (node1.children[i1_idx], root_idx, i2_idx, i1_idx + 1)
             end
-
-            # Move to next Internal1
-            i2_idx += 1
-            i1_idx = 1
-            leaf_state = nothing
+            i2_idx += 1; i1_idx = 1
         end
-
-        # Move to next root entry
-        root_idx += 1
-        i2_idx = 1
-        i1_idx = 1
-        leaf_state = nothing
+        root_idx += 1; i2_idx = 1; i1_idx = 1
     end
-
     nothing
 end
 
-"""
-    LeavesIterator{T}
+# =============================================================================
+# Leaves Iterator
+# =============================================================================
 
-Iterator over leaf nodes in a tree. True lazy iteration - traverses tree on demand
-without collecting leaves upfront. Memory usage is O(1) regardless of leaf count.
-"""
 struct LeavesIterator{T}
     tree::Tree{T}
 end
 
-"""
-    leaves(tree::Tree{T})
-
-Return an iterator over all leaf nodes.
-"""
+"""    leaves(tree) — Iterator over all leaf nodes."""
 leaves(tree::Tree{T}) where T = LeavesIterator{T}(tree)
 
 Base.IteratorSize(::Type{LeavesIterator{T}}) where T = Base.SizeUnknown()
 Base.eltype(::Type{LeavesIterator{T}}) where T = LeafNode{T}
 
-# State tuple: (root_pairs, root_idx, i2_idx, i1_idx)
 function Base.iterate(it::LeavesIterator{T}, state=nothing) where T
     if state === nothing
-        root_pairs = collect(it.tree.table)
+        root_pairs = _collect_root_pairs(it.tree)
         isempty(root_pairs) && return nothing
-        return _advance_leaves(root_pairs, 1, 1, 1)
+        result = _next_leaf(root_pairs, 1, 1, 1)
     else
         root_pairs, root_idx, i2_idx, i1_idx = state
-        return _advance_leaves(root_pairs, root_idx, i2_idx, i1_idx)
+        result = _next_leaf(root_pairs, root_idx, i2_idx, i1_idx)
     end
-end
-
-function _advance_leaves(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
-                         root_idx::Int, i2_idx::Int, i1_idx::Int) where T
-    while root_idx <= length(root_pairs)
-        entry = root_pairs[root_idx].second
-
-        if entry isa Tile{T}
-            root_idx += 1
-            i2_idx = 1
-            i1_idx = 1
-            continue
-        end
-
-        node2 = entry::InternalNode2{T}
-        n_i2_children = length(node2.children)
-
-        while i2_idx <= n_i2_children
-            node1 = node2.children[i2_idx]
-            n_i1_children = length(node1.children)
-
-            if i1_idx <= n_i1_children
-                leaf = node1.children[i1_idx]
-                return (leaf, (root_pairs, root_idx, i2_idx, i1_idx + 1))
-            end
-
-            i2_idx += 1
-            i1_idx = 1
-        end
-
-        root_idx += 1
-        i2_idx = 1
-        i1_idx = 1
-    end
-
-    nothing
+    result === nothing && return nothing
+    leaf, ri, i2i, i1i = result
+    return (leaf, (root_pairs, ri, i2i, i1i))
 end
 
 # =============================================================================
-# Inactive Voxels Iterator
+# Mask-filtered Voxel Iterator (active / inactive)
 # =============================================================================
 
-"""
-    InactiveVoxelsIterator{T}
-
-Iterator over inactive voxels in a tree. True lazy iteration - traverses tree on demand
-without collecting voxels upfront. Memory usage is O(1) regardless of voxel count.
-
-Yields `(Coord, T)` pairs for voxels where the value_mask bit is OFF.
-"""
-struct InactiveVoxelsIterator{T}
+"""Voxel iterator that yields (Coord, T) for voxels matching a mask filter."""
+struct MaskVoxelIterator{T, F}
     tree::Tree{T}
+    mask_fn::F   # on_indices or off_indices
 end
 
-"""
-    inactive_voxels(tree::Tree{T})
+"""    active_voxels(tree) — Iterator over active voxels as (Coord, T) pairs."""
+active_voxels(tree::Tree{T}) where T = MaskVoxelIterator{T, typeof(on_indices)}(tree, on_indices)
 
-Return an iterator over all inactive voxels as (Coord, T) pairs.
-"""
-inactive_voxels(tree::Tree{T}) where T = InactiveVoxelsIterator{T}(tree)
+"""    inactive_voxels(tree) — Iterator over inactive voxels as (Coord, T) pairs."""
+inactive_voxels(tree::Tree{T}) where T = MaskVoxelIterator{T, typeof(off_indices)}(tree, off_indices)
 
-Base.IteratorSize(::Type{InactiveVoxelsIterator{T}}) where T = Base.SizeUnknown()
-Base.eltype(::Type{InactiveVoxelsIterator{T}}) where T = Tuple{Coord, T}
+Base.IteratorSize(::Type{<:MaskVoxelIterator}) = Base.SizeUnknown()
+Base.eltype(::Type{MaskVoxelIterator{T, F}}) where {T, F} = Tuple{Coord, T}
 
-function Base.iterate(it::InactiveVoxelsIterator{T}, state=nothing) where T
+# State: (root_pairs, root_idx, i2_idx, i1_idx, leaf_state, mask_fn)
+function Base.iterate(it::MaskVoxelIterator{T, F}, state=nothing) where {T, F}
     if state === nothing
-        root_pairs = collect(it.tree.table)
+        root_pairs = _collect_root_pairs(it.tree)
         isempty(root_pairs) && return nothing
-        return _advance_inactive_voxels(root_pairs, 1, 1, 1, nothing)
+        return _advance_mask_voxels(root_pairs, 1, 1, 1, nothing, it.mask_fn)
     else
-        root_pairs, root_idx, i2_idx, i1_idx, leaf_state = state
-        return _advance_inactive_voxels(root_pairs, root_idx, i2_idx, i1_idx, leaf_state)
+        root_pairs, ri, i2i, i1i, ls = state
+        return _advance_mask_voxels(root_pairs, ri, i2i, i1i, ls, it.mask_fn)
     end
 end
 
-function _advance_inactive_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
-                                  root_idx::Int, i2_idx::Int, i1_idx::Int,
-                                  leaf_state) where T
-    while root_idx <= length(root_pairs)
-        entry = root_pairs[root_idx].second
-
-        if entry isa Tile{T}
-            root_idx += 1
-            i2_idx = 1
-            i1_idx = 1
-            leaf_state = nothing
-            continue
-        end
-
-        node2 = entry::InternalNode2{T}
-        n_i2_children = length(node2.children)
-
-        while i2_idx <= n_i2_children
-            node1 = node2.children[i2_idx]
-            n_i1_children = length(node1.children)
-
-            while i1_idx <= n_i1_children
-                leaf = node1.children[i1_idx]
-
-                # Iterate inactive voxels in this leaf using off_indices
-                leaf_iter = off_indices(leaf.value_mask)
-                iter_result = leaf_state === nothing ? iterate(leaf_iter) : iterate(leaf_iter, leaf_state)
-
-                if iter_result !== nothing
-                    offset, next_leaf_state = iter_result
-                    lz = offset & 7
-                    ly = (offset >> 3) & 7
-                    lx = (offset >> 6) & 7
-                    c = Coord(leaf.origin.x + Int32(lx),
-                              leaf.origin.y + Int32(ly),
-                              leaf.origin.z + Int32(lz))
-                    val = leaf.values[offset + 1]
-                    return ((c, val), (root_pairs, root_idx, i2_idx, i1_idx, next_leaf_state))
-                end
-
-                i1_idx += 1
-                leaf_state = nothing
+function _advance_mask_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
+                              root_idx::Int, i2_idx::Int, i1_idx::Int,
+                              leaf_state, mask_fn) where T
+    while true
+        # Try to get next voxel from current leaf
+        if leaf_state !== nothing
+            # leaf_state is (leaf, mask_iter, mask_state)
+            leaf, mask_iter, mask_state = leaf_state
+            iter_result = iterate(mask_iter, mask_state)
+            if iter_result !== nothing
+                offset, next_ms = iter_result
+                c = _offset_to_coord(leaf.origin, offset)
+                val = leaf.values[offset + 1]
+                return ((c, val), (root_pairs, root_idx, i2_idx, i1_idx, (leaf, mask_iter, next_ms)))
             end
-
-            i2_idx += 1
-            i1_idx = 1
             leaf_state = nothing
         end
 
-        root_idx += 1
-        i2_idx = 1
-        i1_idx = 1
-        leaf_state = nothing
-    end
+        # Advance to next leaf
+        result = _next_leaf(root_pairs, root_idx, i2_idx, i1_idx)
+        result === nothing && return nothing
+        leaf, root_idx, i2_idx, i1_idx = result
 
-    nothing
+        # Start iterating this leaf's mask
+        mask_iter = mask_fn(leaf.value_mask)
+        iter_result = iterate(mask_iter)
+        if iter_result !== nothing
+            offset, next_ms = iter_result
+            c = _offset_to_coord(leaf.origin, offset)
+            val = leaf.values[offset + 1]
+            return ((c, val), (root_pairs, root_idx, i2_idx, i1_idx, (leaf, mask_iter, next_ms)))
+        end
+        # Empty leaf for this filter — continue to next
+    end
 end
+
+# Backward-compatible type aliases
+const ActiveVoxelsIterator{T} = MaskVoxelIterator{T, typeof(on_indices)}
+const InactiveVoxelsIterator{T} = MaskVoxelIterator{T, typeof(off_indices)}
 
 # =============================================================================
 # All Voxels Iterator
 # =============================================================================
 
 """
-    AllVoxelsIterator{T}
-
-Iterator over all voxels (active and inactive) in a tree. True lazy iteration -
-traverses tree on demand without collecting voxels upfront. Memory usage is O(1)
-regardless of voxel count.
-
-Yields `(Coord, T, Bool)` tuples: (coordinate, value, is_active).
+Iterator over all voxels (active and inactive). Yields `(Coord, T, Bool)` tuples.
 """
 struct AllVoxelsIterator{T}
     tree::Tree{T}
 end
 
-"""
-    all_voxels(tree::Tree{T})
-
-Return an iterator over all voxels as (Coord, T, Bool) tuples,
-where the Bool indicates whether the voxel is active.
-"""
+"""    all_voxels(tree) — Iterator over all voxels as (Coord, T, is_active) tuples."""
 all_voxels(tree::Tree{T}) where T = AllVoxelsIterator{T}(tree)
 
 Base.IteratorSize(::Type{AllVoxelsIterator{T}}) where T = Base.SizeUnknown()
 Base.eltype(::Type{AllVoxelsIterator{T}}) where T = Tuple{Coord, T, Bool}
 
-# State tuple: (root_pairs, root_idx, i2_idx, i1_idx, voxel_offset)
-# voxel_offset ranges 0:511 within each leaf
-
+# State: (root_pairs, root_idx, i2_idx, i1_idx, voxel_offset)
 function Base.iterate(it::AllVoxelsIterator{T}, state=nothing) where T
     if state === nothing
-        root_pairs = collect(it.tree.table)
+        root_pairs = _collect_root_pairs(it.tree)
         isempty(root_pairs) && return nothing
         return _advance_all_voxels(root_pairs, 1, 1, 1, 0)
     else
-        root_pairs, root_idx, i2_idx, i1_idx, voxel_offset = state
-        return _advance_all_voxels(root_pairs, root_idx, i2_idx, i1_idx, voxel_offset)
+        root_pairs, ri, i2i, i1i, voff = state
+        return _advance_all_voxels(root_pairs, ri, i2i, i1i, voff)
     end
 end
 
 function _advance_all_voxels(root_pairs::Vector{Pair{Coord, Union{InternalNode2{T}, Tile{T}}}},
                              root_idx::Int, i2_idx::Int, i1_idx::Int,
                              voxel_offset::Int) where T
-    while root_idx <= length(root_pairs)
-        entry = root_pairs[root_idx].second
-
-        if entry isa Tile{T}
-            root_idx += 1
-            i2_idx = 1
-            i1_idx = 1
-            voxel_offset = 0
-            continue
-        end
-
-        node2 = entry::InternalNode2{T}
-        n_i2_children = length(node2.children)
-
-        while i2_idx <= n_i2_children
-            node1 = node2.children[i2_idx]
-            n_i1_children = length(node1.children)
-
-            while i1_idx <= n_i1_children
-                leaf = node1.children[i1_idx]
-
-                if voxel_offset < 512
-                    offset = voxel_offset
-                    lz = offset & 7
-                    ly = (offset >> 3) & 7
-                    lx = (offset >> 6) & 7
-                    c = Coord(leaf.origin.x + Int32(lx),
-                              leaf.origin.y + Int32(ly),
-                              leaf.origin.z + Int32(lz))
-                    val = leaf.values[offset + 1]
-                    active = is_on(leaf.value_mask, offset)
-                    return ((c, val, active), (root_pairs, root_idx, i2_idx, i1_idx, voxel_offset + 1))
-                end
-
-                i1_idx += 1
-                voxel_offset = 0
+    while true
+        # Try current leaf
+        if voxel_offset > 0 && voxel_offset < 512
+            # We're mid-leaf — find the current leaf again
+            result = _next_leaf(root_pairs, root_idx, i2_idx, i1_idx - 1)
+            if result !== nothing
+                leaf = result[1]
+                c = _offset_to_coord(leaf.origin, voxel_offset)
+                val = leaf.values[voxel_offset + 1]
+                active = is_on(leaf.value_mask, voxel_offset)
+                return ((c, val, active), (root_pairs, root_idx, i2_idx, i1_idx, voxel_offset + 1))
             end
-
-            i2_idx += 1
-            i1_idx = 1
-            voxel_offset = 0
         end
 
-        root_idx += 1
-        i2_idx = 1
-        i1_idx = 1
-        voxel_offset = 0
-    end
+        # Advance to next leaf
+        result = _next_leaf(root_pairs, root_idx, i2_idx, i1_idx)
+        result === nothing && return nothing
+        leaf, root_idx, i2_idx, i1_idx = result
 
-    nothing
+        # Emit first voxel (offset 0)
+        c = _offset_to_coord(leaf.origin, 0)
+        val = leaf.values[1]
+        active = is_on(leaf.value_mask, 0)
+        return ((c, val, active), (root_pairs, root_idx, i2_idx, i1_idx, 1))
+    end
 end
 
 # =============================================================================

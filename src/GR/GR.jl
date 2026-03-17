@@ -90,6 +90,7 @@ export VolumetricMatter, ThickDisk, evaluate_density, emission_absorption, disk_
 export horizon_radius, photon_sphere_radius, isco_radius
 
 # Integrator
+export AbstractStepper, RK4, Verlet
 export IntegratorConfig, integrate_geodesic, rk4_step, verlet_step, adaptive_step, renormalize_null
 
 # Camera

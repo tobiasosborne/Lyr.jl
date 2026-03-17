@@ -56,7 +56,7 @@ config = GRRenderConfig(
         h_tolerance = 1e-6,
         r_max = 250.0,
         renorm_interval = 50,
-        stepper = :rk4
+        stepper = RK4()
     ),
     background = (0.0, 0.0, 0.02),
     use_redshift = true,
@@ -109,7 +109,7 @@ config_s = GRRenderConfig(
         h_tolerance = 1e-6,
         r_max = 250.0,
         renorm_interval = 50,
-        stepper = :rk4
+        stepper = RK4()
     ),
     background = (0.0, 0.0, 0.02),
     use_redshift = true,

@@ -143,61 +143,68 @@ const NANO_VERSION = UInt32(1)
 #   65+sizeof(T): leaf_pos     UInt32 (4B)
 # Total header: 68 + sizeof(T) bytes
 
-@inline _header_size(::Type{T}) where T = 68 + sizeof(T)
-
-@inline function _header_background_pos(::Type{T}) where T
-    13  # background starts at byte 13
-end
-
-@inline function _header_bbox_min_pos(::Type{T}) where T
-    13 + sizeof(T)
-end
+# Header layout: each field derived from previous — single source of truth.
+# Positions are 1-indexed byte offsets into the buffer.
+#   [1] magic(4) [5] version(4) [9] value_size(4) [13] background(sizeof(T))
+#   bbox_min(12) bbox_max(12) root_count(4) i2_count(4) i1_count(4) leaf_count(4)
+#   root_pos(4) i2_pos(4) i1_pos(4) leaf_pos(4)
+@inline _header_background_pos(::Type{T}) where T = 13
+@inline _header_bbox_min_pos(::Type{T})   where T = _header_background_pos(T) + sizeof(T)
+@inline _header_bbox_max_pos(::Type{T})   where T = _header_bbox_min_pos(T) + 12
+@inline _header_root_count_pos(::Type{T}) where T = _header_bbox_max_pos(T) + 12
+@inline _header_i2_count_pos(::Type{T})   where T = _header_root_count_pos(T) + 4
+@inline _header_i1_count_pos(::Type{T})   where T = _header_i2_count_pos(T) + 4
+@inline _header_leaf_count_pos(::Type{T}) where T = _header_i1_count_pos(T) + 4
+@inline _header_root_pos_pos(::Type{T})   where T = _header_leaf_count_pos(T) + 4
+@inline _header_i2_pos_pos(::Type{T})     where T = _header_root_pos_pos(T) + 4
+@inline _header_i1_pos_pos(::Type{T})     where T = _header_i2_pos_pos(T) + 4
+@inline _header_leaf_pos_pos(::Type{T})   where T = _header_i1_pos_pos(T) + 4
+@inline _header_size(::Type{T})           where T = _header_leaf_pos_pos(T) + 3  # last byte of leaf_pos UInt32
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Header accessors
 # ──────────────────────────────────────────────────────────────────────────────
 
 function nano_background(grid::NanoGrid{T})::T where T
-    _buf_load(T, grid.buffer, 13)
+    _buf_load(T, grid.buffer, _header_background_pos(T))
 end
 
 function nano_bbox(grid::NanoGrid{T})::BBox where T
-    base = 13 + sizeof(T)
-    bmin = _buf_load_coord(grid.buffer, base)
-    bmax = _buf_load_coord(grid.buffer, base + 12)
+    bmin = _buf_load_coord(grid.buffer, _header_bbox_min_pos(T))
+    bmax = _buf_load_coord(grid.buffer, _header_bbox_max_pos(T))
     BBox(bmin, bmax)
 end
 
 function nano_root_count(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 37 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_root_count_pos(T)))
 end
 
 function nano_i2_count(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 41 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_i2_count_pos(T)))
 end
 
 function nano_i1_count(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 45 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_i1_count_pos(T)))
 end
 
 function nano_leaf_count(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 49 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_leaf_count_pos(T)))
 end
 
 function _nano_root_pos(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 53 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_root_pos_pos(T)))
 end
 
 function _nano_i2_pos(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 57 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_i2_pos_pos(T)))
 end
 
 function _nano_i1_pos(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 61 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_i1_pos_pos(T)))
 end
 
 function _nano_leaf_pos(grid::NanoGrid{T})::Int where T
-    Int(_buf_load(UInt32, grid.buffer, 65 + sizeof(T)))
+    Int(_buf_load(UInt32, grid.buffer, _header_leaf_pos_pos(T)))
 end
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -514,7 +521,7 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
     _buf_store!(buf, 1, NANO_MAGIC)
     _buf_store!(buf, 5, NANO_VERSION)
     _buf_store!(buf, 9, UInt32(sizeof(T)))
-    _buf_store!(buf, 13, tree.background)
+    _buf_store!(buf, _header_background_pos(T), tree.background)
 
     # BBox — compute from leaf origins
     if !isempty(leaf_nodes)
@@ -528,17 +535,17 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
         bmin = Coord(Int32(0), Int32(0), Int32(0))
         bmax = Coord(Int32(0), Int32(0), Int32(0))
     end
-    _buf_store_coord!(buf, 13 + sizeof(T), bmin)
-    _buf_store_coord!(buf, 25 + sizeof(T), bmax)
+    _buf_store_coord!(buf, _header_bbox_min_pos(T), bmin)
+    _buf_store_coord!(buf, _header_bbox_max_pos(T), bmax)
 
-    _buf_store!(buf, 37 + sizeof(T), UInt32(root_count))
-    _buf_store!(buf, 41 + sizeof(T), UInt32(i2_count))
-    _buf_store!(buf, 45 + sizeof(T), UInt32(i1_count))
-    _buf_store!(buf, 49 + sizeof(T), UInt32(lf_count))
-    _buf_store!(buf, 53 + sizeof(T), UInt32(root_section_pos))
-    _buf_store!(buf, 57 + sizeof(T), UInt32(i2_section_pos))
-    _buf_store!(buf, 61 + sizeof(T), UInt32(i1_section_pos))
-    _buf_store!(buf, 65 + sizeof(T), UInt32(leaf_section_pos))
+    _buf_store!(buf, _header_root_count_pos(T), UInt32(root_count))
+    _buf_store!(buf, _header_i2_count_pos(T),   UInt32(i2_count))
+    _buf_store!(buf, _header_i1_count_pos(T),   UInt32(i1_count))
+    _buf_store!(buf, _header_leaf_count_pos(T),  UInt32(lf_count))
+    _buf_store!(buf, _header_root_pos_pos(T),   UInt32(root_section_pos))
+    _buf_store!(buf, _header_i2_pos_pos(T),     UInt32(i2_section_pos))
+    _buf_store!(buf, _header_i1_pos_pos(T),     UInt32(i1_section_pos))
+    _buf_store!(buf, _header_leaf_pos_pos(T),   UInt32(leaf_section_pos))
 
     # -- Root table --
     wpos = root_section_pos

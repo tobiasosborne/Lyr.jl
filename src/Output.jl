@@ -92,6 +92,39 @@ function auto_exposure(pixels::Matrix{NTuple{3, T}})::Float64 where T <: Abstrac
 end
 
 # ============================================================================
+# PPM output
+# ============================================================================
+
+"""
+    write_ppm(filename::String, pixels::Matrix{NTuple{3, T}})
+
+Write an image to a binary PPM (P6) file.
+
+# Arguments
+- `filename` - Output file path
+- `pixels` - height×width matrix of RGB tuples, channels in [0, 1]
+"""
+function write_ppm(filename::String, pixels::Matrix{NTuple{3, T}}) where T <: AbstractFloat
+    height, width = size(pixels)
+
+    open(filename, "w") do io
+        write(io, "P6\n$width $height\n255\n")
+        buf = Vector{UInt8}(undef, width * 3)
+        for y in 1:height
+            idx = 1
+            @inbounds for x in 1:width
+                r, g, b = pixels[y, x]
+                buf[idx]     = UInt8(clamp(round(Int, r * 255), 0, 255))
+                buf[idx + 1] = UInt8(clamp(round(Int, g * 255), 0, 255))
+                buf[idx + 2] = UInt8(clamp(round(Int, b * 255), 0, 255))
+                idx += 3
+            end
+            write(io, buf)
+        end
+    end
+end
+
+# ============================================================================
 # Denoising filters for Monte Carlo noise
 # ============================================================================
 

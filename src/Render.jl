@@ -140,11 +140,8 @@ end
 """
     render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int; kwargs...)
 
-!!! warning "Deprecated"
-    `render_image` is deprecated. Use `render_volume_image` (Scene-based volume
-    renderer) or `visualize` (one-call field-to-image) instead.
-
-Legacy level-set renderer. Returns a height×width matrix of RGB tuples in [0, 1].
+Surface renderer via sphere-tracing on level-set grids. Returns height×width matrix
+of RGB tuples in [0, 1]. For volumetric rendering, use `render_volume_image` instead.
 """
 function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
                       light_dir::NTuple{3, Float64}=(0.577, 0.577, 0.577),
@@ -153,7 +150,6 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
                       samples_per_pixel::Int=1,
                       gamma::Float64=1.0,
                       seed::UInt64=UInt64(42)) where T <: AbstractFloat
-    Base.depwarn("`render_image` is deprecated, use `render_volume_image` or `visualize` instead.", :render_image)
     aspect = Float64(width) / Float64(height)
     pixels = Matrix{NTuple{3, Float64}}(undef, height, width)
 
@@ -237,36 +233,6 @@ function render_image(grid::Grid{T}, camera::Camera, width::Int, height::Int;
     end
 
     pixels
-end
-
-"""
-    write_ppm(filename::String, pixels::Matrix{NTuple{3, Float64}})
-
-Write an image to a PPM file.
-
-# Arguments
-- `filename` - Output file path
-- `pixels` - height×width matrix of RGB tuples, channels in [0, 1]
-"""
-function write_ppm(filename::String, pixels::Matrix{NTuple{3, T}}) where T <: AbstractFloat
-    height, width = size(pixels)
-
-    open(filename, "w") do io
-        # P6 binary format: ~4x smaller, 10-100x faster than P3 text
-        write(io, "P6\n$width $height\n255\n")
-        buf = Vector{UInt8}(undef, width * 3)
-        for y in 1:height
-            idx = 1
-            @inbounds for x in 1:width
-                r, g, b = pixels[y, x]
-                buf[idx]     = UInt8(clamp(round(Int, r * 255), 0, 255))
-                buf[idx + 1] = UInt8(clamp(round(Int, g * 255), 0, 255))
-                buf[idx + 2] = UInt8(clamp(round(Int, b * 255), 0, 255))
-                idx += 3
-            end
-            write(io, buf)
-        end
-    end
 end
 
 # ============================================================================

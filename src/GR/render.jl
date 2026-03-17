@@ -55,8 +55,8 @@ Configuration for GR rendering.
 - `use_redshift::Bool` — apply frequency shift to disk emission
 - `use_threads::Bool` — use `Threads.@threads` over rows
 """
-struct GRRenderConfig
-    integrator::IntegratorConfig
+struct GRRenderConfig{S<:AbstractStepper}
+    integrator::IntegratorConfig{S}
     background::NTuple{3, Float64}
     use_redshift::Bool
     use_threads::Bool
@@ -88,7 +88,7 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
 end
 
 """Internal: thin-disk trace with pre-computed initial momentum (for supersampling)."""
-function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
+@fastmath function _trace_pixel_thin_with_p0(cam::GRCamera, config::GRRenderConfig,
                                     disk::Union{ThinDisk, Nothing},
                                     sky::Union{CelestialSphere, Nothing},
                                     p0::SVec4d)::NTuple{3, Float64}
@@ -167,7 +167,7 @@ function trace_pixel(cam::GRCamera, config::GRRenderConfig,
 end
 
 """Internal: volumetric trace with pre-computed initial momentum (for supersampling)."""
-function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
+@fastmath function _trace_pixel_with_p0(cam::GRCamera, config::GRRenderConfig,
                                vol::VolumetricMatter,
                                sky::Union{CelestialSphere, Nothing},
                                p0::SVec4d)::NTuple{3, Float64}

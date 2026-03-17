@@ -144,7 +144,7 @@ export read_ppm, image_rmse, image_psnr, image_ssim, image_max_diff
 export save_reference_render, load_reference_render, read_float32_image
 
 # --- Scene setup ---
-export PointLight, DirectionalLight, ConstantEnvironmentLight, VolumeMaterial, VolumeEntry, Scene
+export AbstractLight, PointLight, DirectionalLight, ConstantEnvironmentLight, VolumeMaterial, VolumeEntry, Scene
 
 # --- Phase functions ---
 export IsotropicPhase, HenyeyGreensteinPhase

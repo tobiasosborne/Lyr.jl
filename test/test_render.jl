@@ -99,7 +99,7 @@ using Lyr
     end
 
     @testset "PPM Output" begin
-        @testset "write_ppm creates valid file" begin
+        @testset "write_ppm creates valid P6 binary file" begin
             pixels = [
                 (1.0, 0.0, 0.0) (0.0, 1.0, 0.0);
                 (0.0, 0.0, 1.0) (1.0, 1.0, 1.0)
@@ -110,17 +110,24 @@ using Lyr
 
             @test isfile(tmpfile)
 
-            content = read(tmpfile, String)
-            lines = split(content, '\n')
+            data = read(tmpfile)
+            # P6 binary: header "P6\n2 2\n255\n" then raw RGB bytes
+            header_end = findfirst(UInt8('\n'), data[findfirst(UInt8('\n'), data[findfirst(UInt8('\n'), data) + 1:end]) + findfirst(UInt8('\n'), data):end]) # complex, just find "255\n"
+            # Simpler: parse header lines
+            header_str = String(data[1:min(30, length(data))])
+            @test startswith(header_str, "P6\n2 2\n255\n")
 
-            @test lines[1] == "P3"
-            @test lines[2] == "2 2"  # width height
-            @test lines[3] == "255"
+            # Binary pixel data starts after "P6\n2 2\n255\n" (12 bytes)
+            hdr_len = length("P6\n2 2\n255\n")
+            rgb = data[hdr_len + 1:end]
+            @test length(rgb) == 2 * 2 * 3  # 4 pixels × 3 channels
 
-            # First row: red, green
-            @test strip(lines[4]) == "255 0 0 0 255 0"
-            # Second row: blue, white
-            @test strip(lines[5]) == "0 0 255 255 255 255"
+            # Row 1: red=(255,0,0), green=(0,255,0)
+            @test rgb[1:3] == UInt8[255, 0, 0]
+            @test rgb[4:6] == UInt8[0, 255, 0]
+            # Row 2: blue=(0,0,255), white=(255,255,255)
+            @test rgb[7:9] == UInt8[0, 0, 255]
+            @test rgb[10:12] == UInt8[255, 255, 255]
 
             rm(tmpfile)
         end
@@ -133,11 +140,13 @@ using Lyr
             tmpfile = tempname() * ".ppm"
             write_ppm(tmpfile, pixels)
 
-            content = read(tmpfile, String)
-            lines = split(content, '\n')
-
-            # Clamped values: 1.5->255, -0.5->0, 0.5->128
-            @test occursin("255 0 128", lines[4]) || occursin("255 0 127", lines[4])
+            data = read(tmpfile)
+            hdr_len = length("P6\n1 1\n255\n")
+            rgb = data[hdr_len + 1:end]
+            @test length(rgb) == 3
+            @test rgb[1] == UInt8(255)   # 1.5 clamped to 255
+            @test rgb[2] == UInt8(0)     # -0.5 clamped to 0
+            @test rgb[3] in UInt8[127, 128]  # 0.5 → 127 or 128
 
             rm(tmpfile)
         end

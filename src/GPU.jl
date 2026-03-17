@@ -117,7 +117,7 @@ All arithmetic uses Int32 for GPU compatibility.
 @inline function _gpu_get_value(buf, background::Float32,
                                  cx::Int32, cy::Int32, cz::Int32,
                                  header_T_size::Int32)::Float32
-    # Header positions (Float32 value type → sizeof(T) = 4)
+    # Header positions — must match NanoVDB.jl _header_*_pos chain
     root_count = Int32(_gpu_buf_load(UInt32, buf, Int32(37) + header_T_size))
     root_pos = Int32(_gpu_buf_load(UInt32, buf, Int32(53) + header_T_size))
     entry_sz = Int32(13) + header_T_size  # _root_entry_size

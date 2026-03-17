@@ -174,11 +174,11 @@
         # Coarse step, no renormalization, generous tolerance so neither terminates early
         cfg_rk4 = IntegratorConfig(
             step_size=-0.5, max_steps=2000, h_tolerance=10.0,
-            r_max=100.0, r_min_factor=0.5, stepper=:rk4, renorm_interval=0
+            r_max=100.0, r_min_factor=0.5, stepper=RK4(), renorm_interval=0
         )
         cfg_verlet = IntegratorConfig(
             step_size=-0.5, max_steps=2000, h_tolerance=10.0,
-            r_max=100.0, r_min_factor=0.5, stepper=:verlet, renorm_interval=0
+            r_max=100.0, r_min_factor=0.5, stepper=Verlet(), renorm_interval=0
         )
 
         trace_rk4 = integrate_geodesic(s, initial, cfg_rk4)
@@ -205,7 +205,7 @@
         initial = GeodesicState(x0, p0)
         config = IntegratorConfig(
             step_size=-0.1, max_steps=5000, h_tolerance=1e-6,
-            r_max=100.0, r_min_factor=1.01, stepper=:rk4
+            r_max=100.0, r_min_factor=1.01, stepper=RK4()
         )
         trace = integrate_geodesic(s, initial, config)
 
@@ -219,7 +219,7 @@
         x0 = SVec4d(0.0, 0.0, 0.0, 0.0)
         p0 = SVec4d(-1.0, 1.0, 0.0, 0.0)
         initial = GeodesicState(x0, p0)
-        config = IntegratorConfig(step_size=0.1, max_steps=50, r_max=200.0, stepper=:verlet)
+        config = IntegratorConfig(step_size=0.1, max_steps=50, r_max=200.0, stepper=Verlet())
         trace = integrate_geodesic(m, initial, config)
         @test trace.reason == MAX_STEPS
         @test trace.hamiltonian_max < 1e-10
