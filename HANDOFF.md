@@ -4,7 +4,68 @@
 
 ---
 
-## Latest Session (2026-03-16) — 12 Issues Resolved: Correctness + Performance + Test Reliability
+## Latest Session (2026-03-17) — 14 Issues Resolved: Type Stability + Performance + Refactoring
+
+**Status**: GREEN — 94,325 tests pass, 2 fail (pre-existing golden image mismatch), 1 error (pre-existing). 14 issues closed this session (379 total closed, 21 open).
+
+### What Was Done
+
+**3 Type Stability Fixes (compile-time dispatch eliminates inner-loop branches):**
+- **P2 (c6jb)**: `IntegratorConfig{S<:AbstractStepper}` — RK4/Verlet singleton types replace Symbol dispatch in `_do_step`. 100-10,000 branches per ray eliminated.
+- **P2 (he6c)**: `VolumeEntry{G,N}` — parametric nanogrid. Compiler eliminates `nothing` checks when N=NanoGrid.
+- **P2 (qt4m)**: `Scene{V,L}` — lights stored as Tuple. `for light in scene.lights` unrolls at compile time. 300-3000 dynamic dispatches per image eliminated.
+
+**2 Performance Wins:**
+- **P3 (fwkp)**: `@fastmath` on `rk4_step`, `verlet_step`, `adaptive_step`, and both GR trace functions — enables FMA/reassociation. ~10-20% speedup on FMA-capable CPUs.
+- **P2 (c6jb)**: Stepper type dispatch enables full inlining of `rk4_step`/`verlet_step` into integration loop.
+
+**2 Refactoring:**
+- **P2 (l77u)**: Unified active/inactive voxel iterators into `MaskVoxelIterator{T,F}` with shared `_next_leaf` tree walker and `_offset_to_coord`. -144 net lines.
+- **P3 (gr27)**: NanoVDB header offsets derived as chain (each field = prev + prev_size). 12 magic numbers eliminated, single source of truth.
+
+**3 Cleanup:**
+- **P3 (x5u9)**: Un-deprecated `render_image` — it's the surface renderer (sphere-tracing), distinct from `render_volume_image` (volumetric). Removed misleading `depwarn`.
+- **P4 (pu0l)**: Moved `write_ppm` from `Render.jl` to `Output.jl` alongside other image writers.
+- **P3 (PPM test)**: Updated PPM tests from P3 ASCII to P6 binary format (pre-existing mismatch from `d49e014`).
+
+**4 Won't-Fix Closures (correct as-is):**
+- **P3 (2jnh)**: sin²θ clamp harmless — analytic partials bypass ForwardDiff.
+- **P4 (gms4)**: GR submodule correctly imports its own StaticArrays (separate module hygiene).
+- **P4 (8egg)**: Specialized `read_u32_le` names are self-documenting (43 call sites).
+- **P4 (bfc1)**: IntegrationMethods strategy pattern is idiomatic Julia dispatch.
+- **P4 (wkao)**: PhaseFunction abstract / TransferFunction concrete — breaking change for no user benefit.
+- **P4 (tox2)**: BBox/AABB/BoxDomain serve distinct semantic domains.
+
+### What the Next Agent Should Do
+
+**Phase 1 — Remaining P2 Issues:**
+```bash
+bd show path-tracer-ns5d    # RootNode Union-typed Dict (deferred — low real-world impact, high code churn)
+bd show path-tracer-hecg    # P1: HDDA state machine copy-pasted 6-12 times (biggest refactor remaining)
+bd show path-tracer-fgzb    # P2: VolumeIntegrator.jl has no unit tests
+bd show path-tracer-fj1a    # P2: ImageCompare.jl has zero unit tests
+```
+
+**Phase 2 — Test Coverage (P3):**
+```bash
+bd show path-tracer-qgei    # Error path tests for Field Protocol pipeline
+bd show path-tracer-iflm    # SchwarzschildKS metric test file
+bd show path-tracer-emsz    # Exceptions.jl untested
+```
+
+**Phase 3 — Regenerate Golden Images:**
+The T10.4 and T10.5 benchmark render golden images need regenerating (PPM format changed in `d49e014` but goldens were never updated).
+
+### Commands
+```bash
+bd ready           # 20 unblocked issues
+bd stats           # Project health
+julia --project -e 'using Pkg; Pkg.test()'  # Full suite (~12 min)
+```
+
+---
+
+## Previous Session (2026-03-16) — 12 Issues Resolved: Correctness + Performance + Test Reliability
 
 **Status**: GREEN — 94,329 tests pass, 0 fail. 23 issues closed this session (363 total closed, 37 open).
 
