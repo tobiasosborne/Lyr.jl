@@ -70,6 +70,22 @@ FollowCamera(center_fn, distance::Float64;
     FollowCamera(center_fn, distance, elevation, fov)
 
 """
+    FunctionCamera(camera_fn)
+
+Fully custom camera via a function `camera_fn(t::Float64) → Camera`.
+Use this when none of the built-in modes fit (e.g., camera pinned on a
+moving object while looking at another).
+
+# Example
+```julia
+cam = FunctionCamera(t -> Camera((0.0, 5.0, t), (0.0, 0.0, -t), (0.0, 1.0, 0.0), 40.0))
+```
+"""
+struct FunctionCamera{F} <: CameraMode
+    camera_fn::F
+end
+
+"""
     camera_at_frame(mode, frame, nframes, t) → Camera
 
 Resolve the camera for a specific animation frame.
@@ -88,6 +104,10 @@ function camera_at_frame(mode::FollowCamera, frame::Int, nframes::Int, t::Float6
     target = mode.center_fn(t)
     camera_orbit(target, mode.distance;
                  azimuth=45.0, elevation=mode.elevation, fov=mode.fov)
+end
+
+function camera_at_frame(mode::FunctionCamera, frame::Int, nframes::Int, t::Float64)
+    mode.camera_fn(t)
 end
 
 # ============================================================================

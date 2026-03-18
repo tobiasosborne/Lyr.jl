@@ -200,7 +200,7 @@ export nuclear_trajectory, ScatteringField
 
 # --- Animation ---
 export render_animation, stitch_to_mp4
-export FixedCamera, OrbitCamera, FollowCamera, CameraMode
+export FixedCamera, OrbitCamera, FollowCamera, FunctionCamera, CameraMode
 export tf_electron, tf_photon, tf_excited
 
 # --- Visualize presets ---
