@@ -379,6 +379,7 @@ end
 
 domain(te::TimeEvolution) = te._cached_domain
 field_eltype(te::TimeEvolution) = field_eltype(te.eval_fn(te.t_range[1]))
+characteristic_scale(te::TimeEvolution) = characteristic_scale(te.eval_fn(te.t_range[1]))
 
 Base.show(io::IO, te::TimeEvolution{F}) where F =
     print(io, "TimeEvolution{$F}(t=$(te.t_range), dt=$(te.dt_hint))")

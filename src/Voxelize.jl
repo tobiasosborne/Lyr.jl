@@ -329,3 +329,16 @@ function _apply_threshold!(data::Dict{Coord, Float32}, threshold::Float64)
     end
     data
 end
+
+# ============================================================================
+# TimeEvolution support
+# ============================================================================
+
+"""
+    voxelize(te::TimeEvolution; t=te.t_range[1], kwargs...) -> Grid{Float32}
+
+Snapshot a time-evolving field at time `t` and voxelize it.
+"""
+function voxelize(te::TimeEvolution; t::Float64=te.t_range[1], kwargs...)
+    voxelize(te.eval_fn(t); kwargs...)
+end

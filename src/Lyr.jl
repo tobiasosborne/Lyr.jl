@@ -95,6 +95,15 @@ include("Visualize.jl")
 # Point advection (depends on FieldProtocol)
 include("PointAdvection.jl")
 
+# Hydrogen atom eigenstates and molecular orbitals (depends on FieldProtocol)
+include("HydrogenAtom.jl")
+
+# Wavepackets, potential surfaces, and nuclear dynamics (depends on FieldProtocol, HydrogenAtom)
+include("Wavepackets.jl")
+
+# Animation pipeline (depends on everything above)
+include("Animation.jl")
+
 # ============================================================================
 # Public API — only symbols users type in their code are exported.
 # All other symbols are accessible via Lyr.symbol_name or import Lyr: symbol_name.
@@ -178,6 +187,21 @@ export ScalarField3D, VectorField3D, ComplexScalarField3D
 export ParticleField, TimeEvolution
 export BoxDomain, domain, field_eltype, characteristic_scale
 export visualize
+
+# --- Hydrogen atom ---
+export hydrogen_psi, HydrogenOrbitalField, MolecularOrbitalField
+export h2_bonding, h2_antibonding
+
+# --- Wavepackets ---
+export gaussian_wavepacket, GaussianWavepacketField
+export MorsePotential, H2_MORSE, morse_potential, morse_force
+export kw_potential, kw_force
+export nuclear_trajectory, ScatteringField
+
+# --- Animation ---
+export render_animation, stitch_to_mp4
+export FixedCamera, OrbitCamera, FollowCamera, CameraMode
+export tf_electron, tf_photon, tf_excited
 
 # --- Visualize presets ---
 export camera_orbit, camera_front, camera_iso

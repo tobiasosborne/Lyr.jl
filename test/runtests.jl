@@ -175,6 +175,9 @@ import Lyr:
     include("test_gr_volumetric.jl")
     include("test_gr_validation.jl")
     include("test_gr_kerr.jl")
+    include("test_hydrogen_atom.jl")
+    include("test_wavepackets.jl")
+    include("test_animation.jl")
     # test_cross_renderer.jl excluded: slow (13min). Run standalone: julia --project test/test_cross_renderer.jl
     # All 9 scenes pass (A/B/C/D with HG sweep). HG phase fix applied 2026-03-12.
 end
