@@ -222,11 +222,15 @@ end
 # ============================================================================
 
 """
-    evaluate_frame(precomp, frame_idx) → (electron_density, em_cross_energy)
+    evaluate_frame(precomp, frame_idx; exchange_sign=0) → (electron_density, em_cross_energy)
+
+exchange_sign: 0 = distinguishable (no exchange), +1 = bosons, -1 = fermions (Møller)
+For identical particles: ρ = |ψ₁|² + |ψ₂|² + exchange_sign * 2Re(ψ₁*ψ₂)
 
 EQ:BORN-INCREMENTAL, EQ:EM-CROSS-ENERGY
 """
-function evaluate_frame(precomp::ScatteringPrecompute, frame_idx::Int)
+function evaluate_frame(precomp::ScatteringPrecompute, frame_idx::Int;
+                        exchange_sign::Int=0)
     grid = precomp.grid
     N = grid.N
     alpha = precomp.alpha
@@ -282,9 +286,12 @@ function evaluate_frame(precomp::ScatteringPrecompute, frame_idx::Int)
     if norm2 > 0; psi2_total ./= norm2; end
 
     # --- Electron density ---
+    # For identical particles: ρ = |ψ₁|² + |ψ₂|² + exchange_sign * 2Re(ψ₁*ψ₂)
+    # exchange_sign = -1 for fermions (Møller), +1 for bosons, 0 for distinguishable
     electron_density = Array{Float64}(undef, N, N, N)
     for i in eachindex(electron_density)
-        electron_density[i] = abs2(psi1_total[i]) + abs2(psi2_total[i])
+        electron_density[i] = abs2(psi1_total[i]) + abs2(psi2_total[i]) +
+            exchange_sign * 2.0 * real(conj(psi1_total[i]) * psi2_total[i])
     end
 
     # --- EM cross-energy: E_1 . E_2 ---
@@ -328,6 +335,7 @@ Returns two TimeEvolution fields:
 - `L=50.0` — half-width of computation box (a.u.)
 - `t_range=auto` — time range (computed from kinematics if not given)
 - `nsteps=200` — number of time steps for Dyson integral
+- `exchange_sign=0` — 0=distinguishable, +1=bosons, -1=fermions (Møller)
 """
 function ScalarQEDScattering(p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1::Float64,
                               p2::NTuple{3,Float64}, r2::NTuple{3,Float64}, d2::Float64;
@@ -336,7 +344,8 @@ function ScalarQEDScattering(p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1::F
                               N::Int=64,
                               L::Float64=50.0,
                               t_range::Union{Nothing, Tuple{Float64,Float64}}=nothing,
-                              nsteps::Int=200)
+                              nsteps::Int=200,
+                              exchange_sign::Int=0)
     if t_range === nothing
         sep = sqrt(sum((r1[i] - r2[i])^2 for i in 1:3))
         v_rel = sqrt(sum(((p1[i] - p2[i]) / mass)^2 for i in 1:3))
@@ -403,7 +412,7 @@ function ScalarQEDScattering(p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1::F
         t -> begin
             idx = nearest_frame(t)
             if !haskey(frame_cache, idx)
-                frame_cache[idx] = evaluate_frame(precomp, idx)
+                frame_cache[idx] = evaluate_frame(precomp, idx; exchange_sign=exchange_sign)
             end
             ed, _ = frame_cache[idx]
             ScalarField3D(
@@ -419,7 +428,7 @@ function ScalarQEDScattering(p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1::F
         t -> begin
             idx = nearest_frame(t)
             if !haskey(frame_cache, idx)
-                frame_cache[idx] = evaluate_frame(precomp, idx)
+                frame_cache[idx] = evaluate_frame(precomp, idx; exchange_sign=exchange_sign)
             end
             _, em = frame_cache[idx]
             ScalarField3D(
