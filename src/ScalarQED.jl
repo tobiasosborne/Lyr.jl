@@ -89,10 +89,11 @@ Screened Coulomb potential: Phi_hat(k) = rho_hat(k) / (|k|^2 + mu^2)
 EQ:POISSON-FOURIER
 """
 function poisson_solve(rho::Array{Float64,3}, grid::MomentumGrid, mu2::Float64)
+    # EQ:POISSON-FOURIER
+    # Gaussian units: nabla^2 Phi = -4*pi*rho → Phi_hat = 4*pi * rho_hat / |k|^2
     rho_hat = fft(complex.(rho))
-    N = grid.N
     for i in eachindex(rho_hat)
-        rho_hat[i] /= (grid.k2[i] + mu2)
+        rho_hat[i] *= 4π / (grid.k2[i] + mu2)
     end
     real.(ifft(rho_hat))
 end
@@ -107,10 +108,10 @@ function electric_field_from_density(rho::Array{Float64,3}, grid::MomentumGrid, 
     rho_hat = fft(complex.(rho))
     N = grid.N
 
-    # Precompute Phi_hat
+    # Precompute Phi_hat (Gaussian units: 4*pi factor)
     Phi_hat = similar(rho_hat)
     for i in eachindex(Phi_hat)
-        Phi_hat[i] = rho_hat[i] / (grid.k2[i] + mu2)
+        Phi_hat[i] = 4π * rho_hat[i] / (grid.k2[i] + mu2)
     end
 
     # E = -grad Phi: E_hat_comp = -i*k_comp * Phi_hat
@@ -271,6 +272,14 @@ function evaluate_frame(precomp::ScatteringPrecompute, frame_idx::Int)
     # IFFT to position space
     psi1_total = ifft(psi1_k)
     psi2_total = ifft(psi2_k)
+
+    # Normalize each wavefunction (Born approximation doesn't conserve unitarity;
+    # renormalization preserves the angular distribution of the scattered wave)
+    dV = grid.dx^3
+    norm1 = sqrt(sum(abs2, psi1_total) * dV)
+    norm2 = sqrt(sum(abs2, psi2_total) * dV)
+    if norm1 > 0; psi1_total ./= norm1; end
+    if norm2 > 0; psi2_total ./= norm2; end
 
     # --- Electron density ---
     electron_density = Array{Float64}(undef, N, N, N)

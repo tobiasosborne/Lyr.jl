@@ -30,9 +30,10 @@ p2 = (-0.15, 0.0, 0.0)     # momentum: leftward
 r2 = (15.0, 0.0, -2.0)     # start: right, slightly below
 d2 = 3.0
 
-# Moderate coupling — must be small enough for first-order Born to converge
-# (scattered wave << free wave). Physical alpha = 1/137; we enhance for visibility.
-alpha = 0.05
+# Coupling must be small enough for first-order Born to converge
+# (scattered wave << free wave). Physical alpha = 1/137.
+# With 4*pi in Poisson solve, effective coupling is 4*pi*alpha.
+alpha = 0.01
 
 println("Electron 1: p=$p1, r=$r1, d=$d1")
 println("Electron 2: p=$p2, r=$r2, d=$d2")
