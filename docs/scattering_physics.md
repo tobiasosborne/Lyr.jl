@@ -256,6 +256,64 @@ $$\frac{d\sigma}{d\Omega} = \left(\frac{Z_1 Z_2 e^2}{4 E_k}\right)^2 \frac{1}{\s
 **Ref**: [Schwabl] Eq. (18.51b), p. 338.
 Note: this is exact for the Coulomb potential — the Born approximation accidentally gives the exact result.
 
+### EQ:RUTHERFORD-DEFLECTION — Classical Rutherford Deflection Angle
+
+$$\vartheta = 2\arctan\!\left(\frac{Z_1 Z_2 e^2}{2 E_{\text{cm}}\,b}\right)$$
+
+where $b$ is the impact parameter and $E_{\text{cm}}$ is the center-of-mass kinetic energy.
+In atomic units ($e^2 = 1$): $\vartheta = 2\arctan(Z_1 Z_2 / (2 E_{\text{cm}} b))$.
+
+**Ref**: [Schwabl] context of Eq. (18.51b), p. 338; Goldstein, *Classical Mechanics*, §3.10.
+
+### EQ:COULOMB-TRAJECTORY — Classical Coulomb Scattering Trajectory
+
+Effective radial potential for two charges with angular momentum $L = \mu v_0 b$:
+
+$$V_{\text{eff}}(R) = \frac{Z_1 Z_2 e^2}{R} + \frac{L^2}{2\mu R^2}$$
+
+Radial equation of motion: $\mu\ddot{R} = -\partial V_{\text{eff}}/\partial R = Z_1 Z_2 e^2/R^2 + L^2/(\mu R^3)$.
+Angular evolution: $\dot{\theta} = L/(\mu R^2)$.
+
+**Ref**: Goldstein, *Classical Mechanics*, 3rd ed., Ch. 3, Eqs. (3.22)–(3.34).
+
+---
+
+## V-B. ELECTRONIC TRANSITIONS (INELASTIC SCATTERING)
+
+### EQ:LANDAU-ZENER — Landau-Zener Transition Probability
+
+$$P_{\text{LZ}} = \exp\!\left(-\frac{2\pi\,V_{12}^2}{\hbar\,|v_R|\,\left|\frac{d(\Delta E)}{dR}\right|}\right)$$
+
+where $V_{12}$ is the coupling matrix element between diabatic states at the avoided crossing,
+$v_R$ is the radial velocity at the crossing point, and $d(\Delta E)/dR$ is the slope of the
+diabatic energy gap. In atomic units ($\hbar = 1$): exponent = $-2\pi V_{12}^2 / (|v_R| \cdot |d\Delta E/dR|)$.
+
+**Ref**: C. Zener, Proc. R. Soc. A **137**, 696 (1932); L. Landau, Phys. Z. Sowjetunion **2**, 46 (1932).
+
+### EQ:H2-EXCITED-2P-SIGMA — Excited-State Molecular Orbital (2pσ_u)
+
+$$\psi_{2p\sigma_u}(\boldsymbol{r}; R) = \frac{\psi_A(2,1,0;\boldsymbol{r}-\boldsymbol{R}_A) - \psi_B(2,1,0;\boldsymbol{r}-\boldsymbol{R}_B)}{\sqrt{2 - 2S_{2p}(R)}}$$
+
+where $\psi(2,1,0)$ is the hydrogen $2p_0$ eigenstate (quantization axis along the bond axis)
+and $S_{2p}(R) = \langle 2p_A | 2p_B \rangle$ is the 2p overlap integral.
+For $R > 3\,a_0$, $S_{2p} \approx 0$ and the normalization simplifies to $1/\sqrt{2}$.
+
+**Ref**: [Schwabl] §15.1 (LCAO method); orbital notation from Herzberg, *Spectra of Diatomic Molecules*.
+
+### EQ:DIABATIC-CROSSING — Avoided Crossing Energy Gap
+
+$$\Delta E(R) = E_{\text{excited}}(R) - E_{\text{ground}}(R)$$
+
+At $R \to \infty$: $\Delta E \to E_{2p} - E_{1s} = 10.2\,\text{eV} = 0.375\,\text{a.u.}$
+At the avoided crossing $R_c$: $\Delta E(R_c) = 2V_{12}$ (minimum gap).
+
+### EQ:SUPERPOSITION-COHERENT — Coherent Electronic Superposition
+
+$$\psi(\boldsymbol{r}, t) = c_g(t)\,\psi_{\text{ground}}(\boldsymbol{r}; R(t)) + c_e(t)\,\psi_{\text{excited}}(\boldsymbol{r}; R(t))$$
+
+with $|c_g|^2 + |c_e|^2 = 1$ (probability conservation). Before the avoided crossing:
+$c_g = 1$, $c_e = 0$. After the crossing: $|c_e|^2 = P_{\text{LZ}}$ from EQ:LANDAU-ZENER.
+
 ---
 
 ## VI. DIRAC EQUATION (RELATIVISTIC)
