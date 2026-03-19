@@ -21,18 +21,16 @@ println()
 # ============================================================================
 
 # Two scalar "electrons" approaching in the x-z plane
-# Offset in z gives a glancing collision (impact parameter)
-p1 = (0.15, 0.0, 0.0)      # momentum: rightward (slower for longer interaction)
-r1 = (-15.0, 0.0, 2.0)     # start: left, slightly above
-d1 = 3.0                    # wavepacket width (a.u.)
+# Large separation so the full trajectory is visible
+p1 = (0.1, 0.0, 0.0)       # momentum: rightward
+r1 = (-80.0, 0.0, 10.0)    # start: far left, offset above
+d1 = 8.0                    # wide wavepacket (visible at this scale)
 
-p2 = (-0.15, 0.0, 0.0)     # momentum: leftward
-r2 = (15.0, 0.0, -2.0)     # start: right, slightly below
-d2 = 3.0
+p2 = (-0.1, 0.0, 0.0)      # momentum: leftward
+r2 = (80.0, 0.0, -10.0)    # start: far right, offset below
+d2 = 8.0
 
-# Coupling must be small enough for first-order Born to converge
-# (scattered wave << free wave). Physical alpha = 1/137.
-# With 4*pi in Poisson solve, effective coupling is 4*pi*alpha.
+# Coupling for first-order Born. With 4*pi in Poisson, effective = 4*pi*alpha.
 alpha = 0.01
 
 println("Electron 1: p=$p1, r=$r1, d=$d1")
@@ -50,9 +48,9 @@ e_field, em_field = ScalarQEDScattering(
     mass=1.0,
     alpha=alpha,
     N=64,
-    L=30.0,
-    t_range=(-80.0, 80.0),
-    nsteps=120
+    L=120.0,
+    t_range=(-600.0, 600.0),
+    nsteps=200
 )
 
 println("Time range: $(e_field.t_range)")
@@ -64,7 +62,7 @@ println()
 
 # Check at three time points
 grid_N = 64
-grid_L = 30.0
+grid_L = 120.0
 dx = 2.0 * grid_L / grid_N
 for t_frac in [0.0, 0.5, 1.0]
     t = e_field.t_range[1] + t_frac * (e_field.t_range[2] - e_field.t_range[1])
@@ -88,8 +86,9 @@ println()
 mat_electron = VolumeMaterial(tf_electron(); sigma_scale=12.0, emission_scale=8.0)
 mat_photon   = VolumeMaterial(tf_photon(); sigma_scale=20.0, emission_scale=15.0)
 
-# Fixed camera above the scattering plane
-cam = FixedCamera((0.0, 50.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 50.0)
+# Camera far above scattering plane — sees full trajectories of both electrons
+# At y=500, FOV=30°, visible width ≈ 2*500*tan(15°) ≈ 268 a.u. — covers the L=120 box
+cam = FixedCamera((0.0, 500.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 30.0)
 
 nframes = 80
 println("Rendering $nframes frames (electron density + EM cross-energy)...")
