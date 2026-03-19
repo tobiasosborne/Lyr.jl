@@ -104,6 +104,9 @@ include("Wavepackets.jl")
 # Scalar QED tree-level scattering (depends on FieldProtocol, Wavepackets, FFTW)
 include("ScalarQED.jl")
 
+# GPU-accelerated scalar QED (depends on ScalarQED, KernelAbstractions, Adapt)
+include("ScalarQEDGPU.jl")
+
 # Animation pipeline (depends on everything above)
 include("Animation.jl")
 
@@ -203,6 +206,7 @@ export nuclear_trajectory, ScatteringField
 
 # --- Scalar QED ---
 export ScalarQEDScattering, MomentumGrid
+export ScalarQEDScatteringGPU, GPUMomentumGrid
 
 # --- Animation ---
 export render_animation, stitch_to_mp4
