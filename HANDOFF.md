@@ -4,30 +4,54 @@
 
 ---
 
-## Latest Session (2026-03-19, evening) — Scalar QED Tree-Level Scattering
+## Latest Session (2026-03-19, evening) — Scalar QED + Møller + Ionization
 
-**Status**: IN PROGRESS — Scalar QED warm-up for Moller scattering implemented. 23 tests pass. Demo rendering in progress.
+**Status**: YELLOW — Core scalar QED infrastructure complete (23 tests). Møller + ionization demos created but rendering quality needs iteration. A 128³ + zooming camera render is running.
 
 ### What Was Done
 
-**Scalar QED Scattering (`wizv`):**
+**Scalar QED (`wizv` — CLOSED):**
 - Created `src/ScalarQED.jl` — tree-level Dyson series for two charged scalar particles
-  - MomentumGrid: 3D FFT infrastructure with proper fftfreq ordering
+  - MomentumGrid: 3D FFT infrastructure with fftfreq ordering
   - Time-dependent Born approximation: precompute FT[V_other * psi_free] at each time step
   - Incremental accumulation: S_n(k) running sum with free propagator phase
-  - EM cross-energy: E_1 . E_2 from Poisson-solved Coulomb fields (= virtual photon)
-  - ScalarQEDScattering: Field Protocol wrapper returning TimeEvolution{ScalarField3D}
-- Created `test/test_scalar_qed.jl` — 23 tests (grid, normalization, Poisson, conservation, symmetry)
-- Created `examples/scatter_scalar_qed.jl` — demo with electron density + EM energy composite
-- Added FFTW.jl dependency
-- Added 5 new EQ:TAGs to `docs/scattering_physics.md`
+  - EM cross-energy: E₁·E₂ from Poisson-solved Coulomb fields (= virtual photon)
+  - 4π Poisson factor (Gaussian units), Born normalization for unitarity
+  - `exchange_sign` parameter: 0=distinguishable, +1=bosons, -1=fermions (Møller)
+- 23 tests, FFTW.jl dependency, 5 EQ:TAGs in `docs/scattering_physics.md`
 
-**Also committed**: H-H elastic scattering glancing-collision rewrite (from interrupted session)
+**Møller Scattering (`tjyx` — IN PROGRESS):**
+- Created `examples/scatter_qed_moller.jl` — calls ScalarQEDScattering with exchange_sign=-1
+- Fermi antisymmetrization: ρ = |ψ₁|² + |ψ₂|² - 2Re(ψ₁*ψ₂)
+- **Issue**: exchange term only matters during brief wavefunction overlap — visually identical to scalar QED for most frames. The NR limit is fundamentally the same Coulomb scattering.
+
+**H-H Ionization (`22lf` — IN PROGRESS):**
+- Created `examples/scatter_hh_ionization.jl` — expanding Gaussian for freed electron
+- **Issue**: ionized electron is a hardcoded expanding Gaussian, not computed from collision dynamics. Needs more physics rigor.
+
+**Camera/rendering iteration:**
+- User feedback: first renders were too zoomed in (tiny square), then too zoomed out (invisible EM field)
+- Current approach: zooming camera (wide → close at collision → wide) with 128³ grid
+- Render running in background: 512×512, spp=4, 120 frames
+
+### Known Issues / Honest Assessment
+1. **Virtual photon visibility**: E₁·E₂ cross-term is weak at large separations. Zoom camera helps but may still be too faint. May need to artificially scale the EM field for visualization.
+2. **Born approximation unitarity**: Normalized per-frame, which preserves probability but doesn't guarantee correct scattered wave amplitude.
+3. **Møller vs scalar QED**: In NR limit, the only difference is the exchange sign on the density overlap term — visually negligible except during collision.
+4. **Resolution vs scale trade-off**: N=128 with L=120 gives dx=1.875 a.u., σ=6 spans ~6 voxels. Adequate but not great.
 
 ### What's Next
-1. Verify demo renders correctly (running)
-2. Close `wizv`, start `tjyx` — upgrade to full spinor QED Moller scattering
-3. Remaining: `22lf` (H-H ionization)
+1. Check 128³ zooming camera render result
+2. If EM field still invisible: increase alpha or add artificial EM scaling for visualization
+3. Close `tjyx` and `22lf` once demos look good
+4. Remaining ready issues: `hecg` (P1 refactor), `fgzb`/`fj1a` (P2 tests)
+
+### Commits This Session
+- `00599e2` fix: H-H elastic — glancing collision rewrite (from interrupted session)
+- `c742c6a` feat: scalar QED tree-level scattering — Born + EM cross-energy
+- `c0db295` fix: scalar QED — 4π Poisson factor + Born normalization
+- `1ef124b` fix: scalar QED demo — 10x larger simulation
+- `662ee6c` feat: QED Møller scattering + H-H ionization visualizations
 
 ---
 
