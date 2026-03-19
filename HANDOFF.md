@@ -40,18 +40,32 @@
 3. **Møller vs scalar QED**: In NR limit, the only difference is the exchange sign on the density overlap term — visually negligible except during collision.
 4. **Resolution vs scale trade-off**: N=128 with L=120 gives dx=1.875 a.u., σ=6 spans ~6 voxels. Adequate but not great.
 
+### GPU Acceleration (in progress)
+- Spawned 3 proposer subagents for GPU design, reviewed all three
+- **Winner**: Recompute + incremental accumulation (Proposal C)
+  - Eliminates 107 GB P_tilde storage entirely
+  - Frame f+1 = frame f + 1 Born step → O(nsteps) total, not O(nframes × nsteps)
+  - N=256 fits in 4.4 GB VRAM, N=512 theoretically feasible
+- Created `src/ScalarQEDGPU.jl` — KA kernels, pre-planned FFTs, GPU frame evaluator
+- CUDA.jl `Pkg.add` was running when session ended (may need retry)
+- **NOT YET TESTED** — module compiles but CUDA backend not validated
+
 ### What's Next
-1. Check 128³ zooming camera render result
-2. If EM field still invisible: increase alpha or add artificial EM scaling for visualization
-3. Close `tjyx` and `22lf` once demos look good
-4. Remaining ready issues: `hecg` (P1 refactor), `fgzb`/`fj1a` (P2 tests)
+1. **Finish CUDA.jl install** — `julia --project -e 'import Pkg; Pkg.add("CUDA")'` (may need retry)
+2. **Test GPU path** — `using CUDA; using Lyr; ScalarQEDScatteringGPU(...)` on a small grid (N=32)
+3. **128³ zooming camera render** was running when killed — rerun with `julia --project -t auto examples/scatter_scalar_qed.jl`
+4. If EM field still invisible at large scale: increase alpha or add EM scaling
+5. Close `tjyx` and `22lf` once demos look good
+6. Remaining ready issues: `hecg` (P1 refactor), `fgzb`/`fj1a` (P2 tests)
 
 ### Commits This Session
 - `00599e2` fix: H-H elastic — glancing collision rewrite (from interrupted session)
 - `c742c6a` feat: scalar QED tree-level scattering — Born + EM cross-energy
 - `c0db295` fix: scalar QED — 4π Poisson factor + Born normalization
 - `1ef124b` fix: scalar QED demo — 10x larger simulation
-- `662ee6c` feat: QED Møller scattering + H-H ionization visualizations
+- `662ee6c` feat: QED Møller + H-H ionization demos
+- `6ea1965` fix: 128³ grid, zooming camera, 512×512 render
+- `59d8711` feat: GPU-accelerated scalar QED — recompute + incremental accumulation
 
 ---
 
