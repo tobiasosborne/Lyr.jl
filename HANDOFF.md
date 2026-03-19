@@ -4,7 +4,34 @@
 
 ---
 
-## Latest Session (2026-03-17, evening) — 3 Refactors Done + QFT Scattering Viz Planned
+## Latest Session (2026-03-19, evening) — Scalar QED Tree-Level Scattering
+
+**Status**: IN PROGRESS — Scalar QED warm-up for Moller scattering implemented. 23 tests pass. Demo rendering in progress.
+
+### What Was Done
+
+**Scalar QED Scattering (`wizv`):**
+- Created `src/ScalarQED.jl` — tree-level Dyson series for two charged scalar particles
+  - MomentumGrid: 3D FFT infrastructure with proper fftfreq ordering
+  - Time-dependent Born approximation: precompute FT[V_other * psi_free] at each time step
+  - Incremental accumulation: S_n(k) running sum with free propagator phase
+  - EM cross-energy: E_1 . E_2 from Poisson-solved Coulomb fields (= virtual photon)
+  - ScalarQEDScattering: Field Protocol wrapper returning TimeEvolution{ScalarField3D}
+- Created `test/test_scalar_qed.jl` — 23 tests (grid, normalization, Poisson, conservation, symmetry)
+- Created `examples/scatter_scalar_qed.jl` — demo with electron density + EM energy composite
+- Added FFTW.jl dependency
+- Added 5 new EQ:TAGs to `docs/scattering_physics.md`
+
+**Also committed**: H-H elastic scattering glancing-collision rewrite (from interrupted session)
+
+### What's Next
+1. Verify demo renders correctly (running)
+2. Close `wizv`, start `tjyx` — upgrade to full spinor QED Moller scattering
+3. Remaining: `22lf` (H-H ionization)
+
+---
+
+## Previous Session (2026-03-17, evening) — 3 Refactors Done + QFT Scattering Viz Planned
 
 **Status**: YELLOW — 94,325 passed, 2 fail (pre-existing golden image mismatch), 1 error (pre-existing). Code changes committed and pushed. New feature project scoped: QFT Scattering Visualization Series (10 beads issues with dependency DAG).
 

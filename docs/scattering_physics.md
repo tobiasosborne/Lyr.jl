@@ -496,3 +496,67 @@ Each equation produces a scalar or vector field evaluated on a 3D grid:
 4. **Virtual photon**: |A^μ(x)| from convolution EQ:VIRTUAL-PHOTON → glow field between electrons
 
 All fields feed into Lyr's Field Protocol (`ScalarField3D` → `voxelize` → `visualize`).
+
+---
+
+## Scalar QED Tree-Level Scattering
+
+### EQ:SCALAR-QED-VERTEX — Scalar QED 3-point vertex
+**Ref**: [Greiner-QFT] Eq. (9.19)
+
+Interaction Lagrangian: L_int = -ieA^μ(φ*∂_μφ - ∂_μφ* φ) + e²A_μA^μ|φ|²
+
+Vertex factor (3-point): -ie(p_in + p_out)^μ
+
+In NR limit, 0-component dominates: vertex ≈ -2iem, reducing to Coulomb coupling.
+
+### EQ:TIME-DEP-BORN — First-order Dyson term for wavepacket scattering
+**Ref**: [Schwabl] Ch. 18; [Sakurai] Ch. 7
+
+Time-dependent first-order Born correction to electron 1 scattered by electron 2:
+
+  ψ₁_scat(k, t) = -iα ∫_{-∞}^{t} dt' exp(-iE_k(t-t')) × FT[V₂(x,t') × ψ₁_free(x,t')](k)
+
+where:
+- V₂(x,t) = Poisson solve of |ψ₂_free(x,t)|² (Coulomb field of electron 2)
+- Convergence is natural: integrand vanishes when wavepackets don't overlap
+
+Implementation: `src/ScalarQED.jl:precompute_born_products`
+
+### EQ:BORN-INCREMENTAL — Incremental accumulation formula
+Discretize the Dyson integral on a time grid {t_j}:
+
+  S_n(k) = Σ_{j=1}^{n} exp(iE_k t_j) × P̃(k, t_j)
+  ψ_scat(k, t_n) = -iα Δt × exp(-iE_k t_n) × S_n(k)
+
+where P̃(k, t_j) = FFT[V_other(x,t_j) × ψ_free(x,t_j)].
+
+Incremental update: S_n = S_{n-1} + exp(iE_k t_n) × P̃(k, t_n)
+
+Implementation: `src/ScalarQED.jl:evaluate_frame`
+
+### EQ:EM-CROSS-ENERGY — EM interaction energy density (virtual photon)
+
+The EM energy density as a quantum expectation value (Coulomb gauge):
+
+  u_EM(x,t) = |E_total|²/2 = |E₁ + E₂|²/2
+
+Subtract self-energies to isolate the interaction:
+
+  Δu(x,t) = E₁(x,t) · E₂(x,t)
+
+where E_i = -∇Φ_i and Φ_i solves ∇²Φ_i = -|ψ_i|².
+
+This is zero when wavepackets are far apart, peaks during the exchange = the virtual photon visualized.
+
+Implementation: `src/ScalarQED.jl:evaluate_frame`
+
+### EQ:POISSON-FOURIER — Poisson solve via FFT
+
+Screened Coulomb: -∇²Φ = ρ  →  Φ̂(k) = ρ̂(k) / (|k|² + μ²)
+
+Screening mass μ regularizes the k=0 singularity. Set μ ~ 0.1/L for box size L.
+
+Electric field: Ê(k) = -ik × Φ̂(k)
+
+Implementation: `src/ScalarQED.jl:poisson_solve`, `electric_field_from_density`

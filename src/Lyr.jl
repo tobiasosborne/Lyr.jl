@@ -101,6 +101,9 @@ include("HydrogenAtom.jl")
 # Wavepackets, potential surfaces, and nuclear dynamics (depends on FieldProtocol, HydrogenAtom)
 include("Wavepackets.jl")
 
+# Scalar QED tree-level scattering (depends on FieldProtocol, Wavepackets, FFTW)
+include("ScalarQED.jl")
+
 # Animation pipeline (depends on everything above)
 include("Animation.jl")
 
@@ -197,6 +200,9 @@ export gaussian_wavepacket, GaussianWavepacketField
 export MorsePotential, H2_MORSE, morse_potential, morse_force
 export kw_potential, kw_force
 export nuclear_trajectory, ScatteringField
+
+# --- Scalar QED ---
+export ScalarQEDScattering, MomentumGrid
 
 # --- Animation ---
 export render_animation, stitch_to_mp4
