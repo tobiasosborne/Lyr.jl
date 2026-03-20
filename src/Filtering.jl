@@ -1,4 +1,4 @@
-# Filtering.jl - Spatial smoothing filters on VDB grids
+# Filtering.jl — Spatial smoothing filters on VDB grids
 #
 # Both filters use the 3×3×3 BoxStencil and support iterative application
 # for wider effective kernels (iterated box filter → Gaussian by CLT).

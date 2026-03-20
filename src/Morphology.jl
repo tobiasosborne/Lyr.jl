@@ -1,8 +1,9 @@
-# Morphology.jl - Morphological operations on VDB grids
+# Morphology.jl — Morphological dilation and erosion on VDB grids
 #
 # dilate: expand active region by activating face neighbors
 # erode: contract active region by deactivating boundary voxels
 
+"The 6 face-neighbor offsets in 3D (positive and negative along each axis)."
 const _FACE_OFFSETS = (
     Coord(Int32(1),  Int32(0),  Int32(0)),
     Coord(Int32(-1), Int32(0),  Int32(0)),

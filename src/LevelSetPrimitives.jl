@@ -1,4 +1,4 @@
-# LevelSetPrimitives.jl - Generate level set grids from analytic SDF primitives
+# LevelSetPrimitives.jl — Generate level set grids from analytic SDF primitives
 #
 # Level sets store signed distance field (SDF) values in a narrow band around
 # the surface. Negative = inside, zero = on surface, positive = outside.

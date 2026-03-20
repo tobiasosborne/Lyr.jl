@@ -1,9 +1,8 @@
 # weak_field.jl — Weak-field linearised metric (Phase 2 stub)
 #
-# g_00 = -(1 + 2Φ), g_ij = (1 - 2Φ)δ_ij, g_0i = 0
-# where Φ is the gravitational potential from a Poisson solve.
-#
-# The potential Φ will be stored in a VDB Grid{Float32} and
+# Linearised gravity: g_00 = -(1 + 2Phi), g_ij = (1 - 2Phi) delta_ij
+# where Phi is the Newtonian gravitational potential from a Poisson solve.
+# The potential Phi will be stored in a VDB Grid{Float32} and
 # queried via trilinear interpolation at each geodesic step.
 
 """

@@ -1,4 +1,4 @@
-# Header.jl - VDB file header parsing
+# Header.jl — VDB file header parsing and magic number validation
 
 """
 VDB file magic number: bytes [0x20, 0x42, 0x44, 0x56] (" BDV") read as little-endian u32.

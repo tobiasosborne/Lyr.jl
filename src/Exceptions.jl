@@ -1,4 +1,4 @@
-# Exceptions.jl - Typed exceptions for VDB parsing errors
+# Exceptions.jl — Typed exception hierarchy for VDB parsing and compression errors
 
 """
     LyrError <: Exception

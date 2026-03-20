@@ -1,4 +1,4 @@
-# Interpolation.jl - Sampling and gradient computation
+# Interpolation.jl — Sampling, gradient computation, and grid resampling
 
 # --- Interpolation method types ---
 
@@ -92,18 +92,23 @@ sample_world(grid::Grid{T}, xyz::SVec3d) where T =
 
 # --- NTuple convenience wrappers ---
 
+"NTuple convenience wrapper: converts to SVec3d and delegates."
 sample_nearest(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
     sample_nearest(tree, SVec3d(ijk...))
 
+"NTuple convenience wrapper: converts to SVec3d and delegates."
 sample_trilinear(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
     sample_trilinear(tree, SVec3d(ijk...))
 
+"NTuple convenience wrapper: converts to SVec3d and delegates."
 sample_quadratic(tree::Tree{T}, ijk::NTuple{3, Float64}) where T =
     sample_quadratic(tree, SVec3d(ijk...))
 
+"NTuple convenience wrapper: converts to SVec3d and delegates."
 sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}, method::InterpolationMethod) where T =
     sample_world(grid, SVec3d(xyz...), method)
 
+"NTuple convenience wrapper: converts to SVec3d and delegates."
 sample_world(grid::Grid{T}, xyz::NTuple{3, Float64}) where T =
     sample_world(grid, SVec3d(xyz...), TrilinearInterpolation())
 
@@ -224,11 +229,13 @@ end
 
 # --- Internal helpers (unchanged) ---
 
-# Check if a value equals ±background (for boundary detection)
+"Check if a scalar value equals +background or -background (narrow band boundary detection)."
 _is_background(val::T, bg::T) where {T <: AbstractFloat} = (val == bg) || (val == -bg)
+
+"Check if a vector value equals the background tuple."
 _is_background(val::NTuple{N,T}, bg::NTuple{N,T}) where {N, T <: AbstractFloat} = (val == bg)
 
-# Scalar lerp
+"Trilinear interpolation of 8 corner scalar values with fractional offsets (u, v, w)."
 function _lerp3(v000::T, v100::T, v010::T, v110::T, v001::T, v101::T, v011::T, v111::T, u::T, v::T, w::T)::T where T <: AbstractFloat
     c00 = v000 * (1 - u) + v100 * u
     c10 = v010 * (1 - u) + v110 * u
@@ -241,7 +248,7 @@ function _lerp3(v000::T, v100::T, v010::T, v110::T, v001::T, v101::T, v011::T, v
     c0 * (1 - w) + c1 * w
 end
 
-# Vector lerp
+"Trilinear interpolation of 8 corner vector values, applied component-wise."
 function _lerp3(v000::NTuple{N, T}, v100::NTuple{N, T}, v010::NTuple{N, T}, v110::NTuple{N, T},
                 v001::NTuple{N, T}, v101::NTuple{N, T}, v011::NTuple{N, T}, v111::NTuple{N, T},
                 u::T, v::T, w::T)::NTuple{N, T} where {N, T <: AbstractFloat}
@@ -264,7 +271,12 @@ function gradient(tree::Tree{T}, c::Coord)::NTuple{3, T} where T
     (dx, dy, dz)
 end
 
-# Gradient for vector types
+"""
+    gradient(tree::Tree{NTuple{N,T}}, c::Coord) -> NTuple{3, NTuple{N,T}}
+
+Compute the gradient of a vector field at coordinate `c` using central differences.
+Returns 3 component-wise derivative vectors (d/dx, d/dy, d/dz).
+"""
 function gradient(tree::Tree{NTuple{N, T}}, c::Coord)::NTuple{3, NTuple{N, T}} where {N, T}
     i, j, k = c.x, c.y, c.z
 

@@ -1,4 +1,4 @@
-# Meshing.jl - Marching Cubes isosurface extraction from VDB grids
+# Meshing.jl — Marching Cubes isosurface extraction from VDB grids
 #
 # Implements the classic Marching Cubes algorithm (Lorensen & Cline 1987)
 # to extract a triangle mesh from a scalar VDB grid at a given isovalue.
@@ -9,9 +9,10 @@
 # Marching Cubes lookup tables
 # =============================================================================
 
-# EDGE_TABLE: 256 entries. For each cube configuration (8-bit index from corner
-# sign tests), a 12-bit mask indicating which edges are intersected by the
-# isosurface. Bit i set => edge i is crossed.
+"""
+Marching Cubes edge table: 256 entries mapping each cube configuration (8-bit corner
+sign index) to a 12-bit mask of intersected edges. Bit i set means edge i is crossed.
+"""
 const MC_EDGE_TABLE = UInt16[
     0x000, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
     0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
@@ -47,9 +48,10 @@ const MC_EDGE_TABLE = UInt16[
     0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x000,
 ]
 
-# TRI_TABLE: 256 entries. For each cube configuration, a tuple of edge indices
-# forming triangles, terminated by -1. Each group of 3 consecutive non-negative
-# values forms one triangle.
+"""
+Marching Cubes triangle table: 256 entries. For each cube configuration, a tuple of
+edge indices forming triangles (groups of 3), terminated by -1.
+"""
 const MC_TRI_TABLE = (
     (-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1),
     ( 0, 8, 3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1),
@@ -313,6 +315,7 @@ const MC_TRI_TABLE = (
 # Edge endpoint pairs (corner indices for each of the 12 edges)
 # =============================================================================
 
+"Edge endpoint pairs: maps each of the 12 cube edges to its two corner indices (0-based)."
 const MC_EDGE_CORNERS = (
     (0, 1),   # Edge 0:  corner 0 -> 1
     (1, 2),   # Edge 1:  corner 1 -> 2
@@ -332,9 +335,10 @@ const MC_EDGE_CORNERS = (
 # Corner offsets relative to cell origin (i,j,k)
 # =============================================================================
 
-# Corner ordering (standard MC convention):
-# 0: (0,0,0)  1: (1,0,0)  2: (1,1,0)  3: (0,1,0)
-# 4: (0,0,1)  5: (1,0,1)  6: (1,1,1)  7: (0,1,1)
+"""
+Corner offsets relative to cell origin (standard MC convention):
+0:(0,0,0) 1:(1,0,0) 2:(1,1,0) 3:(0,1,0) 4:(0,0,1) 5:(1,0,1) 6:(1,1,1) 7:(0,1,1).
+"""
 const MC_CORNER_OFFSETS = (
     (Int32(0), Int32(0), Int32(0)),  # corner 0
     (Int32(1), Int32(0), Int32(0)),  # corner 1

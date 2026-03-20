@@ -30,6 +30,8 @@ ephemeral.sqlite3-shm
 dolt-server.pid
 dolt-server.log
 dolt-server.lock
+dolt-server.activity
+dolt-server.port
 
 # Legacy files (from pre-Dolt versions)
 *.db

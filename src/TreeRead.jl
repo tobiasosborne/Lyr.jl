@@ -1,4 +1,4 @@
-# TreeRead.jl - Combined topology + value parsing
+# TreeRead.jl — Combined topology and value parsing for VDB tree deserialization
 #
 # VDB file formats differ by version:
 # - v222+: Topology and values are in separate sections (uses block_offset)

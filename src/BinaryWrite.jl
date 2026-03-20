@@ -1,4 +1,4 @@
-# BinaryWrite.jl - Pure functions for writing primitive types to IO streams
+# BinaryWrite.jl — Pure functions for writing primitive types to IO streams
 #
 # All functions have signature: (io::IO, val) -> nothing
 # All multi-byte types are little-endian

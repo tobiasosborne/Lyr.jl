@@ -1,4 +1,4 @@
-# FastSweeping.jl - Eikonal reinitialization for level set SDF grids
+# FastSweeping.jl — Eikonal reinitialization for level set SDF grids
 #
 # Implements the Fast Sweeping Method (Zhao 2004) on sparse VDB grids.
 # Decouples from the immutable tree during computation: extracts active

@@ -1,12 +1,21 @@
 # GR.jl — General Relativistic ray tracing module for Lyr.jl
 #
-# Implements backward null geodesic integration through Lorentzian metrics
-# for physically correct visualisation of gravitational lensing, accretion
-# disks, and curved spacetime phenomena.
+# Backward null geodesic integration through Lorentzian spacetime metrics
+# for physically correct visualization of gravitational lensing, accretion
+# disks, black hole shadows, and curved spacetime phenomena.
 #
-# Architecture: Hamiltonian formulation H = ½ gᵘᵛ pμ pν = 0
-# with symplectic Störmer-Verlet integration.
+# Architecture: Hamiltonian formulation H = 1/2 g^{mu nu} p_mu p_nu = 0
+# with RK4 or symplectic Stormer-Verlet integration and adaptive step control.
+#
+# Supported metrics: Minkowski, Schwarzschild (BL + Kerr-Schild), Kerr (BL).
 
+"""
+    GR
+
+General Relativistic ray tracing submodule. Provides backward null geodesic
+integration through curved spacetimes for black hole and accretion disk
+visualization. Key entry point: `gr_render_image(camera, config; disk=..., volume=...)`.
+"""
 module GR
 
 using StaticArrays

@@ -223,10 +223,10 @@ end
 end
 
 """
-    static_camera(m::SchwarzschildKS, r, θ, φ, fov, resolution)
+    static_camera(m::SchwarzschildKS, r, theta, phi, fov, resolution) -> GRCamera
 
-Camera for Schwarzschild KS at Boyer-Lindquist position (r, θ, φ),
-automatically converted to Cartesian (x, y, z).
+Camera for Schwarzschild KS at Boyer-Lindquist position (r, theta, phi),
+automatically converted to Cartesian Kerr-Schild coordinates (x, y, z).
 """
 function static_camera(m::SchwarzschildKS, r::Float64, θ::Float64, φ::Float64,
                         fov::Float64, resolution::Tuple{Int, Int})::GRCamera

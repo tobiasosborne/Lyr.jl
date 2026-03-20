@@ -1,4 +1,4 @@
-# Binary.jl - Pure functions for reading primitive types from byte vectors
+# Binary.jl — Pure functions for reading primitive types from byte vectors
 #
 # All functions have signature: (bytes::Vector{UInt8}, pos::Int) -> (result, new_pos::Int)
 # Positions are 1-indexed (Julia convention)

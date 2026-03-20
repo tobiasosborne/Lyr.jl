@@ -61,8 +61,11 @@ end
 # ============================================================================
 
 """
-Evaluate a Gaussian wavepacket on the position-space grid at time t.
-Uses the analytic formula from Wavepackets.jl.
+    evaluate_wavepacket_on_grid!(psi, grid, t, p0, r0, d, mass)
+
+Evaluate a Gaussian wavepacket on the position-space grid at time `t`.
+Writes results in-place to the 3D array `psi`. Uses the analytic
+closed-form time evolution from `gaussian_wavepacket`.
 """
 function evaluate_wavepacket_on_grid!(psi::Array{ComplexF64,3},
                                       grid::MomentumGrid,
@@ -83,10 +86,13 @@ end
 # ============================================================================
 
 """
-    poisson_solve(rho, grid, mu2) → Phi (real part of IFFT result)
+    poisson_solve(rho, grid, mu2) -> Array{Float64,3}
 
-Screened Coulomb potential: Phi_hat(k) = rho_hat(k) / (|k|^2 + mu^2)
-EQ:POISSON-FOURIER
+Solve the screened Poisson equation in Fourier space:
+Phi_hat(k) = 4pi * rho_hat(k) / (|k|^2 + mu^2).
+
+The screening mass `mu2` regularizes the k=0 singularity (infrared cutoff).
+Returns the real-space potential Phi(x) via inverse FFT.
 """
 function poisson_solve(rho::Array{Float64,3}, grid::MomentumGrid, mu2::Float64)
     # EQ:POISSON-FOURIER
@@ -99,10 +105,11 @@ function poisson_solve(rho::Array{Float64,3}, grid::MomentumGrid, mu2::Float64)
 end
 
 """
-    electric_field_from_density(rho, grid, mu2) → (Ex, Ey, Ez)
+    electric_field_from_density(rho, grid, mu2) -> (Ex, Ey, Ez)
 
-Compute E = -grad(Phi) where Phi solves Poisson equation.
-All done in Fourier space: E_hat = -ik * rho_hat / (|k|^2 + mu^2)
+Compute the electric field E = -grad(Phi) from a charge density `rho`,
+where Phi solves the screened Poisson equation. Computed entirely in Fourier
+space: E_hat_j = -i k_j * Phi_hat. Returns three 3D arrays (Ex, Ey, Ez).
 """
 function electric_field_from_density(rho::Array{Float64,3}, grid::MomentumGrid, mu2::Float64)
     rho_hat = fft(complex.(rho))
@@ -145,8 +152,10 @@ end
 """
     ScatteringPrecompute
 
-Stores FT[V_j(x,t_n) * psi_i_free(x,t_n)] at each time step, for both electrons.
-This is the integrand of the first-order Dyson series.
+Precomputed Born products for the first-order Dyson series. Stores
+`P_tilde(k, t_j) = FFT[V_other(x,t_j) * psi_free(x,t_j)]` at each time step
+for both particles. These are the momentum-space integrands of the time-dependent
+Born approximation, enabling O(1) per-frame evaluation via incremental accumulation.
 """
 struct ScatteringPrecompute
     grid::MomentumGrid
@@ -164,12 +173,15 @@ struct ScatteringPrecompute
 end
 
 """
-    precompute_born_products(...) → ScatteringPrecompute
+    precompute_born_products(grid, p1, r1, d1, p2, r2, d2, mass, alpha, times)
+        -> ScatteringPrecompute
 
-For each time step t_j, compute and store:
-  P_tilde(k, t_j) = FFT[ V_other(x, t_j) * psi_free(x, t_j) ]
+Precompute the Born products for all time steps in the Dyson series. For each
+time step `t_j`, computes `P_tilde(k,t_j) = FFT[V_other(x,t_j) * psi_free(x,t_j)]`
+for both particles. This is the dominant cost -- O(N^3 log N) per step.
 
-EQ:TIME-DEP-BORN
+Physics: implements the time-dependent Born approximation (first-order
+perturbation theory) for scalar QED scattering via virtual photon exchange.
 """
 function precompute_born_products(grid::MomentumGrid,
                                   p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1::Float64,
@@ -222,12 +234,17 @@ end
 # ============================================================================
 
 """
-    evaluate_frame(precomp, frame_idx; exchange_sign=0) → (electron_density, em_cross_energy)
+    evaluate_frame(precomp, frame_idx; exchange_sign=0)
+        -> (electron_density::Array{Float64,3}, em_cross_energy::Array{Float64,3})
 
-exchange_sign: 0 = distinguishable (no exchange), +1 = bosons, -1 = fermions (Møller)
-For identical particles: ρ = |ψ₁|² + |ψ₂|² + exchange_sign * 2Re(ψ₁*ψ₂)
+Evaluate both observables at time step `frame_idx` from precomputed Born products.
 
-EQ:BORN-INCREMENTAL, EQ:EM-CROSS-ENERGY
+Returns:
+- `electron_density`: |psi_1|^2 + |psi_2|^2 + exchange terms
+- `em_cross_energy`: E_1 . E_2 (electromagnetic interaction energy density)
+
+The `exchange_sign` controls quantum statistics:
+0 = distinguishable particles, +1 = bosons, -1 = fermions (Moller scattering).
 """
 function evaluate_frame(precomp::ScatteringPrecompute, frame_idx::Int;
                         exchange_sign::Int=0)

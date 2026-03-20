@@ -1,6 +1,6 @@
-# NanoVDB.jl - Flat-buffer VDB representation for GPU-ready data
+# NanoVDB.jl — Flat-buffer VDB representation for GPU-ready rendering
 #
-# Serializes the pointer-based VDB tree (Root→I2→I1→Leaf) into a single
+# Serializes the pointer-based VDB tree (Root->I2->I1->Leaf) into a single
 # contiguous Vector{UInt8} buffer with byte-offset references. This is the
 # critical path to GPU rendering via KernelAbstractions.jl.
 #
@@ -165,44 +165,78 @@ const NANO_VERSION = UInt32(1)
 # Header accessors
 # ──────────────────────────────────────────────────────────────────────────────
 
+"""
+    nano_background(grid::NanoGrid{T}) -> T
+
+Return the background value stored in the NanoGrid header.
+"""
 function nano_background(grid::NanoGrid{T})::T where T
     _buf_load(T, grid.buffer, _header_background_pos(T))
 end
 
+"""
+    nano_bbox(grid::NanoGrid{T}) -> BBox
+
+Return the axis-aligned bounding box stored in the NanoGrid header.
+"""
 function nano_bbox(grid::NanoGrid{T})::BBox where T
     bmin = _buf_load_coord(grid.buffer, _header_bbox_min_pos(T))
     bmax = _buf_load_coord(grid.buffer, _header_bbox_max_pos(T))
     BBox(bmin, bmax)
 end
 
+"""
+    nano_root_count(grid::NanoGrid{T}) -> Int
+
+Return the number of root table entries in the NanoGrid.
+"""
 function nano_root_count(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_root_count_pos(T)))
 end
 
+"""
+    nano_i2_count(grid::NanoGrid{T}) -> Int
+
+Return the number of InternalNode2 nodes in the NanoGrid.
+"""
 function nano_i2_count(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_i2_count_pos(T)))
 end
 
+"""
+    nano_i1_count(grid::NanoGrid{T}) -> Int
+
+Return the number of InternalNode1 nodes in the NanoGrid.
+"""
 function nano_i1_count(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_i1_count_pos(T)))
 end
 
+"""
+    nano_leaf_count(grid::NanoGrid{T}) -> Int
+
+Return the number of leaf nodes in the NanoGrid.
+"""
 function nano_leaf_count(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_leaf_count_pos(T)))
 end
 
+"Return the buffer byte position of the root table section."
 function _nano_root_pos(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_root_pos_pos(T)))
 end
 
+"Return the buffer byte position of the I2 nodes section."
 function _nano_i2_pos(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_i2_pos_pos(T)))
 end
 
+"Return the buffer byte position of the I1 nodes section."
 function _nano_i1_pos(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_i1_pos_pos(T)))
 end
 
+"Return the buffer byte position of the leaf nodes section."
 function _nano_leaf_pos(grid::NanoGrid{T})::Int where T
     Int(_buf_load(UInt32, grid.buffer, _header_leaf_pos_pos(T)))
 end
@@ -230,26 +264,36 @@ const _LEAF_VMASK_OFF = 12
 const _LEAF_VALUES_OFF = 76
 @inline _leaf_node_size(::Type{T}) where T = 76 + 512 * sizeof(T)
 
+"Return the origin coordinate of a NanoLeafView."
 @inline function nano_origin(v::NanoLeafView)::Coord
     _buf_load_coord(v.buf, v.offset)
 end
 
+"Check if voxel at 0-based `idx` is active in a NanoLeafView."
 @inline function nano_is_active(v::NanoLeafView, idx::Int)::Bool
     _buf_mask_is_on(v.buf, v.offset + _LEAF_VMASK_OFF, idx)
 end
 
+"Read the voxel value at 0-based `idx` from a NanoLeafView."
 @inline function nano_get_value(v::NanoLeafView{T}, idx::Int)::T where T
     _buf_load(T, v.buf, v.offset + _LEAF_VALUES_OFF + idx * sizeof(T))
 end
 
+"Read the voxel value at coordinate `c` from a NanoLeafView."
 @inline function nano_get_value(v::NanoLeafView{T}, c::Coord)::T where T
     nano_get_value(v, leaf_offset(c))
 end
 
 # ── Node level types for parameterized internal views ──
+
+"""Abstract type tag for NanoInternalView parameterization."""
 abstract type NodeLevel end
-struct Level1 <: NodeLevel end  # I1: 16³, 64-word masks
-struct Level2 <: NodeLevel end  # I2: 32³, 512-word masks
+
+"""Level1 tag: Internal1 nodes with 16^3 children and 64-word masks."""
+struct Level1 <: NodeLevel end
+
+"""Level2 tag: Internal2 nodes with 32^3 children and 512-word masks."""
+struct Level2 <: NodeLevel end
 
 """
     NanoInternalView{T, L<:NodeLevel}
@@ -300,33 +344,41 @@ const _I2_DATA_OFF = _I2_TILECOUNT_OFF + 4  # 12308
 @inline _data_off(::Type{Level2}) = _I2_DATA_OFF
 
 # ── Unified methods for NanoInternalView{T, L} ──
+
+"Return the origin coordinate of a NanoInternalView."
 @inline function nano_origin(v::NanoInternalView)::Coord
     _buf_load_coord(v.buf, v.offset)
 end
 
+"Return the number of child nodes in a NanoInternalView."
 @inline function nano_child_count(v::NanoInternalView{T, L})::Int where {T, L}
     Int(_buf_load(UInt32, v.buf, v.offset + _childcount_off(L)))
 end
 
+"Return the number of active tiles in a NanoInternalView."
 @inline function nano_tile_count(v::NanoInternalView{T, L})::Int where {T, L}
     Int(_buf_load(UInt32, v.buf, v.offset + _tilecount_off(L)))
 end
 
+"Check if slot `idx` (0-based) contains a child node."
 @inline function nano_has_child(v::NanoInternalView{T, L}, idx::Int)::Bool where {T, L}
     _buf_mask_is_on(v.buf, v.offset + _cmask_off(L), idx)
 end
 
+"Check if slot `idx` (0-based) contains an active tile (not a child)."
 @inline function nano_has_tile(v::NanoInternalView{T, L}, idx::Int)::Bool where {T, L}
     !nano_has_child(v, idx) &&
     _buf_mask_is_on(v.buf, v.offset + _vmask_off(L), idx)
 end
 
+"Return the buffer byte offset of the child node at slot `idx` (0-based)."
 @inline function nano_child_offset(v::NanoInternalView{T, L}, idx::Int)::Int where {T, L}
     table_idx = _buf_count_on_before(v.buf, v.offset + _cmask_off(L),
                                      v.offset + _cprefix_off(L), idx)
     Int(_buf_load(UInt32, v.buf, v.offset + _data_off(L) + table_idx * 4))
 end
 
+"Return the tile value at slot `idx` (0-based) in a NanoInternalView."
 @inline function nano_tile_value(v::NanoInternalView{T, L}, idx::Int)::T where {T, L}
     cc = nano_child_count(v)
     tile_idx = _buf_count_on_before(v.buf, v.offset + _vmask_off(L),
@@ -701,6 +753,11 @@ mutable struct NanoValueAccessor{T}
     i2_origin::Coord
 end
 
+"""
+    NanoValueAccessor(grid::NanoGrid{T}) -> NanoValueAccessor{T}
+
+Create a NanoValueAccessor with empty cache for the given NanoGrid.
+"""
 function NanoValueAccessor(grid::NanoGrid{T}) where T
     z = Coord(Int32(0), Int32(0), Int32(0))
     NanoValueAccessor{T}(grid, 0, z, 0, z, 0, z)
@@ -714,6 +771,12 @@ end
     nothing
 end
 
+"""
+    get_value(acc::NanoValueAccessor{T}, c::Coord) -> T
+
+Look up the value at coordinate `c` using the cached NanoValueAccessor.
+Cache hits on the leaf, I1, or I2 level avoid re-traversing the tree.
+"""
 @inline function get_value(acc::NanoValueAccessor{T}, c::Coord)::T where T
     buf = acc.grid.buffer
 
@@ -810,6 +873,7 @@ voxels and lerps based on fractional position.
     c0_ + w * (c1_ - c0_)
 end
 
+"Full traversal from root, populating I2 cache."
 @inline function _nano_get_from_root(acc::NanoValueAccessor{T}, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)
@@ -832,6 +896,7 @@ end
     return _nano_get_from_i2(acc, i2_off, c)
 end
 
+"Traverse from I2 node, populating I1 cache."
 @inline function _nano_get_from_i2(acc::NanoValueAccessor{T}, i2_off::Int, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)
@@ -855,6 +920,7 @@ end
     return _nano_get_from_i1(acc, i1_off, c)
 end
 
+"Traverse from I1 node, populating leaf cache."
 @inline function _nano_get_from_i1(acc::NanoValueAccessor{T}, i1_off::Int, c::Coord)::T where T
     buf = acc.grid.buffer
     bg = nano_background(acc.grid)
@@ -940,6 +1006,7 @@ end
 Base.IteratorSize(::Type{<:NanoVolumeRayIntersector}) = Base.SizeUnknown()
 Base.eltype(::Type{NanoVolumeRayIntersector{T}}) where T = NanoLeafHit{T}
 
+"Mutable iteration state for NanoVolumeRayIntersector."
 mutable struct NanoVRIState{T}
     roots::Vector{Tuple{Float64, Int}}  # (tmin, i2_byte_offset)
     root_idx::Int
@@ -985,6 +1052,7 @@ function Base.iterate(vri::NanoVolumeRayIntersector{T}, state::NanoVRIState{T}) 
     _nano_vri_advance(vri.grid.buffer, vri.ray, state)
 end
 
+"Advance the NanoVolumeRayIntersector state machine to yield the next leaf hit."
 function _nano_vri_advance(buf::Vector{UInt8}, ray::Ray, state::NanoVRIState{T})::Union{Tuple{NanoLeafHit{T}, NanoVRIState{T}}, Nothing} where T
     while true
         # Phase 1: Drain current I1 DDA for leaf hits

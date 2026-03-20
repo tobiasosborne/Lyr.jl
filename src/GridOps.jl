@@ -1,4 +1,4 @@
-# GridOps.jl - Functional grid operations for VDB grids
+# GridOps.jl — Element-wise grid compositing, clipping, and conversion operations
 #
 # All operations are non-mutating: they iterate source grid(s), compute results,
 # and build new grids via Dict{Coord,T} accumulation + build_grid().

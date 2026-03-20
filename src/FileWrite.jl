@@ -1,4 +1,4 @@
-# FileWrite.jl - VDB file writing (v224 format, v222+ leaf values)
+# FileWrite.jl — VDB file writing (v224 format, v222+ leaf values)
 #
 # Writes complete VDB files that can be round-tripped through parse_vdb.
 # Uses NoCompression and COMPRESS_ACTIVE_MASK for simplicity.
@@ -170,6 +170,11 @@ function _write_scale_translate_data!(io::IO, tx::Float64, ty::Float64, tz::Floa
     _write_vec3d!(io, sx, sy, sz)                                          # VoxelSize
 end
 
+"""
+    write_transform!(io::IO, transform::UniformScaleTransform) -> Nothing
+
+Write a uniform scale transform as a UniformScaleMap.
+"""
 function write_transform!(io::IO, transform::UniformScaleTransform)::Nothing
     write_string_with_size!(io, "UniformScaleMap")
     s = transform.scale
@@ -177,6 +182,12 @@ function write_transform!(io::IO, transform::UniformScaleTransform)::Nothing
     nothing
 end
 
+"""
+    write_transform!(io::IO, transform::LinearTransform) -> Nothing
+
+Write a linear transform as a ScaleMap, ScaleTranslateMap, or UniformScaleTranslateMap.
+Only diagonal matrices are supported (no rotation).
+"""
 function write_transform!(io::IO, transform::LinearTransform)::Nothing
     m = transform.mat
     has_translation = any(!iszero, transform.trans)
@@ -381,6 +392,7 @@ function _write_node_masks_and_tiles!(io::IO, node, ::Type{T}, codec::Codec=NoCo
     end
 end
 
+"Write I2 topology: masks, tile values, then recurse into I1 children."
 function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
     _write_node_masks_and_tiles!(io, i2, T, codec; half_precision=half_precision)
     for child in i2.children
@@ -389,6 +401,7 @@ function _write_i2_topology!(io::IO, i2::InternalNode2{T}, background::T, all_le
     nothing
 end
 
+"Write I1 topology: masks, tile values, then leaf value masks."
 function _write_i1_topology!(io::IO, i1::InternalNode1{T}, background::T, all_leaves::Vector{LeafNode{T}}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
     _write_node_masks_and_tiles!(io, i1, T, codec; half_precision=half_precision)
     for leaf in i1.children

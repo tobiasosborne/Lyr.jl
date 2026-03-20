@@ -15,6 +15,13 @@ using Random: Xoshiro, randexp
 # Precomputed per-volume constants — avoid recomputing per-ray
 # ============================================================================
 
+"""
+    _PrecomputedVolume{T}
+
+Cached per-volume constants extracted from `VolumeEntry` to avoid redundant
+computation during rendering. Precomputes the Woodcock majorant, bounding box,
+and material parameters. Created once per frame via `_precompute_volume`.
+"""
 struct _PrecomputedVolume{T}
     nanogrid::NanoGrid{T}
     bmin::SVec3d
@@ -28,6 +35,13 @@ struct _PrecomputedVolume{T}
     pf::Union{IsotropicPhase, HenyeyGreensteinPhase}
 end
 
+"""
+    _precompute_volume(vol::VolumeEntry) -> _PrecomputedVolume
+
+Extract and cache per-volume constants: bounding box, majorant extinction
+coefficient (max_density * sigma_scale), acceptance scale, material parameters.
+Called once per frame to avoid redundant computation in the per-ray inner loop.
+"""
 @inline function _precompute_volume(vol::VolumeEntry)
     nano = vol.nanogrid::NanoGrid  # assert non-nothing (already validated)
     bbox = nano_bbox(nano)
@@ -58,8 +72,12 @@ end
 # Must be @inline for zero overhead — these run millions of times per frame.
 
 """
-Sample a span [t, span_end] via delta tracking. Returns `(t_new, event)` where
+    _delta_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, albedo, rng)
+        -> (t_new, event)
+
+Sample a span [t, span_end] via Woodcock delta tracking. Returns `(t_new, event)` where
 event is `:scattered`, `:absorbed`, or `:none` (escaped span without collision).
+Must be `@inline` for zero-overhead integration in the HDDA state machine.
 """
 @inline function _delta_sample_span(ray::Ray, acc::NanoValueAccessor, t::Float64,
                                     span_end::Float64, inv_sigma::Float64,
@@ -77,7 +95,12 @@ event is `:scattered`, `:absorbed`, or `:none` (escaped span without collision).
 end
 
 """
-Sample a span [t, span_end] via ratio tracking. Returns `(t_new, T_acc, absorbed)`.
+    _ratio_sample_span(ray, acc, t, span_end, inv_sigma, accept_scale, T_acc, rng)
+        -> (t_new, T_acc, absorbed)
+
+Sample a span [t, span_end] via ratio tracking for transmittance estimation.
+Multiplies `T_acc` by `(1 - density * accept_scale)` at each null-collision step.
+Returns early with `absorbed=true` if transmittance drops below 1e-10.
 """
 @inline function _ratio_sample_span(ray::Ray, acc::NanoValueAccessor, t::Float64,
                                     span_end::Float64, inv_sigma::Float64,
@@ -436,6 +459,17 @@ end
 # Emission-absorption preview renderer
 # ============================================================================
 
+"""
+    render_volume_preview(scene, width, height; step_size=0.5, max_steps=2000)
+        -> Matrix{NTuple{3, Float64}}
+
+Fast deterministic emission-absorption volume renderer. Uses fixed-step ray
+marching through HDDA-identified active spans. No stochastic sampling --
+produces clean but biased results. Good for previews and iteration.
+
+Increasing `step_size` speeds up rendering at the cost of accuracy;
+decreasing it improves quality but increases render time linearly.
+"""
 function render_volume_preview(scene::Scene, width::Int, height::Int;
                                step_size::Float64=0.5, max_steps::Int=2000)
     for vol in scene.volumes
@@ -500,6 +534,19 @@ end
 # Single-scatter volume renderer
 # ============================================================================
 
+"""
+    render_volume_image(scene, width, height; spp=1, seed=UInt64(42), max_bounces=1)
+        -> Matrix{NTuple{3, Float64}}
+
+Production single-scatter volume renderer using Monte Carlo delta tracking
+with ratio-tracking shadow rays. Physically unbiased -- converges to the
+correct solution as `spp` increases.
+
+Higher `spp` reduces noise linearly (variance ~ 1/spp) but render time
+scales linearly. For noise-free results, use `spp >= 16` with `denoise_bilateral`.
+
+Requires `build_nanogrid(grid.tree)` on all volume entries before rendering.
+"""
 function render_volume_image(scene::Scene, width::Int, height::Int;
                              spp::Int=1, seed::UInt64=UInt64(42),
                              max_bounces::Int=1)
@@ -731,6 +778,13 @@ end
 # render_volume — unified dispatch
 # ============================================================================
 
+"""
+    render_volume(scene, method::ReferencePathTracer, width, height; spp=1, seed=UInt64(42))
+
+Multi-scatter path-tracing volume renderer with Russian roulette termination.
+Most physically accurate mode -- accounts for multiple scattering events.
+Significantly slower than single-scatter; use for reference images.
+"""
 function render_volume(scene::Scene, method::ReferencePathTracer,
                        width::Int, height::Int;
                        spp::Int=1, seed::UInt64=UInt64(42))
@@ -766,12 +820,22 @@ function render_volume(scene::Scene, method::ReferencePathTracer,
     pixels
 end
 
+"""
+    render_volume(scene, ::SingleScatterTracer, width, height; spp=1, seed=UInt64(42))
+
+Dispatch to `render_volume_image` (single-scatter delta tracking).
+"""
 function render_volume(scene::Scene, ::SingleScatterTracer,
                        width::Int, height::Int;
                        spp::Int=1, seed::UInt64=UInt64(42))
     render_volume_image(scene, width, height; spp=spp, seed=seed)
 end
 
+"""
+    render_volume(scene, method::EmissionAbsorption, width, height; kwargs...)
+
+Dispatch to `render_volume_preview` (deterministic emission-absorption).
+"""
 function render_volume(scene::Scene, method::EmissionAbsorption,
                        width::Int, height::Int; kwargs...)
     render_volume_preview(scene, width, height;

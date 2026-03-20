@@ -1,8 +1,8 @@
-# volumetric.jl — Volumetric matter bridge for GR rendering
+# volumetric.jl — Volumetric matter for GR emission-absorption ray marching
 #
-# VolumetricMatter wraps an analytic density source (or future VDB grid)
-# and provides density/emission queries at each geodesic integration step.
-# Spatial coordinates are extracted from the geodesic state x^μ = (t, r, θ, φ).
+# VolumetricMatter wraps an analytic density source (e.g. ThickDisk) and provides
+# density/emission queries at each geodesic integration step. The render loop
+# accumulates optical depth and Planck-colored thermal emission along the ray.
 
 # ─────────────────────────────────────────────────────────────────────
 # VolumetricMatter — the bridge struct

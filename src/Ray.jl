@@ -1,4 +1,4 @@
-# Ray.jl - Ray utilities for volume rendering
+# Ray.jl — Ray types, AABB intersection, and leaf-ray intersection for volume rendering
 
 """
     AABB

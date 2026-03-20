@@ -148,10 +148,10 @@ const _CIE_XYZ_5NM = (
     (780, 0.000042, 0.000015, 0.000000),
 )
 
-# Physical constants for Planck's law (SI)
-const _PLANCK_H = 6.62607015e-34   # J·s
-const _PLANCK_C = 2.99792458e8     # m/s
-const _PLANCK_K = 1.380649e-23     # J/K
+# Physical constants for Planck's law (SI, CODATA 2018 exact values)
+const _PLANCK_H = 6.62607015e-34   # Planck constant, J s
+const _PLANCK_C = 2.99792458e8     # speed of light, m/s
+const _PLANCK_K = 1.380649e-23     # Boltzmann constant, J/K
 
 """
     planck_spectral_radiance(λ_m, T) -> Float64

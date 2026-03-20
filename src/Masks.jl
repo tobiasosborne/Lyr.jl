@@ -1,4 +1,4 @@
-# Masks.jl - Immutable fixed-size bitmask types
+# Masks.jl — Immutable fixed-size bitmask types with prefix-sum acceleration
 
 """
     Mask{N,W}
@@ -29,13 +29,17 @@ end
     Mask{N,W}(words, _compute_prefix(words))
 end
 
-# Helper to compute number of words needed
+"Compute the number of UInt64 words needed for N bits."
 @inline nwords(::Val{N}) where N = cld(N, 64)
 
-# Type aliases for VDB node masks
-const LeafMask = Mask{512, 8}          # 8x8x8 = 512 voxels, 8 words
-const Internal1Mask = Mask{4096, 64}   # 16x16x16 = 4096 children, 64 words
-const Internal2Mask = Mask{32768, 512} # 32x32x32 = 32768 children, 512 words
+"""Type alias for 512-bit leaf node value mask (8x8x8 voxels, 8 UInt64 words)."""
+const LeafMask = Mask{512, 8}
+
+"""Type alias for 4096-bit Internal1 node mask (16x16x16 children, 64 UInt64 words)."""
+const Internal1Mask = Mask{4096, 64}
+
+"""Type alias for 32768-bit Internal2 node mask (32x32x32 children, 512 UInt64 words)."""
+const Internal2Mask = Mask{32768, 512}
 
 function Base.show(io::IO, m::Mask{N,W}) where {N,W}
     print(io, "Mask{", N, "}(", count_on(m), "/", N, " on)")

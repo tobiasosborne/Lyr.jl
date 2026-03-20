@@ -1,5 +1,4 @@
-# File.jl - Top-level VDB file parsing
-# Components: Header.jl, Metadata.jl, GridDescriptor.jl
+# File.jl — Top-level VDB file parsing, combining header, metadata, and grid deserialization
 
 """
     VDBFile

@@ -28,9 +28,11 @@ struct PointLight <: AbstractLight
     intensity::SVec3d
 end
 
+"""Construct a PointLight from tuple position and intensity."""
 PointLight(pos::NTuple{3,Float64}, intensity::NTuple{3,Float64}) =
     PointLight(SVec3d(pos...), SVec3d(intensity...))
 
+"""Construct a white PointLight at the given position."""
 PointLight(pos::NTuple{3,Float64}) =
     PointLight(SVec3d(pos...), SVec3d(1.0, 1.0, 1.0))
 
@@ -67,6 +69,7 @@ struct ConstantEnvironmentLight <: AbstractLight
     radiance::SVec3d
 end
 
+"""Construct a ConstantEnvironmentLight from an RGB tuple."""
 ConstantEnvironmentLight(r::NTuple{3,Float64}) =
     ConstantEnvironmentLight(SVec3d(r...))
 
@@ -94,6 +97,13 @@ struct VolumeMaterial
     scattering_albedo::Float64
 end
 
+"""
+    VolumeMaterial(tf; phase_function=nothing, sigma_scale=1.0,
+                   emission_scale=1.0, scattering_albedo=0.5)
+
+Convenience constructor. `tf` is the first positional argument (transfer function);
+all other parameters are keyword. Phase function defaults to `IsotropicPhase()`.
+"""
 function VolumeMaterial(tf; phase_function=nothing,
                         sigma_scale::Float64=1.0,
                         emission_scale::Float64=1.0,
@@ -124,6 +134,7 @@ struct VolumeEntry{G, N}
     material::VolumeMaterial
 end
 
+"""Construct a VolumeEntry without a NanoGrid (must be built before rendering)."""
 VolumeEntry(grid, material::VolumeMaterial) =
     VolumeEntry(grid, nothing, material)
 

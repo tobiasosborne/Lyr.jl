@@ -1,4 +1,4 @@
-# Segmentation.jl - Connected component analysis on sparse VDB grids
+# Segmentation.jl — Connected component analysis on sparse VDB grids
 #
 # BFS flood fill using 6-connectivity (face neighbors).
 

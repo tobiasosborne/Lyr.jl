@@ -1,4 +1,4 @@
-# CSG.jl - Constructive Solid Geometry operations on level set grids
+# CSG.jl — Constructive Solid Geometry operations on level set grids
 #
 # Level set grids store signed distance field (SDF) values where:
 #   negative = inside, zero = on surface, positive = outside
@@ -91,6 +91,7 @@ function _csg_combine(a::Grid{T}, b::Grid{T}, op)::Grid{T} where T
     build_grid(result, bg; name=a.name, grid_class=GRID_LEVEL_SET, voxel_size=vs)
 end
 
+"Add the 6 face-adjacent coordinates of `c` to the set `s`."
 @inline function _push_face_neighbors!(s::Set{Coord}, c::Coord)
     push!(s, Coord(c.x + Int32(1), c.y, c.z))
     push!(s, Coord(c.x - Int32(1), c.y, c.z))

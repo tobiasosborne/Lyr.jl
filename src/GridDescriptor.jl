@@ -1,4 +1,4 @@
-# GridDescriptor.jl - VDB grid descriptor parsing
+# GridDescriptor.jl — VDB grid descriptor parsing and value type detection
 
 """
     GridDescriptor

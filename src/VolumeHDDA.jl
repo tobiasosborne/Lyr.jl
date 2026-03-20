@@ -38,6 +38,13 @@ end
 Base.IteratorSize(::Type{<:NanoVolumeHDDA}) = Base.SizeUnknown()
 Base.eltype(::Type{NanoVolumeHDDA{T}}) where T = TimeSpan
 
+"""
+    HDDAState{T}
+
+Mutable state for the `NanoVolumeHDDA` iterator. Tracks position at root,
+I2, and I1 levels of the NanoGrid hierarchy, plus the current merged span.
+A `span_t0 < 0` indicates no open span.
+"""
 mutable struct HDDAState{T}
     roots::Vector{Tuple{Float64, Int}}   # pre-sorted (tmin, i2_byte_offset)
     root_idx::Int

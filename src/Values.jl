@@ -1,4 +1,4 @@
-# Values.jl - Parse node values
+# Values.jl — Parsing leaf and internal node values from VDB binary format
 
 """
     read_dense_values(::Type{T}, bytes, pos, codec, mask_compressed, mask, background; value_size) -> Tuple{Vector{T}, Int}

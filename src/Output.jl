@@ -3,7 +3,13 @@
 # Supports EXR (via OpenEXR.jl), PNG (via PNGFiles.jl), and PPM.
 # Tone mapping operators: Reinhard, ACES, exposure.
 
-"""Find a loaded package by name, searching all loaded modules (not just Main)."""
+"""
+    _find_loaded_module(name::Symbol) -> Union{Module, Nothing}
+
+Find a loaded package by name, searching all loaded modules (not just Main).
+Used to detect optional dependencies (OpenEXR.jl, PNGFiles.jl) at runtime
+without requiring them in Project.toml.
+"""
 function _find_loaded_module(name::Symbol)
     for (key, mod) in Base.loaded_modules
         if key.name == String(name)

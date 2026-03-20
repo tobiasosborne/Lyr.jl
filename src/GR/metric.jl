@@ -22,9 +22,36 @@ abstract type MetricSpace{D} end
 # ─────────────────────────────────────────────────────────────────────
 # Required interface stubs (subtypes must implement)
 # ─────────────────────────────────────────────────────────────────────
+
+"""
+    metric(m::MetricSpace{4}, x::SVec4d) -> SMat4d
+
+Return the covariant metric tensor g_mu_nu at spacetime point x.
+Must be differentiable (ForwardDiff passes Dual numbers through x).
+"""
 function metric end
+
+"""
+    metric_inverse(m::MetricSpace{4}, x::SVec4d) -> SMat4d
+
+Return the contravariant metric tensor g^mu^nu at spacetime point x.
+Must satisfy g^mu^alpha g_alpha_nu = delta^mu_nu.
+"""
 function metric_inverse end
+
+"""
+    is_singular(m::MetricSpace{4}, x::SVec4d) -> Bool
+
+Return true if x is at or inside a coordinate singularity (e.g., r <= 2M
+for Schwarzschild coordinates). Used to terminate geodesic integration.
+"""
 function is_singular end
+
+"""
+    coordinate_bounds(m::MetricSpace{4})
+
+Return valid coordinate ranges as a NamedTuple (e.g., `(r_min=2.0, r_max=Inf)`).
+"""
 function coordinate_bounds end
 
 # ─────────────────────────────────────────────────────────────────────

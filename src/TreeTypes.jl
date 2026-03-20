@@ -1,4 +1,4 @@
-# TreeTypes.jl - Immutable algebraic data types for VDB tree structure
+# TreeTypes.jl — Immutable algebraic data types for the VDB tree hierarchy
 
 """
     GridClass

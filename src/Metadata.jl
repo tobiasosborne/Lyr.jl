@@ -1,4 +1,4 @@
-# Metadata.jl - VDB metadata parsing
+# Metadata.jl — VDB file-level and per-grid metadata parsing
 #
 # Format (same for file-level and per-grid metadata):
 #   count (u32) — number of entries

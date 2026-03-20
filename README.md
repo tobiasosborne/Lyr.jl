@@ -46,6 +46,46 @@ The hydrogen orbital visualizations compute analytical wavefunctions (associated
 
 The GR module traces null geodesics backward from camera to source through curved spacetime. Schwarzschild and Cartesian Kerr-Schild metrics are implemented with analytic Christoffel symbols (no automatic differentiation). Thick disk emission uses the Shakura-Sunyaev temperature profile with bremsstrahlung-inspired emissivity. Frequency shift is computed from the ratio of photon 4-momentum contracted with emitter/observer 4-velocities.
 
+### Scattering Physics
+
+<table>
+  <tr>
+    <td align="center"><img src="showcase/scatter_ee_small_b.mp4" width="280"/><br/><em>e-e Coulomb (small b)</em></td>
+    <td align="center"><img src="showcase/scatter_scalar_qed.mp4" width="280"/><br/><em>Scalar QED</em></td>
+    <td align="center"><img src="showcase/scatter_hh_excitation.mp4" width="280"/><br/><em>H-H excitation</em></td>
+  </tr>
+</table>
+
+A six-scenario scattering series from H-H elastic collisions through tree-level scalar QED with virtual photon exchange. All physics is analytic — Gaussian wavepackets convolved with known propagators, rendered through the volume pipeline.
+
+### Volume Rendering and Grid Operations
+
+<table>
+  <tr>
+    <td align="center"><img src="showcase/csg_union.png" width="200"/><br/><em>CSG union</em></td>
+    <td align="center"><img src="showcase/csg_intersection.png" width="200"/><br/><em>CSG intersection</em></td>
+    <td align="center"><img src="showcase/mesh_to_sdf.png" width="200"/><br/><em>Mesh to SDF</em></td>
+    <td align="center"><img src="showcase/sculpture_csg.png" width="200"/><br/><em>CSG sculpture</em></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center"><img src="showcase/diff_ops_gradient.png" width="200"/><br/><em>Gradient</em></td>
+    <td align="center"><img src="showcase/diff_ops_divergence.png" width="200"/><br/><em>Divergence</em></td>
+    <td align="center"><img src="showcase/diff_ops_curl.png" width="200"/><br/><em>Curl</em></td>
+    <td align="center"><img src="showcase/diff_ops_laplacian.png" width="200"/><br/><em>Laplacian</em></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center"><img src="showcase/cloud_single_scatter.png" width="280"/><br/><em>Single scattering</em></td>
+    <td align="center"><img src="showcase/cloud_multi_scatter.png" width="280"/><br/><em>Multiple scattering</em></td>
+    <td align="center"><img src="showcase/16_denoising_comparison.png" width="280"/><br/><em>NLM denoising</em></td>
+  </tr>
+</table>
+
 ## Why Lyr?
 
 Most scientific visualization tools treat rendering as an afterthought — a black box that turns data into pixels. Lyr takes the opposite approach: the rendering itself is the physics.
@@ -65,11 +105,16 @@ Inspired by [Nils Berglund's](https://www.youtube.com/@NilsBerglund) mathematica
 | **Volume Rendering** | Delta tracking (free-flight sampling), ratio tracking (shadow transmittance), single-scatter lighting, transfer functions, phase functions (isotropic, Henyey-Greenstein). |
 | **Post-Processing** | Non-local means denoising, bilateral filtering, tonemapping (ACES filmic, Reinhard, exposure), PNG/EXR output. |
 | **GPU** | NanoVDB flat-buffer with KernelAbstractions.jl delta tracking kernel. Progressive accumulation. CPU fallback. |
-| **Grid Construction** | `build_grid` from sparse `Dict{Coord, T}`. `gaussian_splat` for particle-to-volume conversion. |
+| **Grid Construction** | `build_grid` from sparse `Dict{Coord, T}`. `gaussian_splat` for particle-to-volume. Level-set primitives (sphere, box). CSG (union, intersection, difference). Particles-to-SDF. |
+| **Mesh Operations** | `mesh_to_level_set` for closed manifold meshes. Marching cubes meshing (`volume_to_mesh`). SDF-to-fog and fog-to-SDF conversion. |
 | **Surface Rendering** | DDA hierarchical ray traversal (Amanatides-Woo), level-set sphere tracing, trilinear interpolation. |
-| **General Relativity** | Null geodesic ray tracing (RK4 + Verlet). Schwarzschild (Boyer-Lindquist + Cartesian Kerr-Schild). Thin & thick accretion disk models. Gravitational redshift + Doppler beaming. Volumetric emission-absorption through curved spacetime. |
-| **Quantum Physics** | Hydrogen atom wavefunctions (any n,l,m). Lindblad master equation for open quantum systems. Larmor precession. |
+| **Differential Operators** | Gradient, divergence, curl, Laplacian, mean curvature on VDB grids. Fast sweeping. Morphology (dilate, erode). Segmentation. |
+| **General Relativity** | Null geodesic ray tracing (RK4 + Verlet). Schwarzschild (Boyer-Lindquist + Cartesian Kerr-Schild). Thin and thick accretion disk models. Gravitational redshift + Doppler beaming. Volumetric emission-absorption through curved spacetime. |
+| **Quantum Physics** | Hydrogen atom wavefunctions (any n,l,m). Molecular orbitals (H2 bonding/antibonding). Lindblad master equation for open quantum systems. Larmor precession. |
+| **Scalar QED** | Tree-level Dyson series for charged scalar particles. Born approximation with FFT convolution. Virtual photon exchange (Poisson-solved Coulomb cross-energy). Momentum-space propagation. |
+| **Wavepackets** | Gaussian wavepacket propagation. FFT convolution infrastructure. Morse and Kratzer-Wang potentials. Nuclear trajectory integration. Scattering fields. |
 | **Field Protocol** | `ScalarField3D`, `VectorField3D`, `ComplexScalarField3D`, `ParticleField`, `TimeEvolution` — define physics, get rendered. One-call `visualize()` pipeline. |
+| **Animation** | Frame-by-frame rendering pipeline. Camera modes (fixed, orbit, follow, function). Transfer function presets (electron, photon, excited state). ffmpeg integration via `stitch_to_mp4`. |
 
 ## Quick Start
 
@@ -105,32 +150,39 @@ See [docs/usage.md](docs/usage.md) for the full guide.
 ## Architecture
 
 ```
-VDB File ──parse_vdb──▶ Grid{T} ──build_nanogrid──▶ NanoGrid{T}
-                          │                              │
+VDB File ──parse_vdb──> Grid{T} ──build_nanogrid──> NanoGrid{T}
+                          |                              |
                      Tree structure               Flat GPU buffer
-                     (Root→I2→I1→Leaf)            (byte offsets)
-                          │                              │
-                          └──────── Scene ◀──────────────┘
-                                     │
+                     (Root>I2>I1>Leaf)            (byte offsets)
+                          |                              |
+                          +──────── Scene <──────────────+
+                                     |
                           render_volume_image (MC delta tracking)
                           render_volume_preview (deterministic)
                           gpu_render_volume (KernelAbstractions.jl)
-                                     │
+                                     |
                               Matrix{NTuple{3,T}}
-                                     │
-                        denoise ──▶ tonemap ──▶ write_png/exr
+                                     |
+                        denoise ──> tonemap ──> write_png/exr
 
 Field Protocol:
   ScalarField3D / VectorField3D / ComplexScalarField3D / ParticleField
-                          │
-                     voxelize() ──▶ Grid{Float32} ──▶ visualize()
+                          |
+                     voxelize() ──> Grid{Float32} ──> visualize()
 
 GR Module:
   MetricSpace (Schwarzschild, SchwarzschildKS)
-       │
+       |
   GRCamera + IntegratorConfig + MatterSource (ThinDisk, ThickDisk)
-       │
-  gr_render_image() ── null geodesic integration ──▶ pixels
+       |
+  gr_render_image() ── null geodesic integration ──> pixels
+
+Scalar QED:
+  MomentumGrid + ScalarQEDScattering
+       |
+  Born approximation ── FFT convolution ── Poisson EM cross-energy
+       |
+  render_animation() + stitch_to_mp4() ──> video
 ```
 
 ## Project Status
@@ -138,13 +190,13 @@ GR Module:
 | Phase | Status | Key Components |
 |-------|--------|----------------|
 | 1. Foundation | **Complete** | VDB read/write, DDA traversal, NanoVDB flat layout |
-| 2. Volume Renderer | **Complete** | Delta/ratio tracking, TF, scene, PNG/EXR output, multi-threaded |
-| 3. GPU Acceleration | **~80%** | Delta tracking kernel, NLM + bilateral denoising |
-| 4. Creation Tools | **Complete** | Grid builder, Gaussian splatting, Field Protocol (5 field types) |
-| 5. GR Ray Tracing | **~85%** | Schwarzschild (BL + KS), RK4/Verlet, thin/thick disk, redshift. Missing: Kerr |
-| 6. Ecosystem | Active | Hydrogen orbitals, MD demos, Ising model, showcase suite |
+| 2. Volume Renderer | **Complete** | Delta/ratio tracking, transfer functions, scene graph, PNG/EXR output, multi-threaded |
+| 3. GPU Acceleration | **~85%** | KA delta tracking kernel, NLM + bilateral denoising. CUDA dependency in progress |
+| 4. Creation Tools | **Complete** | Grid builder, Gaussian splatting, Field Protocol (5 field types), CSG, mesh-to-SDF, particles-to-SDF |
+| 5. GR Ray Tracing | **~90%** | Schwarzschild (BL + KS), RK4/Verlet, thin/thick disk, redshift, volumetric emission-absorption, geodesic tracing. Missing: Kerr metric |
+| 6. Ecosystem/Physics | **Active** | Hydrogen orbitals, Lindblad master eq, Ising model, MD demos, scattering series (e-e Coulomb, H-H elastic/excitation/ionization, scalar QED Born approximation, Moller scattering) |
 
-29,565 tests passing. See [VISION.md](VISION.md) for the full roadmap.
+94,000+ tests passing. See [VISION.md](VISION.md) for the full roadmap.
 
 ## Installation
 
@@ -162,7 +214,7 @@ julia --project -e 'using Pkg; Pkg.instantiate()'
 
 ```julia
 julia --project -e 'using Pkg; Pkg.test()'
-# 29,565 tests, ~3.5 minutes
+# 94,000+ tests, ~4 minutes
 ```
 
 ## License

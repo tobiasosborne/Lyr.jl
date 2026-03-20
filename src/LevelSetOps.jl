@@ -1,4 +1,4 @@
-# LevelSetOps.jl - Operations on level set (SDF) grids
+# LevelSetOps.jl — Operations on level set (SDF) grids
 #
 # Level sets store signed distance: negative = inside, zero = surface, positive = outside.
 # Background value = half_width * voxel_size (the narrow band boundary).
@@ -80,6 +80,7 @@ function extract_isosurface_mask(grid::Grid{T}; isovalue::T=zero(T)) where {T <:
                grid_class=GRID_FOG_VOLUME, voxel_size=_grid_voxel_size(grid))
 end
 
+"Return true if `a` and `b` have opposite signs (positive vs non-positive)."
 @inline _sign_change(a, b) = (a > 0) != (b > 0)
 
 # ============================================================================

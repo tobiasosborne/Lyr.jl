@@ -64,8 +64,12 @@ end
 # ── Mesh topology precomputation ──
 
 """
-Precompute per-face normals, angle-weighted vertex pseudonormals, and
-per-edge pseudonormals for sign determination.
+    _precompute_topology(verts, faces) -> (face_normals, vertex_normals, edge_normals)
+
+Precompute per-face normals, angle-weighted vertex pseudonormals, and per-edge
+pseudonormals for sign determination (Baerentzen & Aanes 2005). The angle
+weighting ensures correct inside/outside classification at mesh vertices and
+edges where multiple triangles meet.
 """
 function _precompute_topology(verts::Vector{SVec3d}, faces::AbstractVector)
     nf = length(faces)

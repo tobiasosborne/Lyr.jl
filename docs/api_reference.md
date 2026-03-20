@@ -455,8 +455,359 @@ Rendering Pipeline:
 
 ---
 
+## Phase Functions
+
+| Function | Description |
+|----------|-------------|
+| `IsotropicPhase()` | Uniform scattering in all directions |
+| `HenyeyGreensteinPhase(g)` | Anisotropic scattering; `g ∈ (-1, 1)`, positive = forward, negative = backward |
+
+Used in `VolumeMaterial`:
+```julia
+mat = VolumeMaterial(tf; phase_function=:isotropic)    # default
+mat = VolumeMaterial(tf; phase_function=HenyeyGreensteinPhase(0.8))
+```
+
+---
+
+## Fast Sweeping (SDF Reinitialization)
+
+```julia
+reinitialize_sdf(grid::Grid{T}; iterations=2) → Grid{T}
+```
+
+Reinitializes a distorted level set to a proper signed distance field using the Fast Sweeping Method (Zhao 2004). Run after CSG operations, advection, or any transformation that breaks the |∇φ| = 1 property.
+
+```julia
+sphere = create_level_set_sphere(center=(0.0,0.0,0.0), radius=10.0)
+distorted = csg_union(sphere, box)
+fixed = reinitialize_sdf(distorted)
+```
+
+---
+
+## Meshing (Marching Cubes)
+
+```julia
+volume_to_mesh(grid::Grid{T}; isovalue::T=zero(T)) → (vertices, faces)
+```
+
+Extract a triangle mesh at the given isovalue using Marching Cubes (Lorensen & Cline 1987). Returns `vertices::Vector{NTuple{3,Float64}}` and `faces::Vector{NTuple{3,Int}}` (1-indexed).
+
+SDF convention: `val < isovalue` → inside.
+
+```julia
+sphere = create_level_set_sphere(center=(0.0,0.0,0.0), radius=10.0)
+verts, tris = volume_to_mesh(sphere)
+```
+
+---
+
+## Segmentation
+
+```julia
+segment_active_voxels(grid::Grid{T}) → (Grid{Int32}, Int)
+```
+
+Label connected components of active voxels using 6-face connectivity BFS. Returns a label grid (values 1, 2, 3, ...) and the component count.
+
+```julia
+labels, n = segment_active_voxels(grid)
+println("Found $n connected components")
+```
+
+---
+
+## Point Advection
+
+```julia
+advect_points(positions, field::VectorField3D, dt; method=:rk4) → Vector{NTuple{3,Float64}}
+```
+
+Advect particles through a velocity field for one time step. Multithreaded over particles.
+
+| `method` | Order | Description |
+|----------|-------|-------------|
+| `:euler` | 1st | Forward Euler |
+| `:rk4` | 4th | Classical Runge-Kutta (default) |
+
+```julia
+vfield = VectorField3D((x,y,z) -> SVec3d(-y, x, 0),
+                        BoxDomain(SVec3d(-10,-10,-10), SVec3d(10,10,10)), 5.0)
+new_pos = advect_points([(1.0, 0.0, 0.0)], vfield, 0.1)
+```
+
+---
+
+## Hydrogen Atom
+
+Analytical hydrogen eigenstates and LCAO molecular orbitals as Field Protocol fields.
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `hydrogen_psi` | `hydrogen_psi(n, l, m, x, y, z)` | `ComplexF64` — ψ\_nlm(r,θ,φ) |
+| `HydrogenOrbitalField` | `HydrogenOrbitalField(n, l, m; radius)` | `ComplexScalarField3D` |
+| `MolecularOrbitalField` | `MolecularOrbitalField(coeffs, orbitals, centers; radius)` | `ComplexScalarField3D` |
+| `h2_bonding` | `h2_bonding(R, x, y, z)` | `ComplexF64` — σg bonding orbital |
+| `h2_antibonding` | `h2_antibonding(R, x, y, z)` | `ComplexF64` — σu* antibonding orbital |
+
+```julia
+# Visualize the 3d_{z²} orbital
+field = HydrogenOrbitalField(3, 2, 0; radius=25.0)
+img = visualize(field; width=512, height=512, spp=32)
+
+# H₂ bonding orbital at R = 1.4 a₀
+field = MolecularOrbitalField([1.0, 1.0], [(1,0,0), (1,0,0)],
+                               [(0.0, 0.0, -0.7), (0.0, 0.0, 0.7)]; radius=8.0)
+```
+
+### Building blocks (also exported)
+
+| Function | Description |
+|----------|-------------|
+| `laguerre(n, α, x)` | Associated Laguerre polynomial L\_n^α(x) |
+| `assoc_legendre(l, m, x)` | Associated Legendre P\_l^m(x) with Condon-Shortley phase |
+| `spherical_harmonic(l, m, θ, φ)` | Complex spherical harmonic Y\_l^m(θ,φ) |
+| `hydrogen_radial(n, l, r)` | Radial wavefunction R\_nl(r) |
+
+---
+
+## Wavepackets
+
+Gaussian wavepackets with closed-form time evolution, potential energy surfaces, and nuclear trajectory integration. All in atomic units.
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `gaussian_wavepacket` | `(x, y, z, t, p0, r0, d, m)` | `ComplexF64` |
+| `wavepacket_width` | `(t, d, m)` | `Float64` |
+| `GaussianWavepacketField` | `(p0, r0, d, m; radius, t_range)` | `TimeEvolution` wrapping a field |
+
+```julia
+# Free electron wavepacket
+ψ = gaussian_wavepacket(0.0, 0.0, 0.0, 1.0, (1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 3.0, 1.0)
+```
+
+### Potential surfaces
+
+| Function | Description |
+|----------|-------------|
+| `MorsePotential(D_e, α, r_e)` | Morse potential V(r) = Dₑ(1 - e^{-α(r-rₑ)})² |
+| `H2_MORSE` | Pre-built Morse potential for H₂ ground state |
+| `morse_potential(pot, r)` | Evaluate V(r) |
+| `morse_force(pot, r)` | Evaluate -dV/dr |
+| `kw_potential(r)` | Kolos-Wolniewicz H₂ potential (Σg+ ground state) |
+| `kw_force(r)` | KW force -dV/dr |
+
+### Nuclear dynamics
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `nuclear_trajectory` | `(r0, v0, force_fn, m, dt, nsteps)` | `(positions, velocities)` |
+| `ScatteringField` | `(traj1, traj2, p01, p02, ...)` | `TimeEvolution` for scattering visualization |
+
+---
+
+## Scalar QED
+
+Tree-level scalar QED scattering via time-dependent Born approximation. Virtual photon exchange from Dyson series.
+
+| Type | Signature | Description |
+|------|-----------|-------------|
+| `MomentumGrid` | `MomentumGrid(N, L; mass=1.0)` | 3D FFT grid for spectral computation |
+| `ScalarQEDScattering` | `ScalarQEDScattering(grid, config, ...)` | CPU scattering computation |
+| `ScalarQEDScatteringGPU` | `ScalarQEDScatteringGPU(...)` | GPU-accelerated variant (KernelAbstractions.jl) |
+| `GPUMomentumGrid` | `GPUMomentumGrid(N, L; backend)` | GPU-resident momentum grid |
+
+### Frame evaluation
+
+Each frame is evaluated incrementally: frame f+1 = frame f + 1 Born step. Produces electron density |ψ|² and EM cross-energy E₁·E₂ for rendering.
+
+---
+
+## Animation Pipeline
+
+Renders `TimeEvolution` fields frame-by-frame with automatic voxelization, volume rendering, and MP4 stitching.
+
+### Camera modes
+
+| Type | Signature | Description |
+|------|-----------|-------------|
+| `FixedCamera` | `FixedCamera(position, target; up, fov)` | Static camera |
+| `OrbitCamera` | `OrbitCamera(center, distance; elevation, fov, revolutions)` | Orbiting camera |
+| `FollowCamera` | `FollowCamera(center_fn, distance; elevation, fov)` | Tracking camera |
+| `FunctionCamera` | `FunctionCamera(camera_fn)` | Fully custom `t → Camera` |
+
+### Transfer function presets (quantum visualization)
+
+| Function | Description |
+|----------|-------------|
+| `tf_electron()` | Blue-white for electron probability density |
+| `tf_photon()` | Red-orange for EM field energy |
+| `tf_excited()` | Purple-magenta for excited electronic states |
+
+### Rendering
+
+```julia
+render_animation(fields, materials, camera_mode;
+                 t_range, nframes, fps=30, width=512, height=512,
+                 spp=4, lights=light_studio(), output="animation.mp4") → String
+```
+
+Returns the output file path. Calls `stitch_to_mp4(frame_dir, output; fps)` via ffmpeg.
+
+```julia
+field = GaussianWavepacketField((1.0,0.0,0.0), (-10.0,0.0,0.0), 3.0, 1.0;
+                                 radius=20.0, t_range=(0.0, 20.0))
+mat = VolumeMaterial(tf_electron(); sigma_scale=10.0)
+render_animation([field], [mat], OrbitCamera((0.0,0.0,0.0), 25.0);
+                 t_range=(0.0, 20.0), nframes=60, output="wavepacket.mp4")
+```
+
+---
+
+## General Relativity Module (`Lyr.GR`)
+
+Backward null geodesic ray tracing through curved spacetime.
+
+### Metrics
+
+| Type | Description |
+|------|-------------|
+| `Minkowski` | Flat spacetime (η\_μν) |
+| `Schwarzschild(M)` | Schwarzschild in Boyer-Lindquist coordinates |
+| `SchwarzschildKS(M)` | Schwarzschild in Cartesian Kerr-Schild (horizon-penetrating) |
+| `Kerr(M, a)` | Kerr metric (spinning black hole) with `BoyerLindquist` or `KerrSchild` coords |
+| `WeakField(M)` | Linearized gravity stub |
+
+```julia
+m = Schwarzschild(1.0)  # M = 1 (geometric units)
+horizon_radius(m)       # 2.0
+photon_sphere_radius(m) # 3.0
+isco_radius(m)          # 6.0
+```
+
+### Metric interface
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `metric` | `(m, x::SVec4d)` | `SMat4d` — g\_μν |
+| `metric_inverse` | `(m, x::SVec4d)` | `SMat4d` — g^μν |
+| `is_singular` | `(m, x::SVec4d)` | `Bool` |
+| `coordinate_bounds` | `(m)` | Coordinate range info |
+| `horizon_radius` | `(m)` | `Float64` |
+
+### Camera
+
+```julia
+GRCamera{M}(metric, position, four_velocity, tetrad, fov, resolution)
+
+# Convenience: static observer at Boyer-Lindquist position
+cam = static_camera(Schwarzschild(1.0), SVec4d(0.0, 30.0, π/4, 0.0),
+                     45.0, (800, 600))
+```
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `static_camera` | `(metric, position, fov, resolution)` | `GRCamera` |
+| `static_observer_tetrad` | `(metric, position)` | `(u^μ, e\_a^μ)` |
+| `pixel_to_momentum` | `(cam, i, j)` | `SVec4d` — initial null p\_μ |
+
+### Matter sources
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `ThinDisk(r\_in, r\_out)` | inner/outer radius | Geometrically thin equatorial disk |
+| `ThickDisk(r\_in, r\_out, h, ρ0)` | + half-height, density | 3D volumetric accretion disk |
+| `CelestialSphere(lookup\_fn)` | angle → color | Background sky |
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `disk_emissivity` | `(disk, r)` | `Float64` — I ∝ (r\_in/r)³ |
+| `novikov_thorne_flux` | `(r, M, r\_isco)` | `Float64` — Page & Thorne 1974 |
+| `disk_temperature_nt` | `(r, M, r\_isco; T\_inner)` | `Float64` — NT temperature profile |
+| `keplerian_four_velocity` | `(metric, r)` | `SVec4d` — circular orbit u^μ |
+| `checkerboard_sphere` | `(θ, φ)` | `NTuple{3,Float64}` — checkered sky |
+
+### Integrator
+
+```julia
+IntegratorConfig(; stepper=RK4(), step_size=0.1, max_steps=10000,
+                   r_max=200.0, r_min_factor=1.01, renorm_interval=50)
+```
+
+| Stepper | Description |
+|---------|-------------|
+| `RK4()` | 4th-order Runge-Kutta (default, accurate) |
+| `Verlet()` | Symplectic Stormer-Verlet (better energy conservation) |
+
+### Rendering
+
+```julia
+gr_render_image(cam::GRCamera, config::GRRenderConfig;
+                disk=nothing, volume=nothing, sky=nothing) → Matrix{NTuple{3,Float64}}
+```
+
+```julia
+GRRenderConfig(; integrator=IntegratorConfig(), background=(0.0,0.0,0.02),
+                 use_redshift=true, use_threads=true, samples_per_pixel=1)
+```
+
+### Redshift & Color
+
+| Function | Description |
+|----------|-------------|
+| `redshift_factor(p\_emit, u\_emit, p\_obs, u\_obs)` | Frequency ratio ν\_obs/ν\_emit |
+| `temperature_shift(T, z)` | T\_obs = T\_emit / (1+z) |
+| `blackbody_color(intensity)` | Planck spectrum → sRGB |
+| `planck_to_rgb(T)` | Temperature in K → sRGB |
+
+### Example
+
+```julia
+using Lyr.GR
+
+m = Schwarzschild(1.0)
+cam = static_camera(m, SVec4d(0.0, 30.0, 1.2, 0.0), 45.0, (800, 600))
+disk = ThinDisk(6.0, 30.0)
+config = GRRenderConfig(use_redshift=true)
+img = gr_render_image(cam, config; disk=disk)
+```
+
+---
+
+## Image Comparison Utilities
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `image_rmse` | `(a, b)` | `Float64` — root mean squared error |
+| `image_psnr` | `(a, b)` | `Float64` — peak signal-to-noise ratio |
+| `image_ssim` | `(a, b)` | `Float64` — structural similarity |
+| `image_max_diff` | `(a, b)` | `Float64` — maximum per-pixel difference |
+| `save_reference_render` | `(path, img)` | Save golden render |
+| `load_reference_render` | `(path)` | Load golden render |
+
+---
+
+## Integration Methods
+
+Volume integrator dispatch types:
+
+| Type | Description |
+|------|-------------|
+| `ReferencePathTracer()` | Full Monte Carlo delta tracking (default) |
+| `SingleScatterTracer()` | Single-scatter with ratio tracking shadows |
+| `EmissionAbsorption()` | Deterministic emission-absorption (fast preview) |
+
+Used in `render_volume`:
+```julia
+render_volume(scene, width, height, EmissionAbsorption(); step_size=0.5)
+```
+
+---
+
 ## Source File Map
 
+### Core I/O & Types
 | File | Contents |
 |------|----------|
 | `src/Lyr.jl` | Module definition, includes, exports |
@@ -464,31 +815,95 @@ Rendering Pipeline:
 | `src/TreeTypes.jl` | `LeafNode`, `InternalNode1/2`, `RootNode`, `Grid` |
 | `src/Masks.jl` | `Mask{N,W}`, bit operations |
 | `src/Accessors.jl` | `ValueAccessor`, `get_value`, iterators |
+| `src/Grid.jl` | Grid wrapper combining tree, transform, metadata |
+| `src/Ray.jl` | `Ray` type, AABB intersection |
+| `src/Binary.jl` | Reading primitive types from byte vectors |
+| `src/BinaryWrite.jl` | Writing primitive types to IO streams |
+| `src/Compression.jl` | Zlib + Blosc codec abstraction |
+| `src/VDBConstants.jl` | Shared format constants and version thresholds |
+| `src/Header.jl` | VDB file header parsing |
+| `src/Metadata.jl` | File-level and per-grid metadata |
+| `src/GridDescriptor.jl` | Grid descriptor parsing, value type detection |
+| `src/Transforms.jl` | Index space ↔ world space transforms |
+| `src/TreeRead.jl` | Topology + values deserialization |
+| `src/Values.jl` | Leaf/internal node value parsing |
+| `src/ChildOrigins.jl` | Child origin computation from parent + index |
+| `src/Exceptions.jl` | Typed exception hierarchy |
+| `src/File.jl` | `parse_vdb` — top-level file parsing |
+| `src/FileWrite.jl` | `write_vdb` — VDB file writing (v224) |
+
+### Grid Construction & Operations
+| File | Contents |
+|------|----------|
 | `src/GridBuilder.jl` | `build_grid` (Dict → immutable tree) |
 | `src/GridOps.jl` | `comp_*`, `clip`, `copy_to/from_dense`, `change_background` |
+| `src/Pruning.jl` | `prune` — collapse uniform leaves to tiles |
 | `src/LevelSetPrimitives.jl` | `create_level_set_sphere/box` |
-| `src/Particles.jl` | `gaussian_splat`, `particles_to_sdf` |
-| `src/MeshToVolume.jl` | `mesh_to_level_set` |
 | `src/CSG.jl` | `csg_union/intersection/difference` |
 | `src/LevelSetOps.jl` | `sdf_to_fog`, `check_level_set`, area/volume |
+| `src/Particles.jl` | `gaussian_splat`, `particles_to_sdf`, `particle_trails_to_sdf` |
+| `src/MeshToVolume.jl` | `mesh_to_level_set` |
+| `src/FastSweeping.jl` | `reinitialize_sdf` (Eikonal fast sweeping) |
+| `src/Meshing.jl` | `volume_to_mesh` (Marching Cubes) |
+| `src/Segmentation.jl` | `segment_active_voxels` (connected components) |
+
+### Analysis & Sampling
+| File | Contents |
+|------|----------|
+| `src/Interpolation.jl` | `sample_trilinear/quadratic`, `resample_to_match` |
 | `src/Stencils.jl` | `GradStencil`, `BoxStencil` |
 | `src/DifferentialOps.jl` | `gradient_grid`, `divergence`, `curl_grid`, `mean_curvature` |
-| `src/Interpolation.jl` | `sample_trilinear/quadratic`, `resample_to_match` |
 | `src/Filtering.jl` | `filter_mean`, `filter_gaussian` |
 | `src/Morphology.jl` | `dilate`, `erode` |
-| `src/NanoVDB.jl` | `NanoGrid`, `build_nanogrid` |
-| `src/TransferFunction.jl` | `TransferFunction`, `tf_*` presets |
-| `src/Scene.jl` | `Scene`, `Camera`, lights, `VolumeMaterial`, `VolumeEntry` |
-| `src/VolumeIntegrator.jl` | `render_volume_image`, `render_volume_preview` |
-| `src/VolumeHDDA.jl` | HDDA span-merging iterator |
-| `src/Output.jl` | `write_ppm`, `write_png`, `write_exr` |
-| `src/FieldProtocol.jl` | `ScalarField3D`, `BoxDomain`, `evaluate` |
-| `src/Voxelize.jl` | `voxelize` |
-| `src/Visualize.jl` | `visualize`, camera/material/light presets |
+| `src/DDA.jl` | DDA ray marching (Amanatides-Woo) |
 | `src/Surface.jl` | `find_surface`, `SurfaceHit` |
-| `src/Pruning.jl` | `prune` |
-| `src/Ray.jl` | `Ray` type |
-| `src/DDA.jl` | DDA ray marching |
-| `src/File.jl` | `parse_vdb` |
-| `src/FileWrite.jl` | `write_vdb` |
-| `src/GPU.jl` | GPU delta tracking kernel |
+
+### Rendering Pipeline
+| File | Contents |
+|------|----------|
+| `src/NanoVDB.jl` | `NanoGrid`, `build_nanogrid` — flat GPU buffer |
+| `src/VolumeHDDA.jl` | HDDA span-merging iterator |
+| `src/TransferFunction.jl` | `TransferFunction`, `tf_*` presets |
+| `src/PhaseFunction.jl` | `IsotropicPhase`, `HenyeyGreensteinPhase` |
+| `src/Scene.jl` | `Scene`, `Camera`, lights, `VolumeMaterial`, `VolumeEntry` |
+| `src/IntegrationMethods.jl` | `ReferencePathTracer`, `SingleScatterTracer`, `EmissionAbsorption` |
+| `src/VolumeIntegrator.jl` | `render_volume_image`, `render_volume_preview` |
+| `src/Render.jl` | Low-level rendering utilities |
+| `src/Output.jl` | `write_ppm`, `write_png`, `write_exr` |
+| `src/ImageCompare.jl` | `image_rmse`, `image_psnr`, `image_ssim` |
+| `src/GPU.jl` | GPU delta tracking kernel (KernelAbstractions.jl) |
+
+### Field Protocol & Visualization
+| File | Contents |
+|------|----------|
+| `src/FieldProtocol.jl` | `ScalarField3D`, `VectorField3D`, `ComplexScalarField3D`, `ParticleField`, `TimeEvolution` |
+| `src/Voxelize.jl` | `voxelize` — field → Grid{Float32} |
+| `src/Visualize.jl` | `visualize`, camera/material/light presets |
+| `src/PointAdvection.jl` | `advect_points` — particle advection through velocity fields |
+
+### Physics Modules
+| File | Contents |
+|------|----------|
+| `src/HydrogenAtom.jl` | `hydrogen_psi`, `HydrogenOrbitalField`, `MolecularOrbitalField`, H₂ LCAO |
+| `src/Wavepackets.jl` | `gaussian_wavepacket`, Morse/KW potentials, nuclear dynamics |
+| `src/ScalarQED.jl` | `ScalarQEDScattering`, `MomentumGrid` — tree-level Born approximation |
+| `src/ScalarQEDGPU.jl` | `ScalarQEDScatteringGPU` — GPU-accelerated variant |
+| `src/Animation.jl` | `render_animation`, camera modes, `stitch_to_mp4` |
+
+### General Relativity
+| File | Contents |
+|------|----------|
+| `src/GR/GR.jl` | GR submodule definition, exports |
+| `src/GR/types.jl` | `SVec4d`, `SMat4d`, `GeodesicState`, `GeodesicTrace` |
+| `src/GR/metric.jl` | `MetricSpace` abstract type + interface |
+| `src/GR/metrics/minkowski.jl` | `Minkowski` flat spacetime |
+| `src/GR/metrics/schwarzschild.jl` | `Schwarzschild` (Boyer-Lindquist) |
+| `src/GR/metrics/schwarzschild_ks.jl` | `SchwarzschildKS` (Cartesian Kerr-Schild) |
+| `src/GR/metrics/kerr.jl` | `Kerr` (Boyer-Lindquist + Kerr-Schild coords) |
+| `src/GR/camera.jl` | `GRCamera`, `static_camera`, tetrad construction |
+| `src/GR/integrator.jl` | `IntegratorConfig`, `RK4`, `Verlet`, geodesic integration |
+| `src/GR/matter.jl` | `ThinDisk`, `CelestialSphere`, Keplerian orbits |
+| `src/GR/redshift.jl` | `redshift_factor`, Planck spectrum, blackbody color |
+| `src/GR/volumetric.jl` | `ThickDisk`, volumetric emission-absorption |
+| `src/GR/render.jl` | `gr_render_image`, `GRRenderConfig` |
+| `src/GR/stubs/weak_field.jl` | `WeakField` linearized gravity stub |

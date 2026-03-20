@@ -1,4 +1,4 @@
-# Topology.jl - Child origin computation helpers
+# ChildOrigins.jl — Child origin computation from parent origin and child index
 #
 # IMPORTANT: In the VDB binary format, only root entries store explicit origins.
 # Internal2, Internal1, and Leaf nodes do NOT store their origins in the file.

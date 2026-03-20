@@ -46,6 +46,13 @@ end
 # II. GPU Momentum Grid (arrays on device)
 # ============================================================================
 
+"""
+    GPUMomentumGrid{A}
+
+3D momentum grid with arrays on a KernelAbstractions backend (CPU or GPU).
+Stores position, momentum, and energy grids plus pre-planned FFTs for the
+target array type. All heavy arrays live on-device for zero-copy computation.
+"""
 struct GPUMomentumGrid{A<:AbstractArray}
     N::Int
     L::Float64
@@ -128,8 +135,11 @@ mutable struct GPUFrameState{A<:AbstractArray}
 end
 
 """
-Recompute one Born product on GPU and accumulate into S_k.
-No P_tilde storage — everything computed and consumed immediately.
+    accumulate_one_step!(state, j)
+
+Recompute one Born product at time step `j` on GPU and accumulate into the
+running sums S1_k and S2_k. No P_tilde storage -- everything is computed and
+consumed immediately, eliminating the O(N^3 * nsteps) memory bottleneck.
 """
 function accumulate_one_step!(state::GPUFrameState, j::Int)
     grid = state.grid
@@ -372,5 +382,10 @@ function ScalarQEDScatteringGPU(p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1
     return electron_field, em_field
 end
 
-# Default backend stub — overridden by CUDA extension
+"""
+    _default_gpu_backend() -> KernelAbstractions.Backend
+
+Return the default GPU backend. Falls back to `CPU()` unless overridden by
+a CUDA extension (which returns `CUDABackend()`).
+"""
 _default_gpu_backend() = KernelAbstractions.CPU()

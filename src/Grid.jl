@@ -1,5 +1,4 @@
-# Grid.jl - Grid wrapper combining tree, transform, and metadata
-# Note: GridClass enum is defined in TreeTypes.jl for use in Topology.jl
+# Grid.jl — Grid wrapper combining VDB tree, coordinate transform, and metadata
 
 """
     parse_grid_class(s::String) -> GridClass

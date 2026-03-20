@@ -1,4 +1,4 @@
-# Pruning.jl - Collapse uniform leaf nodes into tiles
+# Pruning.jl — Collapse uniform leaf nodes into constant-value tiles
 #
 # VDB pruning identifies leaf nodes where all 512 voxel values are within
 # a given tolerance and replaces them with constant-value tiles, reducing

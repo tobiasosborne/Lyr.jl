@@ -297,6 +297,12 @@ end
 # Internal helpers
 # ============================================================================
 
+"""
+    _normalize_and_threshold!(data, max_val, threshold)
+
+Normalize all values in `data` to [0, 1] by dividing by `max_val`, then
+delete entries below `threshold`. Operates in-place on the Dict.
+"""
 function _normalize_and_threshold!(data::Dict{Coord, Float32},
                                     max_val::Float64, threshold::Float64)
     inv_max = Float32(1.0 / max_val)
@@ -316,6 +322,11 @@ function _normalize_and_threshold!(data::Dict{Coord, Float32},
     data
 end
 
+"""
+    _apply_threshold!(data, threshold)
+
+Delete entries from `data` whose absolute value is below `threshold`. In-place.
+"""
 function _apply_threshold!(data::Dict{Coord, Float32}, threshold::Float64)
     thresh = Float32(threshold)
     to_delete = Coord[]

@@ -1,4 +1,4 @@
-# GridBuilder.jl - Build VDB grids from sparse voxel data
+# GridBuilder.jl — Build VDB grids from sparse voxel dictionaries
 
 """
     _build_mask(::Type{Mask{N,W}}, indices) -> Mask{N,W}

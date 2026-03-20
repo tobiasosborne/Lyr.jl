@@ -1,4 +1,4 @@
-# Accessors.jl - Tree queries and iteration
+# Accessors.jl — Tree queries, cached value access, and voxel/leaf iteration
 #
 # Indexing Convention:
 # - Coordinate offset functions (leaf_offset, internal1_child_index, etc.) return 0-based indices
@@ -183,9 +183,13 @@ Check if the voxel at coordinate `c` is active, using the accessor's tree.
 is_active(acc::ValueAccessor{T}, c::Coord) where T = _tree_probe(acc.tree, c)[2]
 
 # Tile region sizes for counting active voxels
-# VDB tree hierarchy: Root → Internal2(32³) → Internal1(16³) → Leaf(8³)
+# VDB tree hierarchy: Root -> Internal2(32^3) -> Internal1(16^3) -> Leaf(8^3)
+
+"""Number of voxels covered by a root-level tile (4096^3)."""
 const ROOT_TILE_VOXELS = Int64(4096)^3
+"""Number of voxels covered by an Internal2-level tile (128^3)."""
 const INTERNAL2_TILE_VOXELS = 128^3
+"""Number of voxels covered by an Internal1-level tile (8^3)."""
 const INTERNAL1_TILE_VOXELS = 8^3
 
 """Count active tile voxels in an internal node."""
@@ -294,11 +298,20 @@ end
 # Leaves Iterator
 # =============================================================================
 
+"""
+    LeavesIterator{T}
+
+Iterator over all `LeafNode{T}` nodes in a VDB tree.
+"""
 struct LeavesIterator{T}
     tree::Tree{T}
 end
 
-"""    leaves(tree) — Iterator over all leaf nodes."""
+"""
+    leaves(tree::Tree{T}) -> LeavesIterator{T}
+
+Return an iterator over all leaf nodes in the tree.
+"""
 leaves(tree::Tree{T}) where T = LeavesIterator{T}(tree)
 
 Base.IteratorSize(::Type{LeavesIterator{T}}) where T = Base.SizeUnknown()
@@ -328,10 +341,18 @@ struct MaskVoxelIterator{T, F}
     mask_fn::F   # on_indices or off_indices
 end
 
-"""    active_voxels(tree) — Iterator over active voxels as (Coord, T) pairs."""
+"""
+    active_voxels(tree::Tree{T}) -> MaskVoxelIterator
+
+Return an iterator over active voxels as `(Coord, T)` pairs.
+"""
 active_voxels(tree::Tree{T}) where T = MaskVoxelIterator{T, typeof(on_indices)}(tree, on_indices)
 
-"""    inactive_voxels(tree) — Iterator over inactive voxels as (Coord, T) pairs."""
+"""
+    inactive_voxels(tree::Tree{T}) -> MaskVoxelIterator
+
+Return an iterator over inactive (stored but not active) voxels as `(Coord, T)` pairs.
+"""
 inactive_voxels(tree::Tree{T}) where T = MaskVoxelIterator{T, typeof(off_indices)}(tree, off_indices)
 
 Base.IteratorSize(::Type{<:MaskVoxelIterator}) = Base.SizeUnknown()
@@ -400,7 +421,12 @@ struct AllVoxelsIterator{T}
     tree::Tree{T}
 end
 
-"""    all_voxels(tree) — Iterator over all voxels as (Coord, T, is_active) tuples."""
+"""
+    all_voxels(tree::Tree{T}) -> AllVoxelsIterator{T}
+
+Return an iterator over all stored voxels as `(Coord, T, Bool)` tuples,
+where the Bool indicates whether the voxel is active.
+"""
 all_voxels(tree::Tree{T}) where T = AllVoxelsIterator{T}(tree)
 
 Base.IteratorSize(::Type{AllVoxelsIterator{T}}) where T = Base.SizeUnknown()
@@ -452,6 +478,11 @@ end
 # InternalNode2 Iterator
 # =============================================================================
 
+"""
+    I2NodesIterator{T}
+
+Iterator over all `InternalNode2{T}` nodes in a VDB tree, yielding `(node, origin)` pairs.
+"""
 struct I2NodesIterator{T}
     tree::Tree{T}
 end
@@ -483,6 +514,11 @@ end
 # InternalNode1 Iterator
 # =============================================================================
 
+"""
+    I1NodesIterator{T}
+
+Iterator over all `InternalNode1{T}` nodes in a VDB tree, yielding `(node, origin)` pairs.
+"""
 struct I1NodesIterator{T}
     tree::Tree{T}
 end

@@ -1,4 +1,4 @@
-# ImageCompare.jl — PPM reader and image comparison metrics
+# ImageCompare.jl — PPM reader and image comparison metrics (RMSE, PSNR, SSIM)
 #
 # Provides read_ppm for round-tripping PPM files, plus RMSE, PSNR, SSIM,
 # and max-diff for golden image regression testing.

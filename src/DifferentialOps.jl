@@ -1,4 +1,4 @@
-# DifferentialOps.jl - Spatial differential operators on VDB grids
+# DifferentialOps.jl — Spatial differential operators on VDB grids
 #
 # All operators iterate active voxels, compute via stencil (or pointwise),
 # and return a new grid. Central differences in index space.
@@ -177,6 +177,7 @@ end
 # Vector → Vector: normalize
 # ============================================================================
 
+"Normalize a 3-tuple to unit length; returns zero vector if magnitude < eps(T)."
 @inline function _vec_normalize(v::NTuple{3, T})::NTuple{3, T} where {T <: AbstractFloat}
     n = T(norm(v))
     n < eps(T) ? (zero(T), zero(T), zero(T)) : (v[1] / n, v[2] / n, v[3] / n)

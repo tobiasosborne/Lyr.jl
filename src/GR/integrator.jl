@@ -7,8 +7,13 @@
 # ─────────────────────────────────────────────────────────────────────
 # Stepper types — compile-time dispatch eliminates branch in inner loop
 # ─────────────────────────────────────────────────────────────────────
+"""Abstract type for geodesic integration steppers. See `RK4` and `Verlet`."""
 abstract type AbstractStepper end
+
+"""Classic 4th-order Runge-Kutta stepper. 4 force evaluations per step, non-symplectic."""
 struct RK4    <: AbstractStepper end
+
+"""Stormer-Verlet (leapfrog) stepper. 2nd-order symplectic -- bounded energy drift."""
 struct Verlet <: AbstractStepper end
 
 """
@@ -313,5 +318,10 @@ function integrate_geodesic(m::MetricSpace{4}, initial::GeodesicState,
     GeodesicTrace(states, reason, h_max, n_steps)
 end
 
-# Fallback: horizon_radius for metrics without one (e.g. Minkowski)
+"""
+    horizon_radius(m::MetricSpace) -> Float64
+
+Return the event horizon radius. Defaults to 0.0 for flat spacetimes.
+Overridden by Schwarzschild (2M), Kerr (M + sqrt(M^2 - a^2)), etc.
+"""
 horizon_radius(::MetricSpace) = 0.0

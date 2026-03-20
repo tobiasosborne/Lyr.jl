@@ -15,7 +15,11 @@
 
 """Coordinate system selector for Kerr spacetime."""
 abstract type KerrCoords end
+
+"""Boyer-Lindquist coordinates (t, r, theta, phi). Standard for analytic work."""
 struct BoyerLindquist <: KerrCoords end
+
+"""Kerr-Schild coordinates. Horizon-penetrating (Phase 2)."""
 struct KerrSchild <: KerrCoords end
 
 """
@@ -68,10 +72,12 @@ end
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────
 
+"""Kerr metric function Sigma = r^2 + a^2 cos^2(theta). Zero at the ring singularity."""
 @inline function _kerr_Σ(r, a, cosθ)
     r * r + a * a * cosθ * cosθ
 end
 
+"""Kerr metric function Delta = r^2 - 2Mr + a^2. Zero at the horizons."""
 @inline function _kerr_Δ(r, M, a)
     r * r - 2.0 * M * r + a * a
 end

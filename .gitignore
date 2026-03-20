@@ -27,6 +27,24 @@ scripts/
 !scripts/generate_benchmark_renders.jl
 !scripts/download_disney_cloud.jl
 
+# Large binary files
+*.djvu
+*.mp4
+*.exr
+*.pdf
+*:com.dropbox.attrs
+
+# Frame output directories (intermediate renders)
+showcase/*_frames/
+showcase/mov*/
+
+# Test output
+test-results/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
 # IDE / tooling
 .claude/
 .vscode/

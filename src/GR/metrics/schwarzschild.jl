@@ -31,13 +31,13 @@ end
 """Convenience constructor: default to Schwarzschild coordinates."""
 Schwarzschild(M::Float64) = Schwarzschild{SchwarzschildCoordinates}(M)
 
-"""Event horizon radius r_s = 2M."""
+"""Event horizon radius r_s = 2M. Coordinate singularity in Schwarzschild coordinates."""
 horizon_radius(s::Schwarzschild) = 2.0 * s.M
 
-"""Photon sphere radius r_ph = 3M (unstable circular null orbits)."""
+"""Photon sphere radius r_ph = 3M. Unstable circular null orbits -- light can orbit here."""
 photon_sphere_radius(s::Schwarzschild) = 3.0 * s.M
 
-"""Innermost stable circular orbit r_ISCO = 6M."""
+"""Innermost stable circular orbit r_ISCO = 6M. Inner edge of thin accretion disks."""
 isco_radius(s::Schwarzschild) = 6.0 * s.M
 
 # ─────────────────────────────────────────────────────────────────────

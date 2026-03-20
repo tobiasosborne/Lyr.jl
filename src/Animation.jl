@@ -1,9 +1,8 @@
-# Animation.jl — Scattering animation rendering pipeline
+# Animation.jl — Time-evolving field animation rendering pipeline
 #
-# Glue between time-evolving physics fields and the existing volume renderer.
-# Loops over TimeEvolution fields, renders each frame, and stitches to MP4.
-#
-# No new rendering logic — uses visualize/render_volume_image, Scene, VolumeEntry.
+# Renders TimeEvolution fields frame-by-frame, combining voxelization,
+# volume rendering, and MP4 stitching into a single pipeline.
+# No new rendering logic — uses render_volume_image, Scene, VolumeEntry.
 
 # ============================================================================
 # Camera Modes

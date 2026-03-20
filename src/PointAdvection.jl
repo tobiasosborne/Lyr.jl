@@ -1,6 +1,7 @@
-# PointAdvection.jl - Advect point sets through velocity fields
+# PointAdvection.jl — Advect point sets through velocity fields
 #
-# Euler and RK4 integration for particle advection through VectorField3D.
+# Euler (1st order) and RK4 (4th order) integration for particle advection
+# through VectorField3D. Multithreaded over particles.
 
 """
     advect_points(positions, field::VectorField3D, dt::Float64;

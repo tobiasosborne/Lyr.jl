@@ -1,4 +1,4 @@
-# IntegrationMethods.jl - Volume integration method type hierarchy
+# IntegrationMethods.jl — Volume integration method type hierarchy
 #
 # Dispatch types for render_volume: each struct carries method-specific parameters.
 # Existing render_volume_image / render_volume_preview remain unchanged.

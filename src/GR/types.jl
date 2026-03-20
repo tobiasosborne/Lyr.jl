@@ -1,16 +1,32 @@
 # types.jl — Core type definitions for GR ray tracing
 #
-# Spacetime vectors, matrices, and geodesic data structures.
+# Spacetime 4-vectors, metric tensors, and geodesic data structures.
 
 using StaticArrays
 
-"""4D spacetime vector (t, x¹, x², x³) or (t, r, θ, φ)."""
+"""
+    SVec4d
+
+4D spacetime vector: (t, x1, x2, x3) in Cartesian or (t, r, theta, phi) in
+Boyer-Lindquist coordinates. Stack-allocated via StaticArrays.
+"""
 const SVec4d = SVector{4, Float64}
 
-"""4×4 spacetime metric tensor or similar."""
+"""
+    SMat4d
+
+4x4 spacetime matrix for metric tensors g_mu_nu, inverse metrics g^mu^nu,
+and tetrad frames. Stack-allocated via StaticArrays.
+"""
 const SMat4d = SMatrix{4, 4, Float64, 16}
 
-"""Reason a geodesic integration terminated."""
+"""
+    TerminationReason
+
+Reason a geodesic integration terminated. Values: `ESCAPED` (r > r_max),
+`HORIZON` (r < r_horizon), `SINGULARITY`, `MAX_STEPS`, `HAMILTONIAN_DRIFT`
+(|H| exceeded tolerance), `DISK_HIT` (intersected thin disk).
+"""
 @enum TerminationReason begin
     ESCAPED           # r > r_max
     HORIZON           # r < r_horizon × (1 + ε)

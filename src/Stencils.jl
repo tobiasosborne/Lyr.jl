@@ -1,4 +1,4 @@
-# Stencils.jl - Cached neighborhood accessors for finite-difference operators
+# Stencils.jl — Cached neighborhood accessors for finite-difference operators
 #
 # GradStencil: 7 values (center + 6 face neighbors) for gradient/laplacian
 # BoxStencil: 27 values (3×3×3 cube) for filtering and tricubic interpolation

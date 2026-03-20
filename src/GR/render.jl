@@ -1,8 +1,8 @@
-# render.jl — GR rendering pipeline
+# render.jl — GR rendering pipeline: backward null geodesic ray tracing
 #
 # For each pixel: generate initial null momentum from camera tetrad,
 # integrate geodesic backward in time, determine color from termination
-# condition (horizon → black, escaped → sky/background, disk → emissivity).
+# condition (horizon -> black, escaped -> sky/background, disk -> emissivity).
 
 # Coordinate-system dispatch: convert to spherical
 # Note: _coord_r is defined in integrator.jl (loaded first, shared with matter.jl)
@@ -307,14 +307,20 @@ end
     gr_render_image(cam, config; disk=nothing, volume=nothing, sky=nothing)
         -> Matrix{NTuple{3, Float64}}
 
-Render a GR image. For each pixel, integrate a geodesic backward from
-the camera and determine the color.
+Render a general relativistic image by backward ray tracing null geodesics
+through curved spacetime. For each pixel, the camera tetrad generates an
+initial null momentum; the geodesic is integrated backward using RK4 or
+Stormer-Verlet with adaptive step control near the photon sphere.
 
-Accepts either a `ThinDisk` (equatorial plane) or `VolumetricMatter`
-(emission-absorption integration). If both are provided, volumetric takes
-precedence.
+Accepts either a `ThinDisk` (equatorial plane intersection) or `VolumetricMatter`
+(emission-absorption integration along the geodesic). If both are provided,
+volumetric takes precedence. An optional `CelestialSphere` provides the sky
+background for escaped rays.
 
-Returns a `height × width` matrix of RGB tuples, compatible with `Lyr.write_ppm`.
+Supports stratified supersampling via `config.samples_per_pixel` (spp=4 -> 2x2 grid).
+Multithreaded over image rows when `config.use_threads` is true.
+
+Returns a `height x width` matrix of RGB tuples in [0, 1], compatible with `write_ppm`.
 """
 function gr_render_image(cam::GRCamera, config::GRRenderConfig;
                           disk::Union{ThinDisk, Nothing} = nothing,

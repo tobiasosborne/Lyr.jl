@@ -140,6 +140,13 @@ light_dramatic() = AbstractLight[
 # Auto-camera from grid
 # ============================================================================
 
+"""
+    _auto_camera(grid) -> Camera
+
+Compute a sensible camera position from the grid's active bounding box.
+Places the camera at ~2x the maximum extent, looking at the center,
+from an isometric-like viewpoint.
+"""
 function _auto_camera(grid)
     bbox = active_bounding_box(grid.tree)
     bbox === nothing && throw(ArgumentError("Cannot auto-camera: grid has no active voxels"))

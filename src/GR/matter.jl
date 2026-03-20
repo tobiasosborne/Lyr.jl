@@ -3,7 +3,13 @@
 # Defines geometric objects that emit or absorb light:
 # thin accretion disk, background star field.
 
-"""Abstract type for matter sources intersected by geodesics."""
+"""
+    MatterSource
+
+Abstract type for matter sources intersected by geodesics. Concrete subtypes:
+`ThinDisk` (equatorial plane), `CelestialSphere` (background sky),
+`VolumetricMatter` (3D density distribution).
+"""
 abstract type MatterSource end
 
 """

@@ -1,4 +1,4 @@
-# Compression.jl - Codec abstraction for VDB compression
+# Compression.jl — Codec abstraction for VDB compression and decompression
 
 using Blosc
 using CodecZlib

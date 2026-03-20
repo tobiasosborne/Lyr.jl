@@ -1,4 +1,4 @@
-# Transforms.jl - Coordinate transforms between index and world space
+# Transforms.jl — Coordinate transforms between VDB index space and world space
 
 """
     AbstractTransform

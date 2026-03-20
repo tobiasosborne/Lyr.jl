@@ -1,4 +1,4 @@
-# Coordinates.jl - Coordinate types and tree navigation
+# Coordinates.jl — 3D integer coordinates and bounding boxes for VDB index space
 
 """
     Coord
@@ -35,18 +35,28 @@ Base.:-(a::Coord, b::Coord)::Coord = Coord(a.x - b.x, a.y - b.y, a.z - b.z)
 Base.min(a::Coord, b::Coord)::Coord = Coord(min(a.x, b.x), min(a.y, b.y), min(a.z, b.z))
 Base.max(a::Coord, b::Coord)::Coord = Coord(max(a.x, b.x), max(a.y, b.y), max(a.z, b.z))
 
-# VDB tree dimensions
-const LEAF_DIM = Int32(8)      # 2^3 = 8
+# VDB tree dimensions — each level of the tree has a fixed branching factor
+
+"""Leaf node dimension per axis (2^3 = 8)."""
+const LEAF_DIM = Int32(8)
+"""Log2 of leaf dimension (3)."""
 const LEAF_LOG2 = 3
-const INTERNAL1_DIM = Int32(16)  # 2^4 = 16
+"""Internal1 node dimension per axis (2^4 = 16)."""
+const INTERNAL1_DIM = Int32(16)
+"""Log2 of Internal1 dimension (4)."""
 const INTERNAL1_LOG2 = 4
-const INTERNAL2_DIM = Int32(32)  # 2^5 = 32
+"""Internal2 node dimension per axis (2^5 = 32)."""
+const INTERNAL2_DIM = Int32(32)
+"""Log2 of Internal2 dimension (5)."""
 const INTERNAL2_LOG2 = 5
 
-# Total log2 dimensions for each level
-const LEAF_TOTAL_LOG2 = LEAF_LOG2                                    # 3
-const INTERNAL1_TOTAL_LOG2 = LEAF_LOG2 + INTERNAL1_LOG2              # 7
-const INTERNAL2_TOTAL_LOG2 = LEAF_LOG2 + INTERNAL1_LOG2 + INTERNAL2_LOG2  # 12
+# Total log2 dimensions for each level (cumulative from leaf upward)
+"""Total log2 for leaf level (3)."""
+const LEAF_TOTAL_LOG2 = LEAF_LOG2
+"""Total log2 for Internal1 level (7 = 3+4)."""
+const INTERNAL1_TOTAL_LOG2 = LEAF_LOG2 + INTERNAL1_LOG2
+"""Total log2 for Internal2 level (12 = 3+4+5)."""
+const INTERNAL2_TOTAL_LOG2 = LEAF_LOG2 + INTERNAL1_LOG2 + INTERNAL2_LOG2
 
 """
     leaf_origin(c::Coord) -> Coord
