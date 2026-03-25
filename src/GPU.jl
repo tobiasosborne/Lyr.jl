@@ -691,11 +691,10 @@ function _gpu_get_value_trilinear_cached(buf::B, background::Float32,
             loff = cache_off  # cache hit
         else
             # One traversal to find leaf
-            _, loff = _gpu_get_value_with_leaf(buf, background, x0, y0, z0, header_T_size)
+            val, loff = _gpu_get_value_with_leaf(buf, background, x0, y0, z0, header_T_size)
             if loff == Int32(0)
                 # Tile/background — uniform value across all 8 corners
-                v, _ = _gpu_get_value_with_leaf(buf, background, x0, y0, z0, header_T_size)
-                return (v, Int32(0), Int32(0), Int32(0), Int32(0))
+                return (val, Int32(0), Int32(0), Int32(0), Int32(0))
             end
             cache_ox = leaf_ox; cache_oy = leaf_oy; cache_oz = leaf_oz; cache_off = loff
         end
