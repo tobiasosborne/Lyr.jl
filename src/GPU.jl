@@ -587,6 +587,466 @@ For shadow rays, uses ratio tracking transmittance estimation.
 end
 
 # ============================================================================
+# GPU HDDA — hierarchical empty-space skipping for delta tracking
+# ============================================================================
+
+# --- DDA helpers (GPU-compatible, all scalar, no structs) ---
+
+"""Safe floor to Int32, clamping to avoid InexactError on extreme values."""
+@inline function _gpu_safe_floor_i32(x::Float32)::Int32
+    y = floor(x)
+    !isfinite(y) && return Int32(0)
+    y > 2.0f9 && return typemax(Int32)
+    y < -2.0f9 && return typemin(Int32)
+    Int32(y)
+end
+
+"""Compute initial tmax for one axis of the DDA."""
+@inline function _gpu_initial_tmax(origin_i::Float32, inv_dir_i::Float32,
+                                    ijk_i::Int32, step_i::Int32, vs::Float32)::Float32
+    isinf(inv_dir_i) && return Inf32
+    boundary = Float32(step_i > Int32(0) ? ijk_i + Int32(1) : ijk_i) * vs
+    (boundary - origin_i) * inv_dir_i
+end
+
+"""
+Initialize Amanatides-Woo DDA. Returns 12 scalars:
+(ijk_x,y,z, step_x,y,z, tmax_x,y,z, tdelta_x,y,z).
+"""
+@inline function _gpu_dda_init(
+    ox::Float32, oy::Float32, oz::Float32,
+    dx::Float32, dy::Float32, dz::Float32,
+    idx::Float32, idy::Float32, idz::Float32,
+    tmin::Float32, voxel_size::Float32)
+    inv_vs = 1.0f0 / voxel_size
+    px = ox + (tmin + 1.0f-6) * dx
+    py = oy + (tmin + 1.0f-6) * dy
+    pz = oz + (tmin + 1.0f-6) * dz
+    ijk_x = _gpu_safe_floor_i32(px * inv_vs)
+    ijk_y = _gpu_safe_floor_i32(py * inv_vs)
+    ijk_z = _gpu_safe_floor_i32(pz * inv_vs)
+    step_x = dx >= 0.0f0 ? Int32(1) : Int32(-1)
+    step_y = dy >= 0.0f0 ? Int32(1) : Int32(-1)
+    step_z = dz >= 0.0f0 ? Int32(1) : Int32(-1)
+    tdelta_x = voxel_size * abs(idx)
+    tdelta_y = voxel_size * abs(idy)
+    tdelta_z = voxel_size * abs(idz)
+    tmax_x = _gpu_initial_tmax(ox, idx, ijk_x, step_x, voxel_size)
+    tmax_y = _gpu_initial_tmax(oy, idy, ijk_y, step_y, voxel_size)
+    tmax_z = _gpu_initial_tmax(oz, idz, ijk_z, step_z, voxel_size)
+    (ijk_x, ijk_y, ijk_z, step_x, step_y, step_z,
+     tmax_x, tmax_y, tmax_z, tdelta_x, tdelta_y, tdelta_z)
+end
+
+"""Advance DDA by one cell. Returns (new ijk_x,y,z, new tmax_x,y,z)."""
+@inline function _gpu_dda_step(
+    ijk_x::Int32, ijk_y::Int32, ijk_z::Int32,
+    step_x::Int32, step_y::Int32, step_z::Int32,
+    tmax_x::Float32, tmax_y::Float32, tmax_z::Float32,
+    tdelta_x::Float32, tdelta_y::Float32, tdelta_z::Float32)
+    if tmax_x < tmax_y
+        if tmax_x < tmax_z
+            return (ijk_x + step_x, ijk_y, ijk_z, tmax_x + tdelta_x, tmax_y, tmax_z)
+        else
+            return (ijk_x, ijk_y, ijk_z + step_z, tmax_x, tmax_y, tmax_z + tdelta_z)
+        end
+    else
+        if tmax_y < tmax_z
+            return (ijk_x, ijk_y + step_y, ijk_z, tmax_x, tmax_y + tdelta_y, tmax_z)
+        else
+            return (ijk_x, ijk_y, ijk_z + step_z, tmax_x, tmax_y, tmax_z + tdelta_z)
+        end
+    end
+end
+
+"""Bounds check + child index for a DDA cell within a node."""
+@inline function _gpu_node_query(ijk_x::Int32, ijk_y::Int32, ijk_z::Int32,
+                                  orig_x::Int32, orig_y::Int32, orig_z::Int32,
+                                  child_size::Int32, dim::Int32)
+    lx = ijk_x - orig_x ÷ child_size
+    ly = ijk_y - orig_y ÷ child_size
+    lz = ijk_z - orig_z ÷ child_size
+    inside = (Int32(0) <= lx) & (lx < dim) &
+             (Int32(0) <= ly) & (ly < dim) &
+             (Int32(0) <= lz) & (lz < dim)
+    child_idx = lx * dim * dim + ly * dim + lz
+    (inside, child_idx)
+end
+
+"""Cell exit time = min(tmax_x, tmax_y, tmax_z)."""
+@inline _gpu_cell_time(tx::Float32, ty::Float32, tz::Float32) = min(tx, min(ty, tz))
+
+# --- Root scanning ---
+
+"""Access root slot by index (unrolled scalar storage)."""
+@inline function _gpu_root_get(slot::Int32,
+    t1::Float32, t2::Float32, t3::Float32, t4::Float32,
+    o1::Int32, o2::Int32, o3::Int32, o4::Int32)
+    slot == Int32(1) && return (t1, o1)
+    slot == Int32(2) && return (t2, o2)
+    slot == Int32(3) && return (t3, o3)
+    return (t4, o4)
+end
+
+"""Scan root table, intersect ray with each I2 AABB, return sorted hits (max 4)."""
+@inline function _gpu_collect_root_hits(buf,
+    ox::Float32, oy::Float32, oz::Float32,
+    idx::Float32, idy::Float32, idz::Float32,
+    header_T_size::Int32)
+    root_count = Int32(_gpu_buf_load(UInt32, buf, Int32(37) + header_T_size))
+    root_pos   = Int32(_gpu_buf_load(UInt32, buf, Int32(53) + header_T_size))
+    entry_sz   = Int32(13) + header_T_size
+
+    # 4 slots (sufficient for nearly all grids — one root covers 4096³ voxels)
+    n = Int32(0)
+    t1 = Inf32; o1 = Int32(0)
+    t2 = Inf32; o2 = Int32(0)
+    t3 = Inf32; o3 = Int32(0)
+    t4 = Inf32; o4 = Int32(0)
+
+    @inbounds for i in Int32(0):(root_count - Int32(1))
+        ep = root_pos + i * entry_sz
+        is_child = _gpu_buf_load(UInt8, buf, ep + Int32(12))
+        is_child == 0x01 || continue
+
+        i2_off = Int32(_gpu_buf_load(UInt32, buf, ep + Int32(13)))
+        orix = Float32(_gpu_buf_load(Int32, buf, i2_off))
+        oriy = Float32(_gpu_buf_load(Int32, buf, i2_off + Int32(4)))
+        oriz = Float32(_gpu_buf_load(Int32, buf, i2_off + Int32(8)))
+
+        tmin, tmax = _gpu_ray_box_intersect(ox, oy, oz, idx, idy, idz,
+            orix, oriy, oriz, orix + 4096.0f0, oriy + 4096.0f0, oriz + 4096.0f0)
+        if tmin < tmax
+            # Insertion sort into sorted slots
+            if tmin < t4
+                if tmin < t3
+                    t4 = t3; o4 = o3
+                    if tmin < t2
+                        t3 = t2; o3 = o2
+                        if tmin < t1
+                            t2 = t1; o2 = o1
+                            t1 = tmin; o1 = i2_off
+                        else
+                            t2 = tmin; o2 = i2_off
+                        end
+                    else
+                        t3 = tmin; o3 = i2_off
+                    end
+                else
+                    t4 = tmin; o4 = i2_off
+                end
+            end
+            n = min(n + Int32(1), Int32(4))
+        end
+    end
+    (n, t1, o1, t2, o2, t3, o3, t4, o4)
+end
+
+# --- Delta tracking within a single HDDA span ---
+
+"""Run delta tracking within [t0, t1]. Returns updated (acc_r,g,b, throughput, rng, terminated)."""
+@inline function _gpu_integrate_span(
+    buf, tf_lut,
+    ox::Float32, oy::Float32, oz::Float32,
+    dx::Float32, dy::Float32, dz::Float32,
+    idx_r::Float32, idy_r::Float32, idz_r::Float32,
+    t0::Float32, t1::Float32,
+    background::Float32, header_T_size::Int32,
+    sigma_maj::Float32, albedo::Float32, emission_scale::Float32,
+    tf_dmin::Float32, tf_dmax::Float32,
+    light_dx::Float32, light_dy::Float32, light_dz::Float32,
+    light_r::Float32, light_g::Float32, light_b::Float32,
+    bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
+    bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
+    acc_r::Float32, acc_g::Float32, acc_b::Float32,
+    throughput::Float32, rng_state::UInt32)
+
+    terminated = false
+    t = t0
+    for _ in Int32(1):Int32(512)
+        xi, rng_state = _gpu_xorshift(rng_state)
+        xi = max(xi, 1.0f-10)
+        t += -log(xi) / sigma_maj
+        t >= t1 && break
+
+        pos_x = ox + t * dx
+        pos_y = oy + t * dy
+        pos_z = oz + t * dz
+        density = _gpu_get_value_trilinear(buf, background, pos_x, pos_y, pos_z, header_T_size)
+        density = max(0.0f0, density)
+
+        accept_prob = density  # density * sigma_maj / sigma_maj
+        xi2, rng_state = _gpu_xorshift(rng_state)
+        if xi2 < accept_prob
+            tf_r, tf_g, tf_b, tf_a = _gpu_tf_lookup(tf_lut, density, tf_dmin, tf_dmax)
+            xi3, rng_state = _gpu_xorshift(rng_state)
+            if xi3 < albedo
+                # Shadow ray (uses full bbox, not HDDA)
+                shadow_ox = pos_x + 0.01f0 * light_dx
+                shadow_oy = pos_y + 0.01f0 * light_dy
+                shadow_oz = pos_z + 0.01f0 * light_dz
+                s_idx = light_dx == 0.0f0 ? copysign(Inf32, light_dx) : 1.0f0 / light_dx
+                s_idy = light_dy == 0.0f0 ? copysign(Inf32, light_dy) : 1.0f0 / light_dy
+                s_idz = light_dz == 0.0f0 ? copysign(Inf32, light_dz) : 1.0f0 / light_dz
+                st_enter, st_exit = _gpu_ray_box_intersect(
+                    shadow_ox, shadow_oy, shadow_oz, s_idx, s_idy, s_idz,
+                    bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z)
+                transmittance = 1.0f0
+                if st_enter < st_exit
+                    st = st_enter
+                    for _ in Int32(1):Int32(256)
+                        xi_s, rng_state = _gpu_xorshift(rng_state)
+                        xi_s = max(xi_s, 1.0f-10)
+                        st += -log(xi_s) / sigma_maj
+                        st >= st_exit && break
+                        sd = _gpu_get_value_trilinear(buf, background,
+                            shadow_ox + st * light_dx, shadow_oy + st * light_dy,
+                            shadow_oz + st * light_dz, header_T_size)
+                        sd = max(0.0f0, sd)
+                        transmittance *= (1.0f0 - sd)
+                        transmittance < 1.0f-10 && break
+                    end
+                end
+                phase = 1.0f0 / (4.0f0 * Float32(π))
+                scale = throughput * transmittance * phase * emission_scale
+                acc_r += tf_r * light_r * scale
+                acc_g += tf_g * light_g * scale
+                acc_b += tf_b * light_b * scale
+            end
+            terminated = true
+            break
+        end
+    end
+    (acc_r, acc_g, acc_b, throughput, rng_state, terminated)
+end
+
+# --- Main HDDA traversal ---
+
+"""
+    _gpu_hdda_delta_track(...)
+
+Combined HDDA traversal + delta tracking. Walks Root→I2→I1 via DDA,
+merges adjacent active cells into spans, runs delta tracking only within
+active spans. Skips ~97% of empty space on sparse grids.
+"""
+@inline function _gpu_hdda_delta_track(
+    buf, tf_lut,
+    ox::Float32, oy::Float32, oz::Float32,
+    dx::Float32, dy::Float32, dz::Float32,
+    idx_r::Float32, idy_r::Float32, idz_r::Float32,
+    background::Float32, header_T_size::Int32,
+    sigma_maj::Float32, albedo::Float32, emission_scale::Float32,
+    tf_dmin::Float32, tf_dmax::Float32,
+    light_dx::Float32, light_dy::Float32, light_dz::Float32,
+    light_r::Float32, light_g::Float32, light_b::Float32,
+    bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
+    bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
+    rng_state::UInt32)
+
+    acc_r = 0.0f0; acc_g = 0.0f0; acc_b = 0.0f0
+    throughput = 1.0f0
+
+    # Phase 0: collect root hits
+    n_roots, rt1, ro1, rt2, ro2, rt3, ro3, rt4, ro4 =
+        _gpu_collect_root_hits(buf, ox, oy, oz, idx_r, idy_r, idz_r, header_T_size)
+    n_roots == Int32(0) && return (acc_r, acc_g, acc_b, rng_state)
+
+    span_t0 = -1.0f0  # no open span
+
+    for ri in Int32(1):n_roots
+        r_tmin, i2_off = _gpu_root_get(ri, rt1, rt2, rt3, rt4, ro1, ro2, ro3, ro4)
+        isinf(r_tmin) && break
+
+        i2_orig_x = _gpu_buf_load(Int32, buf, i2_off)
+        i2_orig_y = _gpu_buf_load(Int32, buf, i2_off + Int32(4))
+        i2_orig_z = _gpu_buf_load(Int32, buf, i2_off + Int32(8))
+
+        # I2 DDA init (stride 128, dim 32)
+        i2_ijk_x, i2_ijk_y, i2_ijk_z, i2_step_x, i2_step_y, i2_step_z,
+        i2_tmax_x, i2_tmax_y, i2_tmax_z, i2_td_x, i2_td_y, i2_td_z =
+            _gpu_dda_init(ox, oy, oz, dx, dy, dz, idx_r, idy_r, idz_r, r_tmin, 128.0f0)
+        i2_t_entry = r_tmin
+
+        for _ in Int32(1):Int32(32768)  # 32³ max
+            i2_inside, i2_cidx = _gpu_node_query(i2_ijk_x, i2_ijk_y, i2_ijk_z,
+                i2_orig_x, i2_orig_y, i2_orig_z, Int32(128), Int32(32))
+            !i2_inside && break
+
+            i2_has_child = _gpu_buf_mask_is_on(buf, i2_off + Int32(_I2_CMASK_OFF), i2_cidx)
+
+            if i2_has_child
+                # Descend to I1
+                tidx = _gpu_buf_count_on_before(buf,
+                    i2_off + Int32(_I2_CMASK_OFF), i2_off + Int32(_I2_CPREFIX_OFF), i2_cidx)
+                i1_off = Int32(_gpu_buf_load(UInt32, buf,
+                    i2_off + Int32(_I2_DATA_OFF) + tidx * Int32(4)))
+
+                i1_orig_x = _gpu_buf_load(Int32, buf, i1_off)
+                i1_orig_y = _gpu_buf_load(Int32, buf, i1_off + Int32(4))
+                i1_orig_z = _gpu_buf_load(Int32, buf, i1_off + Int32(8))
+
+                # Ray-AABB test for I1 (128 voxels per axis)
+                i1_tmin, i1_tmax = _gpu_ray_box_intersect(ox, oy, oz, idx_r, idy_r, idz_r,
+                    Float32(i1_orig_x), Float32(i1_orig_y), Float32(i1_orig_z),
+                    Float32(i1_orig_x) + 128.0f0, Float32(i1_orig_y) + 128.0f0,
+                    Float32(i1_orig_z) + 128.0f0)
+
+                if i1_tmin < i1_tmax
+                    # I1 DDA init (stride 8, dim 16)
+                    i1_ijk_x, i1_ijk_y, i1_ijk_z, i1_step_x, i1_step_y, i1_step_z,
+                    i1_tmax_x, i1_tmax_y, i1_tmax_z, i1_td_x, i1_td_y, i1_td_z =
+                        _gpu_dda_init(ox, oy, oz, dx, dy, dz, idx_r, idy_r, idz_r,
+                            i1_tmin, 8.0f0)
+                    i1_t_entry = i1_tmin
+
+                    for _ in Int32(1):Int32(4096)  # 16³ max
+                        i1_inside, i1_cidx = _gpu_node_query(i1_ijk_x, i1_ijk_y, i1_ijk_z,
+                            i1_orig_x, i1_orig_y, i1_orig_z, Int32(8), Int32(16))
+                        !i1_inside && break
+
+                        i1_active = _gpu_buf_mask_is_on(buf, i1_off + Int32(_I1_CMASK_OFF), i1_cidx) ||
+                                    _gpu_buf_mask_is_on(buf, i1_off + Int32(_I1_VMASK_OFF), i1_cidx)
+
+                        if i1_active
+                            # Open or extend span
+                            if span_t0 < 0.0f0
+                                span_t0 = i1_t_entry
+                            end
+                        elseif span_t0 >= 0.0f0
+                            # Close span and integrate
+                            acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                                _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                                    idx_r, idy_r, idz_r, span_t0, i1_t_entry,
+                                    background, header_T_size, sigma_maj, albedo, emission_scale,
+                                    tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
+                                    light_r, light_g, light_b,
+                                    bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
+                                    acc_r, acc_g, acc_b, throughput, rng_state)
+                            span_t0 = -1.0f0
+                            terminated && return (acc_r, acc_g, acc_b, rng_state)
+                        end
+
+                        i1_t_entry = _gpu_cell_time(i1_tmax_x, i1_tmax_y, i1_tmax_z)
+                        i1_ijk_x, i1_ijk_y, i1_ijk_z, i1_tmax_x, i1_tmax_y, i1_tmax_z =
+                            _gpu_dda_step(i1_ijk_x, i1_ijk_y, i1_ijk_z,
+                                i1_step_x, i1_step_y, i1_step_z,
+                                i1_tmax_x, i1_tmax_y, i1_tmax_z,
+                                i1_td_x, i1_td_y, i1_td_z)
+                    end
+                    # I1 exhausted — span may stay open across I1 boundary
+                else
+                    # Ray misses I1 AABB — close span if open
+                    if span_t0 >= 0.0f0
+                        acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                            _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                                idx_r, idy_r, idz_r, span_t0, i2_t_entry,
+                                background, header_T_size, sigma_maj, albedo, emission_scale,
+                                tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
+                                light_r, light_g, light_b,
+                                bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
+                                acc_r, acc_g, acc_b, throughput, rng_state)
+                        span_t0 = -1.0f0
+                        terminated && return (acc_r, acc_g, acc_b, rng_state)
+                    end
+                end
+            else
+                # No child — check I2 tile
+                i2_has_tile = _gpu_buf_mask_is_on(buf, i2_off + Int32(_I2_VMASK_OFF), i2_cidx)
+                if i2_has_tile
+                    if span_t0 < 0.0f0
+                        span_t0 = i2_t_entry
+                    end
+                elseif span_t0 >= 0.0f0
+                    acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                        _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                            idx_r, idy_r, idz_r, span_t0, i2_t_entry,
+                            background, header_T_size, sigma_maj, albedo, emission_scale,
+                            tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
+                            light_r, light_g, light_b,
+                            bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
+                            acc_r, acc_g, acc_b, throughput, rng_state)
+                    span_t0 = -1.0f0
+                    terminated && return (acc_r, acc_g, acc_b, rng_state)
+                end
+            end
+
+            i2_t_entry = _gpu_cell_time(i2_tmax_x, i2_tmax_y, i2_tmax_z)
+            i2_ijk_x, i2_ijk_y, i2_ijk_z, i2_tmax_x, i2_tmax_y, i2_tmax_z =
+                _gpu_dda_step(i2_ijk_x, i2_ijk_y, i2_ijk_z,
+                    i2_step_x, i2_step_y, i2_step_z,
+                    i2_tmax_x, i2_tmax_y, i2_tmax_z,
+                    i2_td_x, i2_td_y, i2_td_z)
+        end
+
+        # Root entry exhausted — close any open span
+        if span_t0 >= 0.0f0
+            acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                    idx_r, idy_r, idz_r, span_t0, i2_t_entry,
+                    background, header_T_size, sigma_maj, albedo, emission_scale,
+                    tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
+                    light_r, light_g, light_b,
+                    bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
+                    acc_r, acc_g, acc_b, throughput, rng_state)
+            span_t0 = -1.0f0
+            terminated && return (acc_r, acc_g, acc_b, rng_state)
+        end
+    end
+
+    (acc_r, acc_g, acc_b, rng_state)
+end
+
+# --- HDDA delta tracking kernel ---
+
+"""GPU kernel with HDDA empty-space skipping. Same interface as delta_tracking_kernel!."""
+@kernel function delta_tracking_hdda_kernel!(output, buf, tf_lut,
+    background::Float32, sigma_maj::Float32, albedo::Float32, emission_scale::Float32,
+    cam_px::Float32, cam_py::Float32, cam_pz::Float32,
+    cam_fx::Float32, cam_fy::Float32, cam_fz::Float32,
+    cam_rx::Float32, cam_ry::Float32, cam_rz::Float32,
+    cam_ux::Float32, cam_uy::Float32, cam_uz::Float32,
+    cam_fov::Float32, width::Int32, height::Int32,
+    bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
+    bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
+    light_dx::Float32, light_dy::Float32, light_dz::Float32,
+    light_r::Float32, light_g::Float32, light_b::Float32,
+    tf_dmin::Float32, tf_dmax::Float32,
+    header_T_size::Int32, seed::UInt32)
+
+    idx = @index(Global, Linear)
+    px = ((idx - Int32(1)) % width) + Int32(1)
+    py = ((idx - Int32(1)) ÷ width) + Int32(1)
+    rng_state = _gpu_wang_hash(_gpu_wang_hash(UInt32(idx)) ⊻ seed)
+    jx, rng_state = _gpu_xorshift(rng_state)
+    jy, rng_state = _gpu_xorshift(rng_state)
+    u = (Float32(px) - 1.0f0 + jx) / Float32(width)
+    v = 1.0f0 - (Float32(py) - 1.0f0 + jy) / Float32(height)
+    aspect = Float32(width) / Float32(height)
+    half_fov = tan(cam_fov * 0.5f0 * Float32(π) / 180.0f0)
+    rpx = (2.0f0 * u - 1.0f0) * aspect * half_fov
+    rpy = (2.0f0 * v - 1.0f0) * half_fov
+    dx = cam_fx + cam_rx * rpx + cam_ux * rpy
+    dy = cam_fy + cam_ry * rpx + cam_uy * rpy
+    dz = cam_fz + cam_rz * rpx + cam_uz * rpy
+    dlen = sqrt(dx * dx + dy * dy + dz * dz)
+    dlen = max(dlen, 1.0f-10)
+    dx /= dlen; dy /= dlen; dz /= dlen
+    idx_r = dx == 0.0f0 ? copysign(Inf32, dx) : 1.0f0 / dx
+    idy_r = dy == 0.0f0 ? copysign(Inf32, dy) : 1.0f0 / dy
+    idz_r = dz == 0.0f0 ? copysign(Inf32, dz) : 1.0f0 / dz
+
+    acc_r, acc_g, acc_b, _ = _gpu_hdda_delta_track(
+        buf, tf_lut, cam_px, cam_py, cam_pz, dx, dy, dz, idx_r, idy_r, idz_r,
+        background, header_T_size, sigma_maj, albedo, emission_scale,
+        tf_dmin, tf_dmax, light_dx, light_dy, light_dz, light_r, light_g, light_b,
+        bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z, rng_state)
+
+    @inbounds output[idx] = (clamp(acc_r, 0.0f0, 1.0f0),
+                              clamp(acc_g, 0.0f0, 1.0f0),
+                              clamp(acc_b, 0.0f0, 1.0f0))
+end
+
+# ============================================================================
 # GPU render dispatch
 # ============================================================================
 
@@ -660,7 +1120,8 @@ is pre-baked into a 256-entry LUT for device-side evaluation.
 function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
-                            backend=_default_gpu_backend()) where T
+                            backend=_default_gpu_backend(),
+                            hdda::Bool=true) where T
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera
@@ -726,7 +1187,7 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     # Progressive accumulation for multi-spp
     acc_buf = Adapt.adapt(backend, fill(z3, npixels))
 
-    kernel! = delta_tracking_kernel!(backend)
+    kernel! = hdda ? delta_tracking_hdda_kernel!(backend) : delta_tracking_kernel!(backend)
 
     for s in 1:spp
         kernel!(output, dev_buf, dev_tf,
