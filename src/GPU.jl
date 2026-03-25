@@ -18,6 +18,48 @@ using KernelAbstractions
 using Adapt
 
 # ============================================================================
+# GPU Backend Selection
+# ============================================================================
+
+"""
+    _GPU_BACKEND
+
+Global backend reference. Set to `CUDABackend()` by the LyrCUDAExt extension
+when CUDA.jl is loaded and a functional GPU is detected. Falls back to
+`KernelAbstractions.CPU()` otherwise.
+
+Do not set this directly — use `_default_gpu_backend()` to read it.
+"""
+const _GPU_BACKEND = Ref{Any}(KernelAbstractions.CPU())
+
+"""
+    _default_gpu_backend() -> KernelAbstractions.Backend
+
+Return the default GPU backend. Returns `CUDABackend()` when CUDA.jl is loaded
+and a functional GPU is detected, otherwise `CPU()`.
+"""
+_default_gpu_backend() = _GPU_BACKEND[]
+
+"""
+    gpu_available() -> Bool
+
+Return `true` if a CUDA GPU backend is active. Requires both CUDA.jl
+to be loaded and a functional GPU device to be present.
+"""
+gpu_available() = !(_GPU_BACKEND[] isa KernelAbstractions.CPU)
+
+"""
+    gpu_info() -> String
+
+Return a description of the active GPU backend.
+Dispatches to `_gpu_info(backend)` which the LyrCUDAExt extension
+extends with a method for CUDABackend.
+"""
+gpu_info() = _gpu_info(_GPU_BACKEND[])
+_gpu_info(::KernelAbstractions.CPU) = "GPU backend: CPU fallback (load CUDA.jl for GPU acceleration)"
+_gpu_info(backend) = "GPU backend: $(typeof(backend))"
+
+# ============================================================================
 # GPU NanoGrid wrapper
 # ============================================================================
 
@@ -54,10 +96,36 @@ end
 # array types for GPU compatibility. They are designed to be called inside
 # @kernel functions.
 
-"""Device-side buffer load — read a value of type T from position pos."""
-@inline function _gpu_buf_load(::Type{T}, buf, pos::Int32) where T
-    # For GPU kernels: use unsafe_load pattern that works on device
-    @inbounds reinterpret(T, @view buf[pos:pos + Int32(sizeof(T)) - Int32(1)])[1]
+"""Device-side buffer load — read bytes and reconstruct via bit shifts (little-endian).
+Uses scalar reinterpret for float/signed types, which is GPU-safe (register bitcast)."""
+@inline function _gpu_buf_load(::Type{UInt8}, buf, pos::Int32)
+    @inbounds buf[pos]
+end
+
+@inline function _gpu_buf_load(::Type{UInt32}, buf, pos::Int32)
+    @inbounds begin
+        b0 = UInt32(buf[pos])
+        b1 = UInt32(buf[pos + Int32(1)])
+        b2 = UInt32(buf[pos + Int32(2)])
+        b3 = UInt32(buf[pos + Int32(3)])
+    end
+    b0 | (b1 << UInt32(8)) | (b2 << UInt32(16)) | (b3 << UInt32(24))
+end
+
+@inline function _gpu_buf_load(::Type{Int32}, buf, pos::Int32)
+    reinterpret(Int32, _gpu_buf_load(UInt32, buf, pos))
+end
+
+@inline function _gpu_buf_load(::Type{Float32}, buf, pos::Int32)
+    reinterpret(Float32, _gpu_buf_load(UInt32, buf, pos))
+end
+
+@inline function _gpu_buf_load(::Type{UInt64}, buf, pos::Int32)
+    @inbounds begin
+        lo = UInt64(_gpu_buf_load(UInt32, buf, pos))
+        hi = UInt64(_gpu_buf_load(UInt32, buf, pos + Int32(4)))
+    end
+    lo | (hi << UInt64(32))
 end
 
 """Device-side mask bit test — check if bit bit_idx is on in mask at mask_pos."""
@@ -65,7 +133,7 @@ end
     word_idx = bit_idx >> Int32(6)
     bit_in_word = bit_idx & Int32(63)
     word_pos = mask_pos + word_idx * Int32(8)
-    @inbounds word = reinterpret(UInt64, @view buf[word_pos:word_pos + Int32(7)])[1]
+    word = _gpu_buf_load(UInt64, buf, word_pos)
     (word >> bit_in_word) & UInt64(1) != UInt64(0)
 end
 
@@ -574,7 +642,7 @@ end
     gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                        width::Int, height::Int;
                        spp=1, seed=UInt64(42),
-                       backend=KernelAbstractions.CPU()) -> Matrix{NTuple{3, Float32}}
+                       backend=_default_gpu_backend()) -> Matrix{NTuple{3, Float32}}
 
 Render a volume using delta tracking on a KernelAbstractions backend.
 
@@ -587,12 +655,12 @@ is pre-baked into a 256-entry LUT for device-side evaluation.
 - `width`, `height` - Image dimensions
 - `spp` - Samples per pixel (accumulated with progressive averaging)
 - `seed` - RNG seed
-- `backend` - KernelAbstractions backend (default: CPU())
+- `backend` - KernelAbstractions backend (default: auto-detected via `_default_gpu_backend()`)
 """
 function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
-                            backend=KernelAbstractions.CPU()) where T
+                            backend=_default_gpu_backend()) where T
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera
@@ -685,11 +753,12 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
         KernelAbstractions.synchronize(backend)
     end
 
-    # Average and reshape
+    # Copy accumulated results to host, then reshape
     inv_spp = 1.0f0 / Float32(spp)
+    host_buf = Array(acc_buf)  # device → host transfer
     result = Matrix{NTuple{3, Float32}}(undef, height, width)
     for i in 1:npixels
-        r, g, b = acc_buf[i]
+        r, g, b = host_buf[i]
         x = ((i - 1) % width) + 1
         y = ((i - 1) ÷ width) + 1
         result[y, x] = (clamp(r * inv_spp, 0.0f0, 1.0f0),

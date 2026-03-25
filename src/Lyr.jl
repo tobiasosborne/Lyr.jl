@@ -187,6 +187,7 @@ export check_level_set, LevelSetDiagnostic
 
 # --- NanoVDB (high-level) ---
 export NanoGrid, build_nanogrid
+export gpu_available, gpu_info, gpu_render_volume
 
 # --- Field Protocol ---
 export ScalarField3D, VectorField3D, ComplexScalarField3D

@@ -11,54 +11,7 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-03-20, evening) -- Project Icarus: Agent-Driven Research Reproduction
-
-**Status**: GREEN -- Infrastructure complete, PRL deep analysis done.
-
-### What Was Done
-
-**Project Icarus** (`~/Projects/Icarus/`) — experiment to assess how hard it is to use AI agents to reproduce published theoretical physics papers.
-
-**Paper Selection:**
-- Fetched APS RSS feeds for Phys. Rev. Lett/A/B/C/D/E (100 recent articles each)
-- Filtered for theoretical papers using keyword scoring, sampled 1 per journal via `/dev/urandom`
-- Resolved DOIs via crossref content negotiation (JSON metadata)
-- User manually downloaded 6 PDFs (Cloudflare blocked all automated approaches — headless playwright, curl, full chromium with anti-detection all failed)
-
-**Papers Selected:**
-| Journal | Paper | Authors |
-|---------|-------|---------|
-| PRL | Flow between Extremal One-Point Energy Correlators in QCD | Riembau, Son |
-| PRA | Integer factorization via tensor-network Schnorr's sieving | Tesoro, Siloi, Jaschke, Magnifico, Montangero |
-| PRB | Pairing symmetry crossover d→s± in bilayer nickelate | Xiong, Cai, Ma |
-| PRC | Direct boundary matching: nuclear scattering with Lagrange-Legendre | Lei |
-| PRD | Early dark energy constraints in F(R) gravity | Chen, Katsuragawa, Nojiri, Qiu |
-| PRE | Operator learning augmented PINNs for sharp-feature PDEs | Lin, Mao, Wang |
-
-**Phase 1 — Triage (6 parallel Opus agents):**
-- Each paper got a `reproduction_plan.md` assessing: prerequisites, figure-by-figure breakdown, computational requirements, effort estimates, showstoppers
-- Key finding: PRC and PRD are highly automatable (70-80%), PRA and PRL have more infrastructure dependencies
-- User correction: PRA (tensor-network factoring) was rated hardest but user knows the authors and says it's "very easy to fully automate" — reveals agent difficulty bias toward information asymmetry over actual complexity
-
-**Phase 2 — PRL Deep Dive (3 parallel Opus agents):**
-1. **Theory Audit** (`theory_audit.md`, 40.5K): Equation-by-equation audit of all 8 equations + 6 unnumbered claims. Flagged potential typo in Eq. (7) (missing ζ₅ factor on C_F²C_A term). Identified 7 Lean 4 formalization candidates. Confirmed `af` CLI available.
-2. **Infrastructure Detective** (`infrastructure_report.md`, 21.4K): Downloaded 19 reference papers to `refs/`, 7 software packages to `tools/` (HPL 2.0, PolyLogTools, RunDec v2.1+v3, PHOKHARA 10.0, KNT VP code, PDG R-ratio data). **Critical win: N3LO coefficient functions (He et al. arXiv 2503.20441) freely available as Mathematica ancillary files.**
-3. **Computation Pipeline** (`computation_pipeline.md`, 20.5K + `reproduce.jl`, 44.3K): Figure-by-figure reconstruction, full DAG, Julia starter code with α_s running implemented and TODOs for external inputs.
-
-### Key Insights
-- Cloudflare completely blocks automated journal access (headless, headed, curl — all fail). APS RSS feeds work for metadata but not PDFs.
-- Agent difficulty estimates are biased by information asymmetry, not computational complexity
-- The `af` adversarial formalization CLI is available at `/home/tobiasosborne/go/bin/af`
-- N3LO ancillary files being public collapses the main reproduction risk for PRL
-
-### Not Done
-- Actual reproduction of any paper (plans only)
-- Deep dives for PRA/PRB/PRC/PRD/PRE (only PRL got full treatment)
-- Icarus is not yet a git repo — initialize when ready to track
-
----
-
-## Previous Session (2026-03-20) -- Documentation Review + Repo Tidiness
+## Latest Session (2026-03-20) -- Documentation Review + Repo Tidiness
 
 **Status**: GREEN -- Major documentation overhaul complete. No code logic changed.
 

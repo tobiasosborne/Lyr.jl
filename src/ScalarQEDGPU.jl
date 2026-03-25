@@ -382,10 +382,5 @@ function ScalarQEDScatteringGPU(p1::NTuple{3,Float64}, r1::NTuple{3,Float64}, d1
     return electron_field, em_field
 end
 
-"""
-    _default_gpu_backend() -> KernelAbstractions.Backend
-
-Return the default GPU backend. Falls back to `CPU()` unless overridden by
-a CUDA extension (which returns `CUDABackend()`).
-"""
-_default_gpu_backend() = KernelAbstractions.CPU()
+# GPU backend infrastructure (_GPU_BACKEND, _default_gpu_backend, gpu_available,
+# gpu_info) is defined in GPU.jl which is included before this file.

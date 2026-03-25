@@ -6,6 +6,7 @@ authors = ["Lyr.jl Contributors"]
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
@@ -15,6 +16,12 @@ Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 PNGFiles = "f57f5aa1-a3ce-4bc8-8ab9-96f992907883"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+
+[extensions]
+LyrCUDAExt = "CUDA"
 
 [compat]
 Adapt = "4"
