@@ -85,3 +85,15 @@
 - For cross-renderer comparison: constant white TF `(1,1,1,1)`, `emission_scale=1.0`
 - This reduces Lyr's rendering equation to standard radiative transfer
 - Lyr is a SUPERSET of Mitsuba (can do everything Mitsuba does + visualization coloring)
+
+## Float32 DDA Nudge Bug (2026-03-25)
+
+**Problem**: GPU HDDA kernel produced 3.5x dimmer output than the linear kernel.
+
+**Root cause**: `_gpu_dda_init` used absolute nudge `tmin + 1.0f-6` to avoid voxel boundary landing. At `tmin ≈ 178`, `eps(Float32) ≈ 1.5e-5` — the nudge is below the ULP and the addition is a no-op. DDA starts exactly on node boundaries, `floor(128.0/8.0) = 16` = OUTSIDE the 16-cell grid.
+
+**Fix**: Relative nudge `max(abs(tmin) * 1.0f-5, 1.0f-5)` — always several ULPs above eps(tmin).
+
+**Rule**: Never use absolute Float32 epsilons that get added to potentially large values. Use relative epsilons that scale with the value's magnitude. This applies to ANY Float32 DDA, ray marcher, or integrator that uses `t + epsilon`.
+
+**Diagnostic approach**: CPU emulation of GPU code (the `_gpu_*` functions are pure Julia, CPU-callable) comparing spans against CPU Float64 reference. This was far more effective than static code analysis — 3 research subagents couldn't find the bug, but the diagnostic found it in seconds.

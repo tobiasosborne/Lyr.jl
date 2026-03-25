@@ -757,9 +757,12 @@ Initialize Amanatides-Woo DDA. Returns 12 scalars:
     idx::Float32, idy::Float32, idz::Float32,
     tmin::Float32, voxel_size::Float32)
     inv_vs = 1.0f0 / voxel_size
-    px = ox + (tmin + 1.0f-6) * dx
-    py = oy + (tmin + 1.0f-6) * dy
-    pz = oz + (tmin + 1.0f-6) * dz
+    # Nudge tmin inward to avoid landing on voxel boundary (floor → wrong cell).
+    # Must be relative: at tmin≈178, eps(Float32)≈1.5e-5, so absolute 1e-6 is lost.
+    nudge = max(abs(tmin) * 1.0f-5, 1.0f-5)
+    px = ox + (tmin + nudge) * dx
+    py = oy + (tmin + nudge) * dy
+    pz = oz + (tmin + nudge) * dz
     ijk_x = _gpu_safe_floor_i32(px * inv_vs)
     ijk_y = _gpu_safe_floor_i32(py * inv_vs)
     ijk_z = _gpu_safe_floor_i32(pz * inv_vs)
@@ -1276,7 +1279,7 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
                             backend=_default_gpu_backend(),
-                            hdda::Bool=false) where T
+                            hdda::Bool=true) where T
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera

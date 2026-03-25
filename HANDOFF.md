@@ -5,15 +5,49 @@
 
 ---
 
+## THE RULES (mandatory, never skip, never bury)
+
+1. **SKEPTICISM**: All subagent work, handoffs — verify everything twice.
+2. **DEEP BUGS**: Deep, complex, interlocked. Do not underestimate.
+3. **NO BANDAIDS**: Best-practices full solutions only.
+4. **WORKFLOW**: 3 subagents before any core code change.
+5. **REVIEW**: Rigorous reviewer agent after every core change. No exceptions.
+6. **GROUND TRUTH**: Physics is ground truth, not pinned numbers. Tests may be suspect.
+7. **TESTING**: Targeted only, or full suite in background.
+8. **REPEAT RULES**: Repeat occasionally to maintain focus.
+9. **DO NOT UNDERESTIMATE**: This is deeply nontrivial.
+10. **NO PARALLEL AGENTS**: Julia precompilation cache conflicts. Run agents sequentially only.
+
+---
+
 ## Current Status
 
 Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB parser + production volume renderer + Field Protocol bridging physics to pixels. The codebase has ~17,200 LOC source across 60+ files, with 94,000+ tests passing. All documentation comprehensively updated as of 2026-03-20.
 
 ---
 
-## Latest Session (2026-03-25) -- GPU Acceleration Pipeline
+## Latest Session (2026-03-25, session 2) -- GPU HDDA Bug Fix
 
-**Status**: YELLOW -- GPU-linear kernel production-ready. HDDA kernel has correctness bug (filed as `fjo9`).
+**Status**: GREEN -- `fjo9` FIXED. HDDA kernel now matches linear kernel output. Default restored to `hdda=true`.
+
+### What Was Done
+
+**Bug `fjo9` — GPU HDDA 3.5x dimmer output: FIXED**
+- **Root cause**: `_gpu_dda_init` used absolute nudge `tmin + 1.0f-6` to avoid landing on voxel boundaries. At typical `tmin` values (~178), `eps(Float32) ≈ 1.5e-5`, so `1e-6` is below the ULP and the addition has **no effect**. The DDA starts exactly on I1 node boundaries, `floor(128.0/8.0) = 16` which is OUTSIDE the 16-cell grid, causing the I1 DDA to immediately exit and skip the entire node.
+- **Fix**: Changed to relative nudge `max(abs(tmin) * 1.0f-5, 1.0f-5)` — always several ULPs above eps(tmin).
+- **Diagnostic**: CPU emulation of GPU HDDA span collection vs CPU reference. Before fix: 47% coverage (259/577 rays with span mismatches). After fix: 100% coverage, 0 mismatches.
+- **Verification**: 76 HDDA tests + 16 diagnostic tests pass. Reviewer agent confirmed fix correctness and no regression risk.
+- **Default restored**: `hdda=true` in `gpu_render_volume` (was `false` as workaround).
+- **Key insight**: Float32 absolute epsilons are a trap — must use relative epsilons that scale with the value's magnitude.
+
+### Commits
+- (this session) fix: GPU HDDA — Float32 DDA nudge too small, changed to relative epsilon
+
+---
+
+## Previous Session (2026-03-25, session 1) -- GPU Acceleration Pipeline
+
+**Status**: YELLOW -- GPU-linear kernel production-ready. HDDA kernel had correctness bug (now fixed in session 2).
 
 ### What Was Done
 
@@ -123,7 +157,7 @@ jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buf
 
 ### What's Next (Priority Order)
 
-1. **`fjo9` P1 BUG** — Fix GPU HDDA dim output. This is the highest priority. The HDDA code is ~300 lines in `_gpu_hdda_delta_track`. Debug by comparing DDA cell hits against CPU `foreach_hdda_span`. Most likely cause: `_gpu_node_query` coordinate mapping.
+1. ~~**`fjo9` P1 BUG**~~ — **FIXED** (session 2). Float32 DDA nudge too small.
 2. **`xzai` P4.1** — HG phase function on GPU. Two converged proposals exist (from this session). Key insight: for single-scatter, only need `_gpu_hg_eval(g, cos_theta)` as a weight (not direction sampling). The helper functions `_gpu_hg_eval`, `_gpu_scatter_direction` etc. are ALREADY IN GPU.jl but not wired into the kernels. Need to: add `phase_g::Float32` param to both kernels, replace hardcoded `1/(4pi)` with `_gpu_hg_eval(phase_g, dot(ray_dir, light_dir))`, extract `g` from `mat.phase_function` in `gpu_render_volume`.
 3. **`u8wt` P4.2** — Multi-light support on GPU
 4. **`nu0j` P4.4** — Multi-bounce path tracing (needs P4.1 first)
