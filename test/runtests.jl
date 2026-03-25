@@ -90,8 +90,10 @@ import Lyr:
     _delta_tracking_collision, _shadow_transmittance, _trace_multiscatter,
     _volume_bounds,
     # GPU
-    gpu_render_volume,
+    gpu_render_volume, gpu_available, gpu_info,
     _gpu_get_value, _gpu_get_value_trilinear,
+    _gpu_get_value_with_leaf, _gpu_get_value_cached, _gpu_get_value_trilinear_cached,
+    _gpu_leaf_read,
     _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
     _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
     _bake_tf_lut, _estimate_density_range,
@@ -155,6 +157,7 @@ import Lyr:
     include("test_ground_truth.jl")
     include("test_benchmark_renders.jl")
     include("test_gpu.jl")
+    include("test_gpu_cuda.jl")
     include("test_output.jl")
     include("test_show.jl")
     include("test_properties.jl")
