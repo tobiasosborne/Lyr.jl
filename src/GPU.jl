@@ -1276,7 +1276,7 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
                             backend=_default_gpu_backend(),
-                            hdda::Bool=true) where T
+                            hdda::Bool=false) where T
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera
