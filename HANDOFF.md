@@ -11,7 +11,74 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-03-20) -- Documentation Review + Repo Tidiness
+## Latest Session (2026-03-25) -- GPU Acceleration: 36.8x Speedup on RTX 3090
+
+**Status**: GREEN -- GPU rendering production-ready on CUDA.
+
+### What Was Done
+
+**CUDA Package Extension (Phase 1, 5/5 complete):**
+- Created `ext/LyrCUDAExt.jl` with dispatch-based `_gpu_info(backend)` pattern (no method override warnings)
+- `_GPU_BACKEND` Ref pattern in `src/GPU.jl`, auto-detected via `CUDA.functional()` in `__init__`
+- Fixed `_gpu_buf_load`: replaced `reinterpret(@view ...)` with scalar byte-by-byte reads (GPU-safe)
+- Fixed `gpu_render_volume`: `Array(acc_buf)` host transfer before scalar indexing
+- Exported `gpu_available()`, `gpu_info()`, `gpu_render_volume()` as public API
+- CUDA in `[deps]` + `[weakdeps]` for development; move to weakdeps-only at release
+
+**GPU HDDA — Hierarchical Empty-Space Skipping (Phase 2, 6/7 complete):**
+- Full 3-level DDA (Root→I2→I1) as pure scalar functions: `_gpu_dda_init/step/node_query/cell_time`
+- `_gpu_collect_root_hits`: scan root table, 4-slot insertion sort by tmin
+- `_gpu_integrate_span`: delta tracking bounded to [t0,t1] active spans
+- `_gpu_hdda_delta_track`: fused HDDA+DT with span merging via single `span_t0` scalar
+- `delta_tracking_hdda_kernel!`: new kernel, `hdda=true` kwarg (default)
+- **18.3x speedup** on sparse grids (smoke.vdb, 256x256 4spp)
+
+**Leaf Caching (Phase 3, 2/2 complete):**
+- `_gpu_leaf_read`: direct read from cached leaf node (no tree traversal)
+- `_gpu_get_value_with_leaf`: traversal returning leaf offset for cache
+- `_gpu_get_value_trilinear_cached`: same-leaf fast path (~75% of samples)
+- Cache threaded as 4 Int32 scalars through `_gpu_integrate_span`
+- Shadow rays get independent cache (separate trajectory)
+- Non-inline `where B` type param outperforms `@inline` 2x (register pressure)
+- **36.8x total speedup** (2x improvement over HDDA alone)
+
+### Key Technical Insights
+
+1. `reinterpret(T, @view buf[...])` creates ReinterpretArray — NOT GPU-safe. Use scalar byte reads + scalar `reinterpret(Float32, ::UInt32)` (register bitcast)
+2. GPU scalar indexing of CuArray is disallowed — must `Array(device_buf)` before reading pixels
+3. `@inline` on GPU caching functions HURTS performance (19.4x) vs non-inline `where B` (36.8x) — register spilling from oversized inlined kernel reduces occupancy
+4. Julia 1.12 blocks method overwriting in extensions during precompilation — use dispatch-based `_gpu_info(::CUDABackend)` instead
+5. CUDA in `[weakdeps]` alone is insufficient for `using CUDA` — needs to also be in `[deps]` or user's environment
+
+### Benchmarks (RTX 3090, smoke.vdb)
+
+| Config | 256x256 4spp | Speedup |
+|--------|-------------|---------|
+| Linear (no HDDA) | 9.35s | 1.0x |
+| HDDA only | 0.50s | 18.3x |
+| HDDA + leaf cache | 0.25s | **36.8x** |
+
+### Commits
+
+- `0336126` feat: CUDA GPU rendering — package extension + RTX 3090 validated
+- `113caff` feat: GPU HDDA — 18x speedup via hierarchical empty-space skipping
+- `f0d6c5f` feat: GPU leaf caching — 36.8x total speedup
+- `914d239` fix: review — eliminate double traversal, keep non-inline for GPU perf
+
+### GPU Issues Closed (14)
+
+jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path)
+
+### What's Next
+
+1. **P1.5** — CUDA test suite (formal tests for all GPU code)
+2. **P2.7** — Formal benchmarks across grid types
+3. **P4.1-P4.5** — Feature parity: HG phase function, multi-light, multi-bounce, public API polish
+4. **P5.1-P5.4** — GR on GPU (analytic Christoffel symbols, geodesic kernel)
+
+---
+
+## Previous Session (2026-03-20) -- Documentation Review + Repo Tidiness
 
 **Status**: GREEN -- Major documentation overhaul complete. No code logic changed.
 
