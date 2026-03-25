@@ -11,70 +11,124 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-03-25) -- GPU Acceleration: 36.8x Speedup on RTX 3090
+## Latest Session (2026-03-25) -- GPU Acceleration Pipeline
 
-**Status**: GREEN -- GPU rendering production-ready on CUDA.
+**Status**: YELLOW -- GPU-linear kernel production-ready. HDDA kernel has correctness bug (filed as `fjo9`).
 
 ### What Was Done
 
 **CUDA Package Extension (Phase 1, 5/5 complete):**
-- Created `ext/LyrCUDAExt.jl` with dispatch-based `_gpu_info(backend)` pattern (no method override warnings)
+- Created `ext/LyrCUDAExt.jl` with dispatch-based `_gpu_info(backend)` pattern
 - `_GPU_BACKEND` Ref pattern in `src/GPU.jl`, auto-detected via `CUDA.functional()` in `__init__`
-- Fixed `_gpu_buf_load`: replaced `reinterpret(@view ...)` with scalar byte-by-byte reads (GPU-safe)
+- Fixed `_gpu_buf_load`: replaced `reinterpret(@view ...)` with scalar byte-by-byte reads
 - Fixed `gpu_render_volume`: `Array(acc_buf)` host transfer before scalar indexing
 - Exported `gpu_available()`, `gpu_info()`, `gpu_render_volume()` as public API
-- CUDA in `[deps]` + `[weakdeps]` for development; move to weakdeps-only at release
+- 318 CUDA tests passing on RTX 3090 (`test/test_gpu_cuda.jl`)
 
-**GPU HDDA — Hierarchical Empty-Space Skipping (Phase 2, 6/7 complete):**
-- Full 3-level DDA (Root→I2→I1) as pure scalar functions: `_gpu_dda_init/step/node_query/cell_time`
-- `_gpu_collect_root_hits`: scan root table, 4-slot insertion sort by tmin
-- `_gpu_integrate_span`: delta tracking bounded to [t0,t1] active spans
-- `_gpu_hdda_delta_track`: fused HDDA+DT with span merging via single `span_t0` scalar
-- `delta_tracking_hdda_kernel!`: new kernel, `hdda=true` kwarg (default)
-- **18.3x speedup** on sparse grids (smoke.vdb, 256x256 4spp)
+**GPU HDDA (Phase 2) — IMPLEMENTED BUT BUGGY:**
+- Full 3-level DDA (Root→I2→I1) as pure scalar functions
+- `delta_tracking_hdda_kernel!` with `hdda=true` kwarg
+- **BUG `fjo9`**: HDDA kernel produces 3.5x dimmer output than linear kernel. DDA traversal skips active voxel regions, causing speckled artifacts. See `showcase/compare_*.png` for visual evidence. **Default flipped to `hdda=false` until fixed.**
 
 **Leaf Caching (Phase 3, 2/2 complete):**
-- `_gpu_leaf_read`: direct read from cached leaf node (no tree traversal)
-- `_gpu_get_value_with_leaf`: traversal returning leaf offset for cache
 - `_gpu_get_value_trilinear_cached`: same-leaf fast path (~75% of samples)
-- Cache threaded as 4 Int32 scalars through `_gpu_integrate_span`
-- Shadow rays get independent cache (separate trajectory)
-- Non-inline `where B` type param outperforms `@inline` 2x (register pressure)
-- **36.8x total speedup** (2x improvement over HDDA alone)
+- Cache threaded as 4 Int32 scalars; shadow rays get independent cache
+- Non-inline `where B` type param — `@inline` causes 2x slower GPU due to register spilling
+- **Leaf caching is used by BOTH kernels** (linear and HDDA)
 
-### Key Technical Insights
+**Benchmark + Test Suite (P1.5, P2.7 complete):**
+- `examples/benchmark_gpu.jl` — 5 grids benchmarked, 12-202x vs CPU
+- `test/test_gpu_cuda.jl` — 318 tests on RTX 3090
 
-1. `reinterpret(T, @view buf[...])` creates ReinterpretArray — NOT GPU-safe. Use scalar byte reads + scalar `reinterpret(Float32, ::UInt32)` (register bitcast)
-2. GPU scalar indexing of CuArray is disallowed — must `Array(device_buf)` before reading pixels
-3. `@inline` on GPU caching functions HURTS performance (19.4x) vs non-inline `where B` (36.8x) — register spilling from oversized inlined kernel reduces occupancy
-4. Julia 1.12 blocks method overwriting in extensions during precompilation — use dispatch-based `_gpu_info(::CUDABackend)` instead
-5. CUDA in `[weakdeps]` alone is insufficient for `using CUDA` — needs to also be in `[deps]` or user's environment
+### CRITICAL BUG: GPU HDDA `fjo9`
 
-### Benchmarks (RTX 3090, smoke.vdb)
+**Symptom**: HDDA kernel output is 3.5x dimmer than GPU-linear and has speckled stipple pattern.
+**Evidence** (512x512, 32 spp, same scene/seed):
+- CPU mean_r: 0.034, GPU-linear mean_r: 0.028, GPU-HDDA mean_r: 0.008
+- RMSE CPU vs GPU-linear: 0.030 (stochastic noise only — CORRECT)
+- RMSE CPU vs GPU-HDDA: 0.048 (systematic error — BUG)
+- Visual: `showcase/compare_cpu.png` vs `showcase/compare_gpu_hdda.png` vs `showcase/compare_gpu_linear.png`
+- Difference maps: `showcase/compare_diff_*.png` (10x amplified)
 
-| Config | 256x256 4spp | Speedup |
-|--------|-------------|---------|
-| Linear (no HDDA) | 9.35s | 1.0x |
-| HDDA only | 0.50s | 18.3x |
-| HDDA + leaf cache | 0.25s | **36.8x** |
+**Root cause hypothesis**: `_gpu_node_query` in `_gpu_hdda_delta_track` (GPU.jl ~line 830) converts DDA ijk coordinates to local node coordinates via `ijk - origin / child_size`. This coordinate mapping may be wrong for some node origins, causing the DDA to report cells as "outside" when they are actually inside the active region. This would cause spans to close prematurely or never open, skipping active voxels.
+
+**Debugging approach**:
+1. Compare `_gpu_node_query` output with CPU `node_dda_query` (DDA.jl:162) for identical ray/grid combinations
+2. Add debug counters to the HDDA kernel: count spans yielded, total span length, null collision count
+3. Test on a simple grid (single root, single I2, few I1 nodes) where the correct span set is known analytically
+4. The CPU `foreach_hdda_span` (VolumeHDDA.jl:230) is the reference — it works correctly
+
+**Workaround**: `hdda=false` (default now) uses the linear kernel which is correct.
+
+### Key Technical Insights (for next agent)
+
+1. **`reinterpret(T, @view buf[...])`** creates ReinterpretArray — NOT GPU-safe. Use scalar byte reads + scalar `reinterpret(Float32, ::UInt32)` (register bitcast). See `_gpu_buf_load` for the pattern.
+2. **GPU scalar indexing** of CuArray is disallowed — must `Array(device_buf)` before reading pixels back to CPU.
+3. **`@inline` on large GPU functions HURTS performance** — register spilling from oversized inlined kernel reduces GPU occupancy. Non-inline `where B` type param gives 2x better perf. This is a GPU-specific insight; CPU benefits from inlining.
+4. **Julia 1.12 blocks method overwriting** in extensions during precompilation — use dispatch-based `_gpu_info(::CUDABackend)` instead of `function Lyr.gpu_info()`.
+5. **CUDA `val, loff = f(...)` vs `_, loff = f(...)`** can produce different GPU codegen that triggers MISALIGNED_ADDRESS errors. The `_, loff` pattern (discard first return) works; `val, loff` crashes. This is a CUDA compiler quirk, not a Julia issue. Do NOT apply the "obvious" optimization of binding the first return.
+6. **WSL2 + CUDA**: works via GPU passthrough. `nvidia-smi` shows RTX 3090. BUT: Julia processes can consume 59GB+ RAM and kill WSL2. Always use `-t 2` (not `-t auto`) and never run `Pkg.test()` with all threads.
+7. **CUDA in `[weakdeps]`** alone is insufficient for `using CUDA` in the package's own environment — must also be in `[deps]` during development. Move to weakdeps-only at release time.
+
+### GPU Architecture Overview (for next agent)
+
+```
+src/GPU.jl (~1400 lines) contains:
+├── Backend selection: _GPU_BACKEND Ref, _default_gpu_backend(), gpu_available(), gpu_info()
+├── Buffer primitives: _gpu_buf_load (byte-by-byte), _gpu_buf_mask_is_on, _gpu_buf_count_on_before
+├── Value lookup: _gpu_get_value (stateless tree traversal), _gpu_get_value_trilinear
+├── Leaf caching: _gpu_get_value_with_leaf, _gpu_get_value_cached, _gpu_get_value_trilinear_cached
+├── Phase function: _gpu_hg_eval, _gpu_hg_sample_cos_theta, _gpu_build_basis, _gpu_scatter_direction
+│   (defined but NOT YET WIRED INTO KERNELS — see P4.1)
+├── HDDA helpers: _gpu_dda_init, _gpu_dda_step, _gpu_node_query, _gpu_cell_time
+├── HDDA: _gpu_collect_root_hits, _gpu_integrate_span, _gpu_hdda_delta_track
+├── Kernels: delta_tracking_kernel! (linear, CORRECT), delta_tracking_hdda_kernel! (BUGGY)
+├── Dispatch: gpu_render_volume (hdda=false default)
+└── CPU fallbacks: gpu_sphere_trace_cpu!, gpu_volume_march_cpu!
+
+ext/LyrCUDAExt.jl: sets _GPU_BACKEND[] = CUDABackend() on init
+```
+
+### Render Commands
+
+```bash
+# Quick GPU render (correct, linear kernel)
+julia --project -t 2 -e '
+using CUDA, Lyr
+vdb = parse_vdb("test/fixtures/samples/smoke.vdb")
+grid = vdb.grids[1]; nano = build_nanogrid(grid.tree)
+cam = Camera((250.0, -100.0, 120.0), (55.0, 111.0, 59.0), (0.0, 0.0, 1.0), 35.0)
+mat = VolumeMaterial(tf_smoke(); sigma_scale=15.0, scattering_albedo=0.9, emission_scale=3.0)
+vol = VolumeEntry(grid, nano, mat)
+scene = Scene(cam, DirectionalLight((0.4, 0.7, 0.9), (1.5, 1.3, 1.0)), vol)
+img = gpu_render_volume(nano, scene, 1920, 1080; spp=128, backend=CUDABackend())
+write_ppm("output.ppm", img)
+'
+# Post-process: convert output.ppm -level 0%,15% -gamma 0.5 output.png
+```
 
 ### Commits
 
 - `0336126` feat: CUDA GPU rendering — package extension + RTX 3090 validated
-- `113caff` feat: GPU HDDA — 18x speedup via hierarchical empty-space skipping
-- `f0d6c5f` feat: GPU leaf caching — 36.8x total speedup
-- `914d239` fix: review — eliminate double traversal, keep non-inline for GPU perf
+- `113caff` feat: GPU HDDA — 18x speedup (BUT HAS CORRECTNESS BUG)
+- `f0d6c5f` feat: GPU leaf caching — 36.8x speedup (caching is correct, HDDA traversal is buggy)
+- `914d239` fix: review — keep non-inline for GPU perf
+- `1180030` feat: GPU benchmark suite — 12-202x vs CPU across 5 grid types
+- `5132e70` test: CUDA test suite — 318 tests on RTX 3090
+- `b30ac79` fix: default hdda=false until HDDA bug resolved
 
-### GPU Issues Closed (14)
+### GPU Issues Closed (16)
 
-jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path)
+jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks)
 
-### What's Next
+### What's Next (Priority Order)
 
-1. **P1.5** — CUDA test suite (formal tests for all GPU code)
-2. **P2.7** — Formal benchmarks across grid types
-3. **P4.1-P4.5** — Feature parity: HG phase function, multi-light, multi-bounce, public API polish
-4. **P5.1-P5.4** — GR on GPU (analytic Christoffel symbols, geodesic kernel)
+1. **`fjo9` P1 BUG** — Fix GPU HDDA dim output. This is the highest priority. The HDDA code is ~300 lines in `_gpu_hdda_delta_track`. Debug by comparing DDA cell hits against CPU `foreach_hdda_span`. Most likely cause: `_gpu_node_query` coordinate mapping.
+2. **`xzai` P4.1** — HG phase function on GPU. Two converged proposals exist (from this session). Key insight: for single-scatter, only need `_gpu_hg_eval(g, cos_theta)` as a weight (not direction sampling). The helper functions `_gpu_hg_eval`, `_gpu_scatter_direction` etc. are ALREADY IN GPU.jl but not wired into the kernels. Need to: add `phase_g::Float32` param to both kernels, replace hardcoded `1/(4pi)` with `_gpu_hg_eval(phase_g, dot(ray_dir, light_dir))`, extract `g` from `mat.phase_function` in `gpu_render_volume`.
+3. **`u8wt` P4.2** — Multi-light support on GPU
+4. **`nu0j` P4.4** — Multi-bounce path tracing (needs P4.1 first)
+5. **`e7yt` P4.5** — Export GPU API properly (needs P4.1 + P4.2)
+6. **`vbej` P5.1** — Analytic Schwarzschild Christoffel (independent, unblocks GR on GPU)
 
 ---
 
