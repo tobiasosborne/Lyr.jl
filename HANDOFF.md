@@ -22,7 +22,7 @@
 
 ## Current Status
 
-Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB parser + production volume renderer + Field Protocol bridging physics to pixels. The codebase has ~17,200 LOC source across 60+ files, with 94,000+ tests passing. All documentation comprehensively updated as of 2026-03-20.
+Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB parser + production volume renderer + Field Protocol bridging physics to pixels. The codebase has ~17,200 LOC source across 60+ files, with **135,224 tests passing** (2 pre-existing golden image failures, 1 pre-existing Julia 1.12 API error). All documentation comprehensively updated as of 2026-03-20.
 
 ---
 
@@ -40,8 +40,15 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 - **Default restored**: `hdda=true` in `gpu_render_volume` (was `false` as workaround).
 - **Key insight**: Float32 absolute epsilons are a trap — must use relative epsilons that scale with the value's magnitude.
 
+### Diagnostic Methodology (reference for future deep bugs)
+
+1. **3 sequential research subagents** explored GPU.jl, VolumeHDDA.jl, DDA.jl, VolumeIntegrator.jl — all hypothesized root causes were WRONG (operator precedence, accept probability, span boundary logic)
+2. **CPU emulation** of the GPU HDDA span collection (`test/test_gpu_hdda_diagnostic.jl`) — calls the same `_gpu_*` helper functions on CPU with Float32 arithmetic, records spans instead of integrating. Compared against CPU `foreach_hdda_span` (Float64 reference).
+3. Emulation found the bug immediately: 259/577 rays had span mismatches, coverage ratio 0.47. Verbose trace showed `i1[1] OUTSIDE` right after AABB hit — the DDA was starting outside the I1 node.
+4. **Lesson**: For deeply interlocked bugs, runtime diagnostics >> static analysis. The `_gpu_*` functions being pure Julia (CPU-callable) made this possible without a GPU.
+
 ### Commits
-- (this session) fix: GPU HDDA — Float32 DDA nudge too small, changed to relative epsilon
+- `512a525` fix: GPU HDDA — Float32 DDA nudge too small, changed to relative epsilon
 
 ---
 
@@ -59,10 +66,10 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 - Exported `gpu_available()`, `gpu_info()`, `gpu_render_volume()` as public API
 - 318 CUDA tests passing on RTX 3090 (`test/test_gpu_cuda.jl`)
 
-**GPU HDDA (Phase 2) — IMPLEMENTED BUT BUGGY:**
+**GPU HDDA (Phase 2) — COMPLETE (bug fixed in session 2):**
 - Full 3-level DDA (Root→I2→I1) as pure scalar functions
-- `delta_tracking_hdda_kernel!` with `hdda=true` kwarg
-- **BUG `fjo9`**: HDDA kernel produces 3.5x dimmer output than linear kernel. DDA traversal skips active voxel regions, causing speckled artifacts. See `showcase/compare_*.png` for visual evidence. **Default flipped to `hdda=false` until fixed.**
+- `delta_tracking_hdda_kernel!` with `hdda=true` kwarg (now default)
+- Bug `fjo9` was Float32 DDA nudge precision — see session 2 for details
 
 **Leaf Caching (Phase 3, 2/2 complete):**
 - `_gpu_get_value_trilinear_cached`: same-leaf fast path (~75% of samples)
@@ -74,26 +81,6 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 - `examples/benchmark_gpu.jl` — 5 grids benchmarked, 12-202x vs CPU
 - `test/test_gpu_cuda.jl` — 318 tests on RTX 3090
 
-### CRITICAL BUG: GPU HDDA `fjo9`
-
-**Symptom**: HDDA kernel output is 3.5x dimmer than GPU-linear and has speckled stipple pattern.
-**Evidence** (512x512, 32 spp, same scene/seed):
-- CPU mean_r: 0.034, GPU-linear mean_r: 0.028, GPU-HDDA mean_r: 0.008
-- RMSE CPU vs GPU-linear: 0.030 (stochastic noise only — CORRECT)
-- RMSE CPU vs GPU-HDDA: 0.048 (systematic error — BUG)
-- Visual: `showcase/compare_cpu.png` vs `showcase/compare_gpu_hdda.png` vs `showcase/compare_gpu_linear.png`
-- Difference maps: `showcase/compare_diff_*.png` (10x amplified)
-
-**Root cause hypothesis**: `_gpu_node_query` in `_gpu_hdda_delta_track` (GPU.jl ~line 830) converts DDA ijk coordinates to local node coordinates via `ijk - origin / child_size`. This coordinate mapping may be wrong for some node origins, causing the DDA to report cells as "outside" when they are actually inside the active region. This would cause spans to close prematurely or never open, skipping active voxels.
-
-**Debugging approach**:
-1. Compare `_gpu_node_query` output with CPU `node_dda_query` (DDA.jl:162) for identical ray/grid combinations
-2. Add debug counters to the HDDA kernel: count spans yielded, total span length, null collision count
-3. Test on a simple grid (single root, single I2, few I1 nodes) where the correct span set is known analytically
-4. The CPU `foreach_hdda_span` (VolumeHDDA.jl:230) is the reference — it works correctly
-
-**Workaround**: `hdda=false` (default now) uses the linear kernel which is correct.
-
 ### Key Technical Insights (for next agent)
 
 1. **`reinterpret(T, @view buf[...])`** creates ReinterpretArray — NOT GPU-safe. Use scalar byte reads + scalar `reinterpret(Float32, ::UInt32)` (register bitcast). See `_gpu_buf_load` for the pattern.
@@ -103,6 +90,7 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 5. **CUDA `val, loff = f(...)` vs `_, loff = f(...)`** can produce different GPU codegen that triggers MISALIGNED_ADDRESS errors. The `_, loff` pattern (discard first return) works; `val, loff` crashes. This is a CUDA compiler quirk, not a Julia issue. Do NOT apply the "obvious" optimization of binding the first return.
 6. **WSL2 + CUDA**: works via GPU passthrough. `nvidia-smi` shows RTX 3090. BUT: Julia processes can consume 59GB+ RAM and kill WSL2. Always use `-t 2` (not `-t auto`) and never run `Pkg.test()` with all threads.
 7. **CUDA in `[weakdeps]`** alone is insufficient for `using CUDA` in the package's own environment — must also be in `[deps]` during development. Move to weakdeps-only at release time.
+8. **Float32 absolute epsilons are a trap.** `tmin + 1.0f-6` is a no-op when `tmin > 8` (ULP exceeds 1e-6). Always use relative epsilons: `max(abs(tmin) * 1.0f-5, 1.0f-5)`. This caused the `fjo9` HDDA bug — 3.5x dimmer output because DDA started on node boundaries.
 
 ### GPU Architecture Overview (for next agent)
 
@@ -116,8 +104,8 @@ src/GPU.jl (~1400 lines) contains:
 │   (defined but NOT YET WIRED INTO KERNELS — see P4.1)
 ├── HDDA helpers: _gpu_dda_init, _gpu_dda_step, _gpu_node_query, _gpu_cell_time
 ├── HDDA: _gpu_collect_root_hits, _gpu_integrate_span, _gpu_hdda_delta_track
-├── Kernels: delta_tracking_kernel! (linear, CORRECT), delta_tracking_hdda_kernel! (BUGGY)
-├── Dispatch: gpu_render_volume (hdda=false default)
+├── Kernels: delta_tracking_kernel! (linear, CORRECT), delta_tracking_hdda_kernel! (CORRECT, fixed in session 2)
+├── Dispatch: gpu_render_volume (hdda=true default)
 └── CPU fallbacks: gpu_sphere_trace_cpu!, gpu_volume_march_cpu!
 
 ext/LyrCUDAExt.jl: sets _GPU_BACKEND[] = CUDABackend() on init
@@ -126,7 +114,7 @@ ext/LyrCUDAExt.jl: sets _GPU_BACKEND[] = CUDABackend() on init
 ### Render Commands
 
 ```bash
-# Quick GPU render (correct, linear kernel)
+# Quick GPU render (HDDA kernel, default)
 julia --project -t 2 -e '
 using CUDA, Lyr
 vdb = parse_vdb("test/fixtures/samples/smoke.vdb")
@@ -150,19 +138,19 @@ write_ppm("output.ppm", img)
 - `1180030` feat: GPU benchmark suite — 12-202x vs CPU across 5 grid types
 - `5132e70` test: CUDA test suite — 318 tests on RTX 3090
 - `b30ac79` fix: default hdda=false until HDDA bug resolved
+- `512a525` fix: GPU HDDA — Float32 DDA nudge too small (session 2, fjo9 FIXED)
 
-### GPU Issues Closed (16)
+### GPU Issues Closed (17)
 
-jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks)
+jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug)
 
 ### What's Next (Priority Order)
 
-1. ~~**`fjo9` P1 BUG**~~ — **FIXED** (session 2). Float32 DDA nudge too small.
-2. **`xzai` P4.1** — HG phase function on GPU. Two converged proposals exist (from this session). Key insight: for single-scatter, only need `_gpu_hg_eval(g, cos_theta)` as a weight (not direction sampling). The helper functions `_gpu_hg_eval`, `_gpu_scatter_direction` etc. are ALREADY IN GPU.jl but not wired into the kernels. Need to: add `phase_g::Float32` param to both kernels, replace hardcoded `1/(4pi)` with `_gpu_hg_eval(phase_g, dot(ray_dir, light_dir))`, extract `g` from `mat.phase_function` in `gpu_render_volume`.
-3. **`u8wt` P4.2** — Multi-light support on GPU
-4. **`nu0j` P4.4** — Multi-bounce path tracing (needs P4.1 first)
-5. **`e7yt` P4.5** — Export GPU API properly (needs P4.1 + P4.2)
-6. **`vbej` P5.1** — Analytic Schwarzschild Christoffel (independent, unblocks GR on GPU)
+1. **`xzai` P4.1** — HG phase function on GPU. Two converged proposals exist (from this session). Key insight: for single-scatter, only need `_gpu_hg_eval(g, cos_theta)` as a weight (not direction sampling). The helper functions `_gpu_hg_eval`, `_gpu_scatter_direction` etc. are ALREADY IN GPU.jl but not wired into the kernels. Need to: add `phase_g::Float32` param to both kernels, replace hardcoded `1/(4pi)` with `_gpu_hg_eval(phase_g, dot(ray_dir, light_dir))`, extract `g` from `mat.phase_function` in `gpu_render_volume`.
+2. **`u8wt` P4.2** — Multi-light support on GPU
+3. **`nu0j` P4.4** — Multi-bounce path tracing (needs P4.1 first)
+4. **`e7yt` P4.5** — Export GPU API properly (needs P4.1 + P4.2)
+5. **`vbej` P5.1** — Analytic Schwarzschild Christoffel (independent, unblocks GR on GPU)
 
 ---
 
@@ -359,11 +347,12 @@ Six-scenario energy ladder: H-H elastic -> H-H excitation -> H-H ionization -> e
 
 ### Immediate (from latest sessions)
 
-1. **Finish CUDA.jl install + test GPU path** for ScalarQEDGPU on small grid (N=32)
-2. **Rerun scalar QED 128-cubed zooming camera render** -- `julia --project -t auto examples/scatter_scalar_qed.jl`
-3. **Close beads**: `tjyx` (Moller) and `22lf` (ionization) once demos look good
-4. **Close beads**: `jirf`, `lwp3`, `hecg`, `fj1a`, `emsz` -- code is done
-5. **Regenerate golden images**: T10.4/T10.5 PPM format mismatch (2 pre-existing test failures)
+1. **`xzai` P4.1** — Wire HG phase function into GPU kernels (highest-impact GPU feature remaining)
+2. **Regenerate golden images**: T10.4/T10.5 PPM format mismatch (2 pre-existing test failures)
+3. **Fix `write_ppm` test error**: `findfirst(::UInt8, ::Vector{UInt8})` no longer works in Julia 1.12 — needs `findfirst(==(byte), vec)` or similar
+4. **Close beads**: `tjyx` (Moller) and `22lf` (ionization) once demos look good
+5. **Close beads**: `jirf`, `lwp3`, `hecg`, `fj1a`, `emsz` -- code is done
+6. **Finish CUDA.jl install + test GPU path** for ScalarQEDGPU on small grid (N=32)
 
 ### QFT Scattering Viz Series (active project)
 
@@ -414,5 +403,5 @@ Use `bd ready` for current unblocked list and `bd stats` for project health.
 bd ready           # Unblocked issues
 bd blocked         # Dependency chain view
 bd stats           # Project health
-julia --project -e 'using Pkg; Pkg.test()'  # Full suite (~12 min)
+julia --project -t 2 -e 'using Pkg; Pkg.test()'  # Full suite (~18 min, use -t 2 on WSL2)
 ```
