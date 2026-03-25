@@ -587,6 +587,144 @@ For shadow rays, uses ratio tracking transmittance estimation.
 end
 
 # ============================================================================
+# Device-side leaf caching for trilinear interpolation
+# ============================================================================
+
+"""Read a Float32 value directly from a cached leaf node (no tree traversal)."""
+@inline function _gpu_leaf_read(buf, leaf_off::Int32,
+                                 cx::Int32, cy::Int32, cz::Int32,
+                                 header_T_size::Int32)::Float32
+    loff = (cx & Int32(7)) * Int32(64) + (cy & Int32(7)) * Int32(8) + (cz & Int32(7))
+    _gpu_buf_load(Float32, buf, leaf_off + Int32(_LEAF_VALUES_OFF) + loff * header_T_size)
+end
+
+"""Like _gpu_get_value but also returns the leaf byte offset (0 if tile/background)."""
+function _gpu_get_value_with_leaf(buf::B, background::Float32,
+                                           cx::Int32, cy::Int32, cz::Int32,
+                                           header_T_size::Int32) where B
+    root_count = Int32(_gpu_buf_load(UInt32, buf, Int32(37) + header_T_size))
+    root_pos = Int32(_gpu_buf_load(UInt32, buf, Int32(53) + header_T_size))
+    entry_sz = Int32(13) + header_T_size
+    i2_mask = ~Int32(4095)
+    i2_ox = cx & i2_mask; i2_oy = cy & i2_mask; i2_oz = cz & i2_mask
+    lo = Int32(1); hi = root_count; entry_pos = Int32(0); found = false
+    while lo <= hi
+        mid = (lo + hi) >> Int32(1)
+        mid_pos = root_pos + (mid - Int32(1)) * entry_sz
+        mx = _gpu_buf_load(Int32, buf, mid_pos)
+        my = _gpu_buf_load(Int32, buf, mid_pos + Int32(4))
+        mz = _gpu_buf_load(Int32, buf, mid_pos + Int32(8))
+        if mx == i2_ox && my == i2_oy && mz == i2_oz
+            entry_pos = mid_pos; found = true; break
+        elseif _gpu_coord_less(mx, my, mz, i2_ox, i2_oy, i2_oz)
+            lo = mid + Int32(1)
+        else
+            hi = mid - Int32(1)
+        end
+    end
+    found || return (background, Int32(0))
+    is_child = _gpu_buf_load(UInt8, buf, entry_pos + Int32(12))
+    is_child == 0x00 && return (_gpu_buf_load(Float32, buf, entry_pos + Int32(13)), Int32(0))
+    i2_off = Int32(_gpu_buf_load(UInt32, buf, entry_pos + Int32(13)))
+    i2_ix = (cx >> Int32(7)) & Int32(31); i2_iy = (cy >> Int32(7)) & Int32(31); i2_iz = (cz >> Int32(7)) & Int32(31)
+    i2_idx = i2_ix * Int32(1024) + i2_iy * Int32(32) + i2_iz
+    if !_gpu_buf_mask_is_on(buf, i2_off + Int32(_I2_CMASK_OFF), i2_idx)
+        if _gpu_buf_mask_is_on(buf, i2_off + Int32(_I2_VMASK_OFF), i2_idx)
+            cc = Int32(_gpu_buf_load(UInt32, buf, i2_off + Int32(_I2_CHILDCOUNT_OFF)))
+            ti = _gpu_buf_count_on_before(buf, i2_off + Int32(_I2_VMASK_OFF), i2_off + Int32(_I2_VPREFIX_OFF), i2_idx)
+            return (_gpu_buf_load(Float32, buf, i2_off + Int32(_I2_DATA_OFF) + cc * Int32(4) + ti * header_T_size), Int32(0))
+        end
+        return (background, Int32(0))
+    end
+    ti = _gpu_buf_count_on_before(buf, i2_off + Int32(_I2_CMASK_OFF), i2_off + Int32(_I2_CPREFIX_OFF), i2_idx)
+    i1_off = Int32(_gpu_buf_load(UInt32, buf, i2_off + Int32(_I2_DATA_OFF) + ti * Int32(4)))
+    i1_ix = (cx >> Int32(3)) & Int32(15); i1_iy = (cy >> Int32(3)) & Int32(15); i1_iz = (cz >> Int32(3)) & Int32(15)
+    i1_idx = i1_ix * Int32(256) + i1_iy * Int32(16) + i1_iz
+    if !_gpu_buf_mask_is_on(buf, i1_off + Int32(_I1_CMASK_OFF), i1_idx)
+        if _gpu_buf_mask_is_on(buf, i1_off + Int32(_I1_VMASK_OFF), i1_idx)
+            cc = Int32(_gpu_buf_load(UInt32, buf, i1_off + Int32(_I1_CHILDCOUNT_OFF)))
+            ti = _gpu_buf_count_on_before(buf, i1_off + Int32(_I1_VMASK_OFF), i1_off + Int32(_I1_VPREFIX_OFF), i1_idx)
+            return (_gpu_buf_load(Float32, buf, i1_off + Int32(_I1_DATA_OFF) + cc * Int32(4) + ti * header_T_size), Int32(0))
+        end
+        return (background, Int32(0))
+    end
+    ti = _gpu_buf_count_on_before(buf, i1_off + Int32(_I1_CMASK_OFF), i1_off + Int32(_I1_CPREFIX_OFF), i1_idx)
+    leaf_off = Int32(_gpu_buf_load(UInt32, buf, i1_off + Int32(_I1_DATA_OFF) + ti * Int32(4)))
+    val = _gpu_leaf_read(buf, leaf_off, cx, cy, cz, header_T_size)
+    (val, leaf_off)
+end
+
+"""Cached value lookup. Returns (value, cache_ox, cache_oy, cache_oz, cache_off)."""
+function _gpu_get_value_cached(buf::B, background::Float32,
+                                        cx::Int32, cy::Int32, cz::Int32,
+                                        header_T_size::Int32,
+                                        cache_ox::Int32, cache_oy::Int32, cache_oz::Int32,
+                                        cache_off::Int32) where B
+    ox = cx & Int32(-8); oy = cy & Int32(-8); oz = cz & Int32(-8)
+    if cache_off != Int32(0) && ox == cache_ox && oy == cache_oy && oz == cache_oz
+        return (_gpu_leaf_read(buf, cache_off, cx, cy, cz, header_T_size),
+                cache_ox, cache_oy, cache_oz, cache_off)
+    end
+    val, leaf_off = _gpu_get_value_with_leaf(buf, background, cx, cy, cz, header_T_size)
+    leaf_off == Int32(0) && return (val, Int32(0), Int32(0), Int32(0), Int32(0))
+    (val, ox, oy, oz, leaf_off)
+end
+
+"""
+Trilinear interpolation with leaf caching.
+Fast path (~75%): all 8 corners in same leaf → 1 traversal + 8 direct reads.
+Returns (value, cache_ox, cache_oy, cache_oz, cache_off).
+"""
+function _gpu_get_value_trilinear_cached(buf::B, background::Float32,
+                                                   fx::Float32, fy::Float32, fz::Float32,
+                                                   header_T_size::Int32,
+                                                   cache_ox::Int32, cache_oy::Int32,
+                                                   cache_oz::Int32, cache_off::Int32) where B
+    x0 = floor(Int32, fx); y0 = floor(Int32, fy); z0 = floor(Int32, fz)
+    x1 = x0 + Int32(1);    y1 = y0 + Int32(1);    z1 = z0 + Int32(1)
+    tx = fx - Float32(x0);  ty = fy - Float32(y0);  tz = fz - Float32(z0)
+
+    # Same-leaf fast path: all 8 corners in one 8³ leaf
+    if (x0 & Int32(7)) != Int32(7) && (y0 & Int32(7)) != Int32(7) && (z0 & Int32(7)) != Int32(7)
+        leaf_ox = x0 & Int32(-8); leaf_oy = y0 & Int32(-8); leaf_oz = z0 & Int32(-8)
+        if cache_off != Int32(0) && leaf_ox == cache_ox && leaf_oy == cache_oy && leaf_oz == cache_oz
+            loff = cache_off  # cache hit
+        else
+            # One traversal to find leaf
+            _, loff = _gpu_get_value_with_leaf(buf, background, x0, y0, z0, header_T_size)
+            if loff == Int32(0)
+                # Tile/background — uniform value across all 8 corners
+                v, _ = _gpu_get_value_with_leaf(buf, background, x0, y0, z0, header_T_size)
+                return (v, Int32(0), Int32(0), Int32(0), Int32(0))
+            end
+            cache_ox = leaf_ox; cache_oy = leaf_oy; cache_oz = leaf_oz; cache_off = loff
+        end
+        c000 = _gpu_leaf_read(buf, loff, x0, y0, z0, header_T_size)
+        c100 = _gpu_leaf_read(buf, loff, x1, y0, z0, header_T_size)
+        c010 = _gpu_leaf_read(buf, loff, x0, y1, z0, header_T_size)
+        c110 = _gpu_leaf_read(buf, loff, x1, y1, z0, header_T_size)
+        c001 = _gpu_leaf_read(buf, loff, x0, y0, z1, header_T_size)
+        c101 = _gpu_leaf_read(buf, loff, x1, y0, z1, header_T_size)
+        c011 = _gpu_leaf_read(buf, loff, x0, y1, z1, header_T_size)
+        c111 = _gpu_leaf_read(buf, loff, x1, y1, z1, header_T_size)
+    else
+        # Cross-leaf boundary — per-corner cached lookups
+        c000, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x0, y0, z0, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c100, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x1, y0, z0, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c010, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x0, y1, z0, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c110, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x1, y1, z0, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c001, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x0, y0, z1, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c101, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x1, y0, z1, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c011, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x0, y1, z1, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        c111, cache_ox, cache_oy, cache_oz, cache_off = _gpu_get_value_cached(buf, background, x1, y1, z1, header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+    end
+    c00 = c000 * (1.0f0 - tx) + c100 * tx;  c10 = c010 * (1.0f0 - tx) + c110 * tx
+    c01 = c001 * (1.0f0 - tx) + c101 * tx;  c11 = c011 * (1.0f0 - tx) + c111 * tx
+    c0 = c00 * (1.0f0 - ty) + c10 * ty;     c1 = c01 * (1.0f0 - ty) + c11 * ty
+    (c0 * (1.0f0 - tz) + c1 * tz, cache_ox, cache_oy, cache_oz, cache_off)
+end
+
+# ============================================================================
 # GPU HDDA — hierarchical empty-space skipping for delta tracking
 # ============================================================================
 
@@ -744,7 +882,7 @@ end
 
 # --- Delta tracking within a single HDDA span ---
 
-"""Run delta tracking within [t0, t1]. Returns updated (acc_r,g,b, throughput, rng, terminated)."""
+"""Run delta tracking within [t0, t1] with leaf caching. Returns (acc_r,g,b, throughput, rng, terminated, cache_ox,oy,oz,off)."""
 @inline function _gpu_integrate_span(
     buf, tf_lut,
     ox::Float32, oy::Float32, oz::Float32,
@@ -759,7 +897,8 @@ end
     bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
     bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
     acc_r::Float32, acc_g::Float32, acc_b::Float32,
-    throughput::Float32, rng_state::UInt32)
+    throughput::Float32, rng_state::UInt32,
+    cache_ox::Int32, cache_oy::Int32, cache_oz::Int32, cache_off::Int32)
 
     terminated = false
     t = t0
@@ -772,16 +911,18 @@ end
         pos_x = ox + t * dx
         pos_y = oy + t * dy
         pos_z = oz + t * dz
-        density = _gpu_get_value_trilinear(buf, background, pos_x, pos_y, pos_z, header_T_size)
+        density, cache_ox, cache_oy, cache_oz, cache_off =
+            _gpu_get_value_trilinear_cached(buf, background, pos_x, pos_y, pos_z,
+                header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
         density = max(0.0f0, density)
 
-        accept_prob = density  # density * sigma_maj / sigma_maj
+        accept_prob = density
         xi2, rng_state = _gpu_xorshift(rng_state)
         if xi2 < accept_prob
             tf_r, tf_g, tf_b, tf_a = _gpu_tf_lookup(tf_lut, density, tf_dmin, tf_dmax)
             xi3, rng_state = _gpu_xorshift(rng_state)
             if xi3 < albedo
-                # Shadow ray (uses full bbox, not HDDA)
+                # Shadow ray with independent cache
                 shadow_ox = pos_x + 0.01f0 * light_dx
                 shadow_oy = pos_y + 0.01f0 * light_dy
                 shadow_oz = pos_z + 0.01f0 * light_dz
@@ -793,15 +934,18 @@ end
                     bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z)
                 transmittance = 1.0f0
                 if st_enter < st_exit
+                    sc_ox = Int32(0); sc_oy = Int32(0); sc_oz = Int32(0); sc_off = Int32(0)
                     st = st_enter
                     for _ in Int32(1):Int32(256)
                         xi_s, rng_state = _gpu_xorshift(rng_state)
                         xi_s = max(xi_s, 1.0f-10)
                         st += -log(xi_s) / sigma_maj
                         st >= st_exit && break
-                        sd = _gpu_get_value_trilinear(buf, background,
-                            shadow_ox + st * light_dx, shadow_oy + st * light_dy,
-                            shadow_oz + st * light_dz, header_T_size)
+                        sd, sc_ox, sc_oy, sc_oz, sc_off =
+                            _gpu_get_value_trilinear_cached(buf, background,
+                                shadow_ox + st * light_dx, shadow_oy + st * light_dy,
+                                shadow_oz + st * light_dz, header_T_size,
+                                sc_ox, sc_oy, sc_oz, sc_off)
                         sd = max(0.0f0, sd)
                         transmittance *= (1.0f0 - sd)
                         transmittance < 1.0f-10 && break
@@ -817,7 +961,8 @@ end
             break
         end
     end
-    (acc_r, acc_g, acc_b, throughput, rng_state, terminated)
+    (acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+     cache_ox, cache_oy, cache_oz, cache_off)
 end
 
 # --- Main HDDA traversal ---
@@ -845,6 +990,8 @@ active spans. Skips ~97% of empty space on sparse grids.
 
     acc_r = 0.0f0; acc_g = 0.0f0; acc_b = 0.0f0
     throughput = 1.0f0
+    # Per-ray leaf cache (persists across spans for spatial coherence)
+    cache_ox = Int32(0); cache_oy = Int32(0); cache_oz = Int32(0); cache_off = Int32(0)
 
     # Phase 0: collect root hits
     n_roots, rt1, ro1, rt2, ro2, rt3, ro3, rt4, ro4 =
@@ -914,14 +1061,16 @@ active spans. Skips ~97% of empty space on sparse grids.
                             end
                         elseif span_t0 >= 0.0f0
                             # Close span and integrate
-                            acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                            acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                                    cache_ox, cache_oy, cache_oz, cache_off =
                                 _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                                     idx_r, idy_r, idz_r, span_t0, i1_t_entry,
                                     background, header_T_size, sigma_maj, albedo, emission_scale,
                                     tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
                                     light_r, light_g, light_b,
                                     bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
-                                    acc_r, acc_g, acc_b, throughput, rng_state)
+                                    acc_r, acc_g, acc_b, throughput, rng_state,
+                                    cache_ox, cache_oy, cache_oz, cache_off)
                             span_t0 = -1.0f0
                             terminated && return (acc_r, acc_g, acc_b, rng_state)
                         end
@@ -937,14 +1086,16 @@ active spans. Skips ~97% of empty space on sparse grids.
                 else
                     # Ray misses I1 AABB — close span if open
                     if span_t0 >= 0.0f0
-                        acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                        acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                                cache_ox, cache_oy, cache_oz, cache_off =
                             _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                                 idx_r, idy_r, idz_r, span_t0, i2_t_entry,
                                 background, header_T_size, sigma_maj, albedo, emission_scale,
                                 tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
                                 light_r, light_g, light_b,
                                 bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
-                                acc_r, acc_g, acc_b, throughput, rng_state)
+                                acc_r, acc_g, acc_b, throughput, rng_state,
+                                cache_ox, cache_oy, cache_oz, cache_off)
                         span_t0 = -1.0f0
                         terminated && return (acc_r, acc_g, acc_b, rng_state)
                     end
@@ -957,14 +1108,16 @@ active spans. Skips ~97% of empty space on sparse grids.
                         span_t0 = i2_t_entry
                     end
                 elseif span_t0 >= 0.0f0
-                    acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+                    acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                        cache_ox, cache_oy, cache_oz, cache_off =
                         _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                             idx_r, idy_r, idz_r, span_t0, i2_t_entry,
                             background, header_T_size, sigma_maj, albedo, emission_scale,
                             tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
                             light_r, light_g, light_b,
                             bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
-                            acc_r, acc_g, acc_b, throughput, rng_state)
+                            acc_r, acc_g, acc_b, throughput, rng_state,
+                            cache_ox, cache_oy, cache_oz, cache_off)
                     span_t0 = -1.0f0
                     terminated && return (acc_r, acc_g, acc_b, rng_state)
                 end
@@ -980,14 +1133,16 @@ active spans. Skips ~97% of empty space on sparse grids.
 
         # Root entry exhausted — close any open span
         if span_t0 >= 0.0f0
-            acc_r, acc_g, acc_b, throughput, rng_state, terminated =
+            acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                cache_ox, cache_oy, cache_oz, cache_off =
                 _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                     idx_r, idy_r, idz_r, span_t0, i2_t_entry,
                     background, header_T_size, sigma_maj, albedo, emission_scale,
                     tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
                     light_r, light_g, light_b,
                     bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
-                    acc_r, acc_g, acc_b, throughput, rng_state)
+                    acc_r, acc_g, acc_b, throughput, rng_state,
+                    cache_ox, cache_oy, cache_oz, cache_off)
             span_t0 = -1.0f0
             terminated && return (acc_r, acc_g, acc_b, rng_state)
         end
