@@ -26,7 +26,45 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-03-25, session 2) -- GPU HDDA Bug Fix
+## Latest Session (2026-03-26) -- GPU Feature Sprint: Phase Function + Multi-Light + Multi-Bounce
+
+**Status**: GREEN -- 4 GPU issues closed (`xzai`, `u8wt`, `nu0j`, `e7yt`). 367 GPU tests passing. Code committed and pushed.
+
+### What Was Done
+
+**P4.1 (`xzai`) — HG Phase Function on GPU: CLOSED**
+- `_gpu_hg_eval(g, cos_theta)` helper, matches CPU `PhaseFunction.evaluate` to Float32 precision
+- `phase_g::Float32` threaded through entire call chain: `gpu_render_volume` → kernel → `_gpu_hdda_delta_track` → `_gpu_integrate_span`
+- Replaces hardcoded `1/(4π)` isotropic with `_gpu_hg_eval(phase_g, dot(ray_dir, light_dir))`
+- g=0 produces bit-identical output to old isotropic; g=0.8 shows correct forward scattering
+- 38 tests
+
+**P4.2 (`u8wt`) — Multi-Light Support: CLOSED**
+- Packed Float32 buffer: 7 floats per light `[type, x, y, z, r, g, b]` (type: 0=directional, 1=point)
+- `_gpu_read_light`, `_gpu_light_contribution` helpers with point light 1/r² falloff + shadow ray distance capping
+- Both kernels loop over N lights at each scatter event
+- 18 tests
+
+**P4.4 (`nu0j`) — Multi-Bounce Path Tracing: CLOSED**
+- Direction sampling: `_gpu_hg_sample_cos_theta` (HG inverse CDF), `_gpu_build_basis` (Gram-Schmidt), `_gpu_sample_scatter`
+- Bounce loop in both kernels with `max_bounces` parameter (default 0 = single-scatter)
+- Scatter vs absorb tracking: only bounces after scattering (xi3 < albedo), not absorption
+- Russian roulette after bounce 3: `clamp(throughput, 0.05, 1.0)` termination probability
+- `_gpu_integrate_span` and `_gpu_hdda_delta_track` return collision position + scattered flag
+- 29 tests
+
+**P4.5 (`e7yt`) — GPU API Export: CLOSED**
+- `gpu_render_volume`, `gpu_available`, `gpu_info` were already exported
+- Added `backend=:cpu/:gpu/:auto` keyword to `render_volume_image`
+- Auto-detect dispatches to GPU when available, Float32→Float64 conversion for API consistency
+- Informative error when `:gpu` requested but no GPU available
+
+### Commits
+- `d1f296b` feat: GPU rendering — HG phase function, multi-light, multi-bounce path tracing
+
+---
+
+## Previous Session (2026-03-25, session 2) -- GPU HDDA Bug Fix
 
 **Status**: GREEN -- `fjo9` FIXED. HDDA kernel now matches linear kernel output. Default restored to `hdda=true`.
 
@@ -140,17 +178,16 @@ write_ppm("output.ppm", img)
 - `b30ac79` fix: default hdda=false until HDDA bug resolved
 - `512a525` fix: GPU HDDA — Float32 DDA nudge too small (session 2, fjo9 FIXED)
 
-### GPU Issues Closed (17)
+### GPU Issues Closed (21)
 
-jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug)
+jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug), xzai (HG phase), u8wt (multi-light), nu0j (multi-bounce), e7yt (API export)
 
 ### What's Next (Priority Order)
 
-1. **`xzai` P4.1** — HG phase function on GPU. Two converged proposals exist (from this session). Key insight: for single-scatter, only need `_gpu_hg_eval(g, cos_theta)` as a weight (not direction sampling). The helper functions `_gpu_hg_eval`, `_gpu_scatter_direction` etc. are ALREADY IN GPU.jl but not wired into the kernels. Need to: add `phase_g::Float32` param to both kernels, replace hardcoded `1/(4pi)` with `_gpu_hg_eval(phase_g, dot(ray_dir, light_dir))`, extract `g` from `mat.phase_function` in `gpu_render_volume`.
-2. **`u8wt` P4.2** — Multi-light support on GPU
-3. **`nu0j` P4.4** — Multi-bounce path tracing (needs P4.1 first)
-4. **`e7yt` P4.5** — Export GPU API properly (needs P4.1 + P4.2)
-5. **`vbej` P5.1** — Analytic Schwarzschild Christoffel (independent, unblocks GR on GPU)
+1. **`vbej` P5.1** — Analytic Schwarzschild Christoffel symbols (independent, unblocks GR on GPU)
+2. **`wmqg` P4.3** — Multi-volume GPU rendering
+3. **`hecg` P1** — HDDA state machine dedup (refactor)
+4. **GR improvements** — `esr2` RK4 integrator → unblocks `a5ze`, `bjox`, `o9zw`, `837k`
 
 ---
 
@@ -347,12 +384,12 @@ Six-scenario energy ladder: H-H elastic -> H-H excitation -> H-H ionization -> e
 
 ### Immediate (from latest sessions)
 
-1. **`xzai` P4.1** — Wire HG phase function into GPU kernels (highest-impact GPU feature remaining)
-2. **Regenerate golden images**: T10.4/T10.5 PPM format mismatch (2 pre-existing test failures)
-3. **Fix `write_ppm` test error**: `findfirst(::UInt8, ::Vector{UInt8})` no longer works in Julia 1.12 — needs `findfirst(==(byte), vec)` or similar
-4. **Close beads**: `tjyx` (Moller) and `22lf` (ionization) once demos look good
-5. **Close beads**: `jirf`, `lwp3`, `hecg`, `fj1a`, `emsz` -- code is done
-6. **Finish CUDA.jl install + test GPU path** for ScalarQEDGPU on small grid (N=32)
+1. **`vbej` P5.1** — Analytic Schwarzschild Christoffel symbols (unblocks GR on GPU)
+2. **`wmqg` P4.3** — Multi-volume GPU rendering
+3. **Regenerate golden images**: T10.4/T10.5 PPM format mismatch (2 pre-existing test failures)
+4. **Fix `write_ppm` test error**: `findfirst(::UInt8, ::Vector{UInt8})` no longer works in Julia 1.12
+5. **Close beads**: `tjyx` (Moller) and `22lf` (ionization) once demos look good
+6. **Close beads**: `jirf`, `lwp3`, `hecg`, `fj1a`, `emsz` -- code is done
 
 ### QFT Scattering Viz Series (active project)
 
