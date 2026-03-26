@@ -38,10 +38,10 @@ using Test, Lyr
     end
 
     @testset "VectorField3D basic" begin
-        vf = VectorField3D((x,y,z) -> (x, y, z),
+        vf = VectorField3D((x,y,z) -> SVec3d(x, y, z),
             BoxDomain(SVec3d(-2,-2,-2), SVec3d(2,2,2)), 1.0)
         val = evaluate(vf, 1.0, 2.0, 3.0)
-        @test val == (1.0, 2.0, 3.0)
+        @test val == SVec3d(1.0, 2.0, 3.0)
     end
 
     @testset "visualize produces valid image" begin
