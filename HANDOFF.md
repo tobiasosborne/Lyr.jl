@@ -28,7 +28,7 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ## Latest Session (2026-03-26) -- GPU Feature Sprint + GR Christoffel Symbols
 
-**Status**: GREEN -- 6 issues closed (`xzai`, `u8wt`, `nu0j`, `e7yt`, `vbej`, `g2ld`). 367 GPU tests + 458 Schwarzschild + 613 Kerr tests passing. All committed and pushed.
+**Status**: GREEN -- 7 issues closed (`xzai`, `u8wt`, `nu0j`, `e7yt`, `vbej`, `g2ld`, `kzfy`). 377 GPU tests + 458 Schwarzschild + 613 Kerr tests passing. All committed and pushed.
 
 ### What Was Done
 
@@ -70,10 +70,17 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 - Verified: Schwarzschild limit (a=0), Hamiltonian cross-check at 100 random (r,θ,a) points, symmetry
 - Unblocks `kzfy` (GPU geodesic integrator kernel)
 
+**P5.3 (`kzfy`) — GPU Geodesic Integrator Kernel: CLOSED**
+- Schwarzschild thin disk rendering via KA kernel
+- Scalar Float64 RHS + RK4 + adaptive step + null renormalization
+- Disk crossing (θ crosses π/2), checkerboard sky background
+- `gpu_gr_render(M, cam_r, cam_θ, cam_φ, fov, w, h; ...)` dispatch function
+
 ### Commits
 - `d1f296b` feat: GPU rendering — HG phase function, multi-light, multi-bounce path tracing
 - `f0205a6` feat: analytic Schwarzschild Christoffel symbols
 - `4f69788` feat: analytic Kerr BL Christoffel symbols
+- `9ab95de` feat: GPU geodesic ray tracer — Schwarzschild thin disk
 
 ---
 
@@ -191,13 +198,13 @@ write_ppm("output.ppm", img)
 - `b30ac79` fix: default hdda=false until HDDA bug resolved
 - `512a525` fix: GPU HDDA — Float32 DDA nudge too small (session 2, fjo9 FIXED)
 
-### GPU/GR Issues Closed (23)
+### GPU/GR Issues Closed (24)
 
-jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug), xzai (HG phase), u8wt (multi-light), nu0j (multi-bounce), e7yt (API export), vbej (Schwarzschild Christoffel), g2ld (Kerr Christoffel)
+jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug), xzai (HG phase), u8wt (multi-light), nu0j (multi-bounce), e7yt (API export), vbej (Schwarzschild Christoffel), g2ld (Kerr Christoffel), kzfy (GPU geodesic integrator)
 
 ### What's Next (Priority Order)
 
-1. **`kzfy` P5.3** — GPU geodesic integrator kernel (now unblocked by Christoffel symbols)
+1. **`mqok` P5.4** — GPU GR thin-disk + volumetric rendering (now unblocked by kzfy)
 2. **`wmqg` P4.3** — Multi-volume GPU rendering
 3. **`hecg` P1** — HDDA state machine dedup (refactor)
 4. **GR improvements** — `esr2` RK4 integrator → unblocks `a5ze`, `bjox`, `o9zw`, `837k`
