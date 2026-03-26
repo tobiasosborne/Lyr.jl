@@ -504,6 +504,27 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
         @test all(p -> all(isfinite, p), p8_hdda)
     end
 
+    @testset "gpu_render_multi_volume: 2 volumes" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        mat = VolumeMaterial(tf_smoke(); sigma_scale=5.0)
+        light = DirectionalLight((0.577, 0.577, 0.577))
+        vol1 = VolumeEntry(grid, nanogrid, mat)
+        vol2 = VolumeEntry(grid, nanogrid, mat)
+        scene = Scene(cam, [light], [vol1, vol2])
+        img = gpu_render_multi_volume(scene, 8, 8; spp=1)
+        @test size(img) == (8, 8)
+        @test all(p -> all(isfinite, p), img)
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), img)
+    end
+
     @testset "gpu_gr_render: Schwarzschild shadow + disk" begin
         # Camera at r=30, equatorial, looking at BH with thin disk
         img = gpu_gr_render(1.0, 30.0, π/2, 0.0, 60.0, 16, 16;

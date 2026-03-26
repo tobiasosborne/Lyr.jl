@@ -1528,6 +1528,47 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     result
 end
 
+"""
+    gpu_render_multi_volume(scene, width, height; spp=1, seed=UInt64(42),
+                            backend=..., hdda=true, max_bounces=0) -> Matrix{NTuple{3, Float32}}
+
+Render a scene with multiple volumes on GPU. Each volume is rendered
+independently with `gpu_render_volume`, then composited additively.
+Correct for non-overlapping volumes; approximate for overlapping
+(does not account for inter-volume shadowing).
+"""
+function gpu_render_multi_volume(scene::Scene, width::Int, height::Int;
+                                  spp::Int=1, seed::UInt64=UInt64(42),
+                                  backend=_default_gpu_backend(),
+                                  hdda::Bool=true, max_bounces::Int=0)
+    vols = scene.volumes
+    length(vols) == 0 && return fill((0.0f0, 0.0f0, 0.0f0), height, width)
+
+    bg = (scene.background[1], scene.background[2], scene.background[3])
+    lts = collect(scene.lights)
+
+    # Render first volume
+    s1 = Scene(scene.camera, lts, [vols[1]]; background=bg)
+    result = gpu_render_volume(vols[1].nanogrid, s1,
+        width, height; spp=spp, seed=seed, backend=backend, hdda=hdda, max_bounces=max_bounces)
+
+    # Additively composite remaining volumes
+    for vi in 2:length(vols)
+        si = Scene(scene.camera, lts, [vols[vi]]; background=bg)
+        vol_img = gpu_render_volume(vols[vi].nanogrid, si,
+            width, height; spp=spp, seed=seed + UInt64(vi), backend=backend,
+            hdda=hdda, max_bounces=max_bounces)
+        for i in eachindex(result)
+            r1, g1, b1 = result[i]
+            r2, g2, b2 = vol_img[i]
+            result[i] = (clamp(r1 + r2, 0.0f0, 1.0f0),
+                          clamp(g1 + g2, 0.0f0, 1.0f0),
+                          clamp(b1 + b2, 0.0f0, 1.0f0))
+        end
+    end
+    result
+end
+
 # ============================================================================
 # GPU sphere trace kernel (for level sets)
 # ============================================================================
