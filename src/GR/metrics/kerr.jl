@@ -244,3 +244,118 @@ function metric_inverse_partials(k::Kerr{BoyerLindquist},
 
     (zero4, d_dr, d_dθ, zero4)
 end
+
+# ─────────────────────────────────────────────────────────────────────
+# Analytic Christoffel symbols Γ^μ_{αβ} for Kerr Boyer-Lindquist
+#
+# Computed from Γ^μ_{αβ} = ½ g^{μσ}(g_{σα,β} + g_{σβ,α} - g_{αβ,σ})
+# using analytic metric derivatives. Pure arithmetic, GPU-portable.
+# ─────────────────────────────────────────────────────────────────────
+
+"""
+    christoffel(k::Kerr{BoyerLindquist}, x) -> NTuple{4, SMatrix{4,4}}
+
+Analytic Christoffel symbols Γ^μ_{αβ} for Kerr spacetime in Boyer-Lindquist
+coordinates. Returns 4 symmetric 4×4 matrices, one per upper index μ.
+
+Computed from the standard formula using analytic metric partial derivatives.
+All expressions are rational functions of r, θ, M, a — pure arithmetic,
+no allocation, fully GPU-portable.
+"""
+function christoffel(k::Kerr{BoyerLindquist}, x::SVector{4})
+    M, a = k.M, k.a
+    r, θ = x[2], x[3]
+    a2 = a * a
+
+    sinθ = sin(θ)
+    cosθ = cos(θ)
+    sin2θ = max(sinθ * sinθ, 1e-6)
+    sinθ_safe = max(abs(sinθ), 1e-3) * (sinθ >= 0.0 ? 1.0 : -1.0)
+
+    Σ = r * r + a2 * cosθ * cosθ
+    Δ = r * r - 2.0 * M * r + a2
+    r2a2 = r * r + a2
+    Σ2 = Σ * Σ
+    Δ2 = Δ * Δ
+    inv_Σ2 = 1.0 / Σ2
+
+    # Metric components
+    g = metric(k, x)
+    ginv = metric_inverse(k, x)
+
+    # ∂Σ/∂r = 2r, ∂Σ/∂θ = -2a²sinθcosθ
+    dΣ_dr = 2.0 * r
+    dΣ_dθ = -2.0 * a2 * sinθ * cosθ
+
+    # ∂Δ/∂r = 2r - 2M
+    dΔ_dr = 2.0 * r - 2.0 * M
+
+    # ∂g_{tt}/∂r = 2M(Σ - 2r²)/Σ²
+    dgtt_dr = 2.0 * M * (Σ - 2.0 * r * r) * inv_Σ2
+    # ∂g_{tt}/∂θ = 4Mra²sinθcosθ/Σ²
+    dgtt_dθ = 4.0 * M * r * a2 * sinθ * cosθ * inv_Σ2
+
+    # ∂g_{tφ}/∂r = -2Ma sin²θ (Σ - 2r²)/Σ²
+    dgtφ_dr = -2.0 * M * a * sin2θ * (Σ - 2.0 * r * r) * inv_Σ2
+    # ∂g_{tφ}/∂θ = -4Mar sinθcosθ (Σ + a²sin²θ)/Σ²
+    dgtφ_dθ = -4.0 * M * a * r * sinθ * cosθ * (Σ + a2 * sin2θ) * inv_Σ2
+
+    # ∂g_{rr}/∂r = (2rΔ - Σ(2r-2M))/Δ²
+    dgrr_dr = (dΣ_dr * Δ - Σ * dΔ_dr) / Δ2
+    # ∂g_{rr}/∂θ = ∂Σ/∂θ / Δ
+    dgrr_dθ = dΣ_dθ / Δ
+
+    # ∂g_{θθ}/∂r = 2r, ∂g_{θθ}/∂θ = -2a²sinθcosθ
+    dgθθ_dr = dΣ_dr
+    dgθθ_dθ = dΣ_dθ
+
+    # g_{φφ} = A sin²θ/Σ where A = (r²+a²)² - Δa²sin²θ
+    A = r2a2 * r2a2 - Δ * a2 * sin2θ
+    dA_dr = 4.0 * r * r2a2 - dΔ_dr * a2 * sin2θ
+    dA_dθ = -Δ * 2.0 * a2 * sinθ * cosθ
+
+    # ∂g_{φφ}/∂r = sin²θ(∂A/∂r·Σ - A·∂Σ/∂r)/Σ²
+    dgφφ_dr = sin2θ * (dA_dr * Σ - A * dΣ_dr) * inv_Σ2
+    # ∂g_{φφ}/∂θ = [2sinθcosθ·A·Σ + sin²θ(∂A/∂θ·Σ - A·∂Σ/∂θ)]/Σ²
+    dgφφ_dθ = (2.0 * sinθ * cosθ * A * Σ +
+                sin2θ * (dA_dθ * Σ - A * dΣ_dθ)) * inv_Σ2
+
+    # Pack metric derivatives: dg[β][σ,α] where β is derivative index
+    # Only β=2 (r) and β=3 (θ) are non-zero
+    # Using column-major SMatrix: element (row,col) = (σ,α)
+    z = 0.0
+    dg_dr = @SMatrix [
+        dgtt_dr  z        z        dgtφ_dr ;
+        z        dgrr_dr  z        z       ;
+        z        z        dgθθ_dr  z       ;
+        dgtφ_dr  z        z        dgφφ_dr
+    ]
+
+    dg_dθ = @SMatrix [
+        dgtt_dθ  z        z        dgtφ_dθ ;
+        z        dgrr_dθ  z        z       ;
+        z        z        dgθθ_dθ  z       ;
+        dgtφ_dθ  z        z        dgφφ_dθ
+    ]
+
+    # Compute Γ^μ_{αβ} = ½ Σ_σ g^{μσ}(dg[β][σ,α] + dg[α][σ,β] - dg[σ][α,β])
+    # where dg[1]=dg[4]=0, dg[2]=dg_dr, dg[3]=dg_dθ
+    @inline function _dg(idx, σ, α)
+        idx == 2 && return dg_dr[σ, α]
+        idx == 3 && return dg_dθ[σ, α]
+        return 0.0
+    end
+
+    Γ = ntuple(Val(4)) do μ
+        SMat4d(ntuple(Val(16)) do k
+            β = (k - 1) >> 2 + 1  # column (÷ 4)
+            α = (k - 1) & 3 + 1   # row (% 4)
+            s = 0.0
+            for σ in 1:4
+                s += ginv[μ, σ] * (_dg(β, σ, α) + _dg(α, σ, β) - _dg(σ, α, β))
+            end
+            0.5 * s
+        end)
+    end
+    Γ
+end

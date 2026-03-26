@@ -312,4 +312,73 @@ end
     @test total > 0  # disk is visible
 end
 
+# ============================================================================
+# Christoffel symbols
+# ============================================================================
+
+@testset "Christoffel symbols: Schwarzschild limit (a=0)" begin
+    # Kerr with a=0 should match Schwarzschild Christoffel
+    k0 = Kerr(1.0, 0.0)
+    s = Schwarzschild(1.0)
+    x = SVec4d(0.0, 10.0, π/3, 0.0)
+    Γk = christoffel(k0, x)
+    Γs = christoffel(s, x)
+    for μ in 1:4
+        @test maximum(abs, Γk[μ] - Γs[μ]) < 1e-10
+    end
+end
+
+@testset "Christoffel symbols: Hamiltonian cross-check" begin
+    # Verify Γ^μ_{αβ} v^α v^β matches Hamiltonian acceleration for random (r,θ,a)
+    for _ in 1:100
+        a_spin = 0.99 * rand()  # a ∈ [0, 0.99)
+        k = Kerr(1.0, a_spin)
+        r_plus = horizon_radius(k)
+        r = r_plus + 1.0 + 50.0 * rand()  # r ∈ [r+ + 1, r+ + 51]
+        θ = 0.1 + (π - 0.2) * rand()
+        x = SVec4d(0.0, r, θ, 0.0)
+
+        # Random null momentum
+        ginv = metric_inverse(k, x)
+        pr, pθ, pφ = randn(), randn(), randn()
+        C = ginv[2,2]*pr^2 + ginv[3,3]*pθ^2 + ginv[4,4]*pφ^2 + 2.0*ginv[1,4]*0.0  # gtφ·pt terms handled below
+        # Solve quadratic for pt: g^{tt}pt² + 2g^{tφ}pt·pφ + (spatial) = 0
+        aa_coeff = ginv[1,1]
+        bb_coeff = 2.0 * ginv[1,4] * pφ
+        cc_coeff = ginv[2,2]*pr^2 + ginv[3,3]*pθ^2 + ginv[4,4]*pφ^2
+        disc = bb_coeff^2 - 4.0*aa_coeff*cc_coeff
+        disc < 0 && continue
+        pt = (-bb_coeff - sqrt(disc)) / (2.0 * aa_coeff)
+        p = SVec4d(pt, pr, pθ, pφ)
+
+        # Method 1: Hamiltonian
+        _, dp_ham = hamiltonian_rhs(k, x, p)
+        dx = ginv * p
+        partials = metric_inverse_partials(k, x)
+        ddx_ham = ginv * dp_ham
+        for σ in 1:4
+            ddx_ham += dx[σ] * (partials[σ] * p)
+        end
+
+        # Method 2: Christoffel
+        Γ = christoffel(k, x)
+        ddx_chr = SVec4d(ntuple(μ -> -dot(dx, Γ[μ] * dx), 4))
+
+        for μ in 1:4
+            @test ddx_chr[μ] ≈ ddx_ham[μ] rtol=1e-6
+        end
+    end
+end
+
+@testset "Christoffel: symmetry Γ^μ_{αβ} = Γ^μ_{βα}" begin
+    k = Kerr(1.0, 0.7)
+    x = SVec4d(0.0, 8.0, π/4, 0.0)
+    Γ = christoffel(k, x)
+    for μ in 1:4
+        for α in 1:4, β in α:4
+            @test Γ[μ][α,β] ≈ Γ[μ][β,α] atol=1e-12
+        end
+    end
+end
+
 end  # Kerr Boyer-Lindquist
