@@ -1753,3 +1753,263 @@ function resolve(acc::ProgressiveAccumulator)::Matrix{NTuple{3, Float64}}
     end
     result
 end
+
+# ============================================================================
+# GPU Geodesic Ray Tracing (General Relativity)
+# ============================================================================
+
+# --- Schwarzschild Hamiltonian RHS (scalar Float64) ---
+
+"""Schwarzschild Hamiltonian RHS: returns (dx1..4, dp1..4) given position (x1..4) and momentum (p1..4)."""
+@inline function _gpu_schwarzschild_rhs(M::Float64,
+        x2::Float64, x3::Float64,  # r, θ (x1=t, x4=φ not needed)
+        p1::Float64, p2::Float64, p3::Float64, p4::Float64)
+    r = x2; θ = x3
+    f = 1.0 - 2.0 * M / r
+    r2 = r * r; r3 = r2 * r
+    sin2θ = max(sin(θ)^2, 1e-6)
+    inv_r2 = 1.0 / r2
+    rs = 2.0 * M
+
+    # dx/dλ = g^{μν} p_ν (diagonal metric)
+    dx1 = (-1.0 / f) * p1
+    dx2 = f * p2
+    dx3 = inv_r2 * p3
+    dx4 = (inv_r2 / sin2θ) * p4
+
+    # dp_μ/dλ = -½ (∂g^{αβ}/∂x^μ) p_α p_β
+    # dp1 = 0 (static), dp4 = 0 (axisymmetric)
+    # dp2 = -½ [dgtt_dr p1² + dgrr_dr p2² + dgθθ_dr p3² + dgφφ_dr p4²]
+    dgtt_dr = rs / (r2 * f * f)
+    dgrr_dr = rs / r2
+    dgθθ_dr = -2.0 / r3
+    dgφφ_dr = -2.0 / (r3 * sin2θ)
+    dp2 = -0.5 * (dgtt_dr * p1^2 + dgrr_dr * p2^2 + dgθθ_dr * p3^2 + dgφφ_dr * p4^2)
+
+    # dp3: only g^{φφ} depends on θ
+    sinθ = sin(θ); cosθ = cos(θ)
+    sinθ_s = max(abs(sinθ), 1e-3) * (sinθ >= 0.0 ? 1.0 : -1.0)
+    dgφφ_dθ = -2.0 * cosθ / (r2 * sinθ_s^3)
+    dp3 = -0.5 * dgφφ_dθ * p4^2
+
+    (dx1, dx2, dx3, dx4, 0.0, dp2, dp3, 0.0)
+end
+
+"""One RK4 step for Schwarzschild geodesic. Returns updated (x1..4, p1..4)."""
+@inline function _gpu_schwarzschild_rk4(M::Float64, dl::Float64,
+        x1::Float64, x2::Float64, x3::Float64, x4::Float64,
+        p1::Float64, p2::Float64, p3::Float64, p4::Float64)
+    # k1
+    k1 = _gpu_schwarzschild_rhs(M, x2, x3, p1, p2, p3, p4)
+    h = dl * 0.5
+    # k2
+    k2 = _gpu_schwarzschild_rhs(M, x2 + h*k1[2], x3 + h*k1[3],
+        p1 + h*k1[5], p2 + h*k1[6], p3 + h*k1[7], p4 + h*k1[8])
+    # k3
+    k3 = _gpu_schwarzschild_rhs(M, x2 + h*k2[2], x3 + h*k2[3],
+        p1 + h*k2[5], p2 + h*k2[6], p3 + h*k2[7], p4 + h*k2[8])
+    # k4
+    k4 = _gpu_schwarzschild_rhs(M, x2 + dl*k3[2], x3 + dl*k3[3],
+        p1 + dl*k3[5], p2 + dl*k3[6], p3 + dl*k3[7], p4 + dl*k3[8])
+
+    s = dl / 6.0
+    (x1 + s*(k1[1] + 2*k2[1] + 2*k3[1] + k4[1]),
+     x2 + s*(k1[2] + 2*k2[2] + 2*k3[2] + k4[2]),
+     x3 + s*(k1[3] + 2*k2[3] + 2*k3[3] + k4[3]),
+     x4 + s*(k1[4] + 2*k2[4] + 2*k3[4] + k4[4]),
+     p1 + s*(k1[5] + 2*k2[5] + 2*k3[5] + k4[5]),
+     p2 + s*(k1[6] + 2*k2[6] + 2*k3[6] + k4[6]),
+     p3 + s*(k1[7] + 2*k2[7] + 2*k3[7] + k4[7]),
+     p4 + s*(k1[8] + 2*k2[8] + 2*k3[8] + k4[8]))
+end
+
+"""Null cone renormalization for Schwarzschild: solve for p_t from g^{μν}p_μp_ν=0."""
+@inline function _gpu_schwarzschild_renorm(M::Float64, r::Float64, θ::Float64,
+        p1::Float64, p2::Float64, p3::Float64, p4::Float64)
+    f = 1.0 - 2.0 * M / r
+    inv_r2 = 1.0 / (r * r)
+    sin2θ = max(sin(θ)^2, 1e-10)
+    C = f * p2^2 + inv_r2 * p3^2 + (inv_r2 / sin2θ) * p4^2
+    pt_mag = sqrt(max(C * f, 0.0))
+    p1 < 0.0 ? -pt_mag : pt_mag
+end
+
+"""Adaptive step size: smaller near horizon (r=2M), full step in far field."""
+@inline function _gpu_adaptive_step(dl_base::Float64, r::Float64, M::Float64)
+    rh = 2.0 * M
+    scale = clamp(((r - rh) / (6.0 * M))^2, 0.05, 1.0)
+    dl_base * scale
+end
+
+"""Checkerboard sky pattern for escaped rays."""
+@inline function _gpu_checkerboard(θ::Float64, φ::Float64)
+    n_θ = floor(Int, θ * 10.0 / π)
+    n_φ = floor(Int, φ * 10.0 / (2π))
+    if (n_θ + n_φ) % 2 == 0
+        (0.9, 0.9, 0.95)
+    else
+        (0.15, 0.15, 0.2)
+    end
+end
+
+"""Simple blackbody color ramp for disk emission."""
+@inline function _gpu_blackbody_color(T::Float64)
+    T <= 0.0 && return (0.0, 0.0, 0.0)
+    r = clamp(T / 0.5, 0.0, 1.0)
+    g = clamp((T - 0.3) / 0.7, 0.0, 1.0)
+    b = clamp((T - 0.7) / 0.5, 0.0, 1.0)
+    (r, g, b)
+end
+
+# --- GPU Geodesic Kernel ---
+
+"""GPU kernel for Schwarzschild geodesic ray tracing with thin disk."""
+@kernel function gr_schwarzschild_kernel!(output,
+    M::Float64,
+    # Camera position (t, r, θ, φ)
+    cam_r::Float64, cam_θ::Float64, cam_φ::Float64,
+    cam_fov::Float64,
+    # Image dims
+    width::Int32, height::Int32,
+    # Disk (inner=outer=0 for no disk)
+    disk_inner::Float64, disk_outer::Float64,
+    # Integration
+    dl_base::Float64, max_steps::Int32, r_max::Float64,
+    # Background (0=checkerboard, 1=black)
+    bg_mode::Int32)
+
+    idx = @index(Global, Linear)
+    px = ((idx - Int32(1)) % width) + Int32(1)
+    py = ((idx - Int32(1)) ÷ width) + Int32(1)
+
+    aspect = Float64(width) / Float64(height)
+    half_fov = tan(cam_fov * 0.5 * π / 180.0)
+
+    u = (Float64(px) - 0.5) / Float64(width)
+    v = 1.0 - (Float64(py) - 0.5) / Float64(height)
+    rpx = (2.0 * u - 1.0) * aspect * half_fov
+    rpy = (2.0 * v - 1.0) * half_fov
+
+    # Camera direction in tetrad frame: forward=e1(radial), up=e2(polar), right=e3(azimuthal)
+    n_norm = sqrt(1.0 + rpx^2 + rpy^2)
+    nx = 1.0 / n_norm   # forward (toward BH)
+    ny = rpy / n_norm    # up
+    nz = rpx / n_norm    # right
+
+    # Build Schwarzschild static observer tetrad at camera position
+    f = 1.0 - 2.0 * M / cam_r
+    sqrtf = sqrt(max(f, 1e-20))
+    sinθ = sin(cam_θ)
+    sinθ_s = max(abs(sinθ), 1e-3)
+
+    # e0 = (1/√f, 0, 0, 0), e1 = (0, √f, 0, 0), e2 = (0, 0, 1/r, 0), e3 = (0, 0, 0, 1/(r sinθ))
+    # k^μ = e0^μ + nx*e1^μ + ny*e2^μ + nz*e3^μ
+    kt = 1.0 / sqrtf
+    kr = nx * sqrtf
+    kθ = ny / cam_r
+    kφ = nz / (cam_r * sinθ_s)
+
+    # Lower indices: p_μ = g_{μν} k^ν (diagonal Schwarzschild)
+    p1 = -f * kt                    # p_t
+    p2 = (1.0 / f) * kr             # p_r
+    p3 = cam_r^2 * kθ               # p_θ
+    p4 = cam_r^2 * sinθ^2 * kφ      # p_φ
+
+    # Initial position
+    x1 = 0.0; x2 = cam_r; x3 = cam_θ; x4 = cam_φ
+
+    rh = 2.0 * M
+    equator = π / 2.0
+    has_disk = disk_inner > 0.0 && disk_outer > 0.0
+    color_r = 0.0; color_g = 0.0; color_b = 0.0
+    terminated = false
+
+    for step in Int32(1):max_steps
+        r = x2
+        dl = _gpu_adaptive_step(dl_base, r, M)
+
+        x2_prev = x2; x3_prev = x3
+        x1, x2, x3, x4, p1, p2, p3, p4 =
+            _gpu_schwarzschild_rk4(M, dl, x1, x2, x3, x4, p1, p2, p3, p4)
+
+        # Renormalize every 50 steps
+        if step % Int32(50) == Int32(0)
+            p1 = _gpu_schwarzschild_renorm(M, x2, x3, p1, p2, p3, p4)
+        end
+
+        # Check disk crossing (θ crosses π/2)
+        if has_disk && (x3_prev - equator) * (x3 - equator) < 0.0
+            frac = (equator - x3_prev) / (x3 - x3_prev)
+            r_cross = x2_prev + frac * (x2 - x2_prev)
+            if disk_inner <= r_cross <= disk_outer
+                intensity = (disk_inner / r_cross)^3
+                color_r, color_g, color_b = _gpu_blackbody_color(clamp(intensity * 5.0, 0.0, 2.0))
+                terminated = true
+                break
+            end
+        end
+
+        # Horizon
+        if x2 <= rh * 1.01
+            color_r = 0.0; color_g = 0.0; color_b = 0.0
+            terminated = true
+            break
+        end
+
+        # Escape
+        if x2 >= r_max
+            if bg_mode == Int32(0)
+                color_r, color_g, color_b = _gpu_checkerboard(x3, x4)
+            end
+            terminated = true
+            break
+        end
+    end
+
+    @inbounds output[idx] = (color_r, color_g, color_b)
+end
+
+# --- GPU GR Render Dispatch ---
+
+"""
+    gpu_gr_render(metric, cam_position, cam_fov, width, height;
+                  disk=nothing, max_steps=10000, step_size=-0.5,
+                  r_max=200.0, background=:checkerboard,
+                  backend=_default_gpu_backend()) -> Matrix{NTuple{3, Float64}}
+
+Render a black hole scene using GPU-accelerated geodesic ray tracing.
+
+Currently supports Schwarzschild metric with optional thin disk.
+Uses Float64 precision for accurate geodesic integration.
+"""
+function gpu_gr_render(M::Float64, cam_r::Float64, cam_θ::Float64, cam_φ::Float64,
+                        cam_fov::Float64, width::Int, height::Int;
+                        disk_inner::Float64=0.0, disk_outer::Float64=0.0,
+                        max_steps::Int=10000, step_size::Float64=-0.5,
+                        r_max::Float64=200.0, background::Symbol=:checkerboard,
+                        backend=_default_gpu_backend())
+    npixels = width * height
+    z3 = (0.0, 0.0, 0.0)
+    output = Adapt.adapt(backend, fill(z3, npixels))
+
+    bg_mode = background === :checkerboard ? Int32(0) : Int32(1)
+
+    kernel! = gr_schwarzschild_kernel!(backend)
+    kernel!(output, M,
+            cam_r, cam_θ, cam_φ, cam_fov,
+            Int32(width), Int32(height),
+            disk_inner, disk_outer,
+            step_size, Int32(max_steps), r_max,
+            bg_mode;
+            ndrange=npixels)
+    KernelAbstractions.synchronize(backend)
+
+    host_buf = Array(output)
+    result = Matrix{NTuple{3, Float64}}(undef, height, width)
+    for i in 1:npixels
+        x = ((i - 1) % width) + 1
+        y = ((i - 1) ÷ width) + 1
+        result[y, x] = host_buf[i]
+    end
+    result
+end

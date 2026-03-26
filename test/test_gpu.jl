@@ -503,4 +503,40 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
         @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p8_hdda)
         @test all(p -> all(isfinite, p), p8_hdda)
     end
+
+    @testset "gpu_gr_render: Schwarzschild shadow + disk" begin
+        # Camera at r=30, equatorial, looking at BH with thin disk
+        img = gpu_gr_render(1.0, 30.0, π/2, 0.0, 60.0, 16, 16;
+                             disk_inner=6.0, disk_outer=20.0,
+                             max_steps=5000, step_size=-0.3)
+        @test size(img) == (16, 16)
+        @test all(p -> all(isfinite, p), img)
+        # Should have some black pixels (BH shadow) and some bright (disk/sky)
+        n_black = count(p -> p[1] < 0.01 && p[2] < 0.01 && p[3] < 0.01, img)
+        n_bright = count(p -> p[1] > 0.01 || p[2] > 0.01 || p[3] > 0.01, img)
+        @test n_black > 0   # BH shadow exists
+        @test n_bright > 0  # visible disk/sky
+    end
+
+    @testset "gpu_gr_render: no disk — checkerboard sky" begin
+        img = gpu_gr_render(1.0, 30.0, π/2, 0.0, 40.0, 8, 8;
+                             max_steps=3000, step_size=-0.5)
+        @test size(img) == (8, 8)
+        @test all(p -> all(isfinite, p), img)
+        # All rays should either escape (sky color) or fall in (black)
+        # Checkerboard has values ~0.15 or ~0.9
+        n_sky = count(p -> p[1] > 0.1, img)
+        @test n_sky > 0
+    end
+
+    @testset "gpu_gr_render: Minkowski limit (M=0) — no lensing" begin
+        # M=0: flat space, no bending, all rays escape
+        img = gpu_gr_render(0.0, 30.0, π/2, 0.0, 40.0, 8, 8;
+                             max_steps=1000, step_size=-0.5, r_max=100.0)
+        @test size(img) == (8, 8)
+        @test all(p -> all(isfinite, p), img)
+        # No black hole → no black pixels (all rays escape to sky)
+        n_black = count(p -> p[1] == 0.0 && p[2] == 0.0 && p[3] == 0.0, img)
+        @test n_black == 0
+    end
 end
