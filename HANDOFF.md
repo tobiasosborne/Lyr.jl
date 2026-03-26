@@ -28,7 +28,7 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ## Latest Session (2026-03-26) -- GPU Feature Sprint + GR Christoffel Symbols
 
-**Status**: GREEN -- 7 issues closed (`xzai`, `u8wt`, `nu0j`, `e7yt`, `vbej`, `g2ld`, `kzfy`). 377 GPU tests + 458 Schwarzschild + 613 Kerr tests passing. All committed and pushed.
+**Status**: GREEN -- 12 issues closed. 380 GPU + 458 Schwarzschild + 613 Kerr tests passing. All committed and pushed. 18 open issues remain (from 22 at session start).
 
 ### What Was Done
 
