@@ -242,4 +242,78 @@
         # initial + 10 recorded + final = 12
         @test length(trace.states) >= 10
     end
+
+    @testset "adaptive_step: near horizon vs far field" begin
+        # Near horizon (r=2.5M): step should be small
+        dl_near = adaptive_step(-0.5, 2.5, M)
+        # Far field (r=50M): step should be near base
+        dl_far = adaptive_step(-0.5, 50.0, M)
+        @test abs(dl_near) < abs(dl_far)
+        @test abs(dl_far) ≈ 0.5 atol=0.05  # nearly full step in far field
+        # At r=2M (horizon): step = 0.05 × base (minimum clamp)
+        dl_horizon = adaptive_step(-0.5, 2.0 + 1e-6, M)
+        @test abs(dl_horizon) ≈ 0.05 * 0.5 atol=0.01
+    end
+
+    @testset "renormalize_null: preserves H=0" begin
+        # Start with a null geodesic, perturb p_t, renormalize
+        x = SVec4d(0.0, 10.0, π/2, 0.0)
+        p = SVec4d(-1.0, 0.3, 0.2, 0.5)
+        # Renormalize to null
+        p_null = renormalize_null(s, x, p)
+        H = hamiltonian(s, x, p_null)
+        @test abs(H) < 1e-12
+
+        # Test with Kerr
+        k = Kerr(1.0, 0.7)
+        xk = SVec4d(0.0, 8.0, π/3, 0.0)
+        pk = SVec4d(-1.0, 0.4, -0.3, 0.6)
+        pk_null = renormalize_null(k, xk, pk)
+        Hk = hamiltonian(k, xk, pk_null)
+        @test abs(Hk) < 1e-12
+
+        # Sign preservation
+        @test sign(pk_null[1]) == sign(pk[1])
+    end
+
+    @testset "rk4_step: Minkowski straight line" begin
+        # In flat space, geodesics are straight lines
+        m_flat = Minkowski()
+        x = SVec4d(0.0, 1.0, 2.0, 3.0)
+        p = SVec4d(-1.0, 0.5, 0.3, 0.1)  # null in Minkowski: -1² + 0.5² + 0.3² + 0.1² = -0.65 ≠ 0
+        # Make null: p_t = √(p_r² + p_θ² + p_φ²)
+        pt = -sqrt(p[2]^2 + p[3]^2 + p[4]^2)
+        p = SVec4d(pt, p[2], p[3], p[4])
+
+        dl = -0.1
+        x_new, p_new = rk4_step(m_flat, x, p, dl)
+        # In Minkowski: dx/dλ = g^{μν}p_ν = p^μ (since g = η)
+        # With covariant p: g^{μν}p_ν = (-p_t, p_r, p_θ, p_φ)
+        expected_v = SVec4d(-pt, p[2], p[3], p[4])
+        x_expected = x + dl * expected_v
+        @test norm(x_new - x_expected) < 1e-12
+        # Momentum unchanged in flat space
+        @test norm(p_new - p) < 1e-12
+    end
+
+    @testset "verlet_step: Minkowski straight line" begin
+        m_flat = Minkowski()
+        x = SVec4d(0.0, 1.0, 2.0, 3.0)
+        pt = -sqrt(0.5^2 + 0.3^2 + 0.1^2)
+        p = SVec4d(pt, 0.5, 0.3, 0.1)
+        dl = -0.1
+        x_new, p_new = verlet_step(m_flat, x, p, dl)
+        expected_v = SVec4d(-pt, p[2], p[3], p[4])
+        x_expected = x + dl * expected_v
+        @test norm(x_new - x_expected) < 1e-10
+        @test norm(p_new - p) < 1e-10
+    end
+
+    @testset "WeakField stub throws informative error" begin
+        wf = WeakField()
+        x = SVec4d(0.0, 0.0, 0.0, 0.0)
+        @test_throws ErrorException metric(wf, x)
+        @test_throws ErrorException metric_inverse(wf, x)
+        @test is_singular(wf, x) == false
+    end
 end
