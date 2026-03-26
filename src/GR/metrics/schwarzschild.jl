@@ -137,3 +137,86 @@ function metric_inverse_partials(s::Schwarzschild{SchwarzschildCoordinates},
 
     (d_dt, d_dr, d_dθ, d_dφ)
 end
+
+# ─────────────────────────────────────────────────────────────────────
+# Analytic Christoffel symbols Γ^μ_αβ
+#
+# 9 independent non-zero components for Schwarzschild BL coordinates.
+# Pure arithmetic — no allocation, GPU-portable in Float32 or Float64.
+# Reference: Carroll, Spacetime and Geometry, Chapter 5.
+# ─────────────────────────────────────────────────────────────────────
+
+"""
+    christoffel(s::Schwarzschild{SchwarzschildCoordinates}, x) -> NTuple{4, SMatrix{4,4}}
+
+Analytic Christoffel symbols Γ^μ_{αβ} for Schwarzschild spacetime.
+Returns 4 symmetric 4×4 matrices, one per upper index μ ∈ {t,r,θ,φ}.
+
+The 9 independent non-zero components are:
+- Γ^t_{tr} = M/(r(r-2M))
+- Γ^r_{tt} = M(r-2M)/r³
+- Γ^r_{rr} = -M/(r(r-2M))
+- Γ^r_{θθ} = -(r-2M)
+- Γ^r_{φφ} = -(r-2M)sin²θ
+- Γ^θ_{rθ} = 1/r
+- Γ^θ_{φφ} = -sinθ cosθ
+- Γ^φ_{rφ} = 1/r
+- Γ^φ_{θφ} = cosθ/sinθ
+"""
+function christoffel(s::Schwarzschild{SchwarzschildCoordinates}, x::SVector{4})
+    r, θ = x[2], x[3]
+    M = s.M
+    f = 1.0 - 2.0 * M / r          # 1 - r_s/r
+    r2 = r * r
+    sinθ = sin(θ)
+    cosθ = cos(θ)
+    sin2θ = max(sinθ^2, 1e-6)
+    sinθ_safe = max(abs(sinθ), 1e-3) * (sinθ >= 0.0 ? 1.0 : -1.0)
+    z = 0.0
+
+    Γ_tr = M / (r2 * f)             # = M/(r(r-2M))  since r²f = r(r-2M)
+
+    # Γ^t_{αβ}: only (t,r) and (r,t) are non-zero
+    Γt = @SMatrix [
+        z     Γ_tr  z  z ;
+        Γ_tr  z     z  z ;
+        z     z     z  z ;
+        z     z     z  z
+    ]
+
+    Γr_tt = M * f / r2               # M(r-2M)/r³ = M·f/r²
+    Γr_rr = -M / (r2 * f)            # -M/(r(r-2M))
+    Γr_θθ = -(r - 2.0 * M)           # -(r-2M) = -r·f
+    Γr_φφ = -(r - 2.0 * M) * sin2θ   # -(r-2M)sin²θ
+
+    # Γ^r_{αβ}
+    Γr = @SMatrix [
+        Γr_tt  z      z      z      ;
+        z      Γr_rr  z      z      ;
+        z      z      Γr_θθ  z      ;
+        z      z      z      Γr_φφ
+    ]
+
+    inv_r = 1.0 / r
+    Γθ_φφ = -sinθ_safe * cosθ
+
+    # Γ^θ_{αβ}: (r,θ) and (θ,r) symmetric, plus (φ,φ)
+    Γθ = @SMatrix [
+        z  z      z      z      ;
+        z  z      inv_r  z      ;
+        z  inv_r  z      z      ;
+        z  z      z      Γθ_φφ
+    ]
+
+    cot_θ = cosθ / sinθ_safe
+
+    # Γ^φ_{αβ}: (r,φ) and (φ,r) symmetric, (θ,φ) and (φ,θ) symmetric
+    Γφ = @SMatrix [
+        z  z  z      z      ;
+        z  z  z      inv_r  ;
+        z  z  z      cot_θ  ;
+        z  inv_r  cot_θ  z
+    ]
+
+    (Γt, Γr, Γθ, Γφ)
+end

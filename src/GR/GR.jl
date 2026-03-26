@@ -87,7 +87,7 @@ export ESCAPED, HORIZON, SINGULARITY, MAX_STEPS, HAMILTONIAN_DRIFT, DISK_HIT
 
 # Metric interface
 export MetricSpace, metric, metric_inverse, is_singular, coordinate_bounds
-export metric_inverse_partials, hamiltonian, hamiltonian_rhs
+export metric_inverse_partials, hamiltonian, hamiltonian_rhs, christoffel
 
 # Metrics
 export Minkowski
