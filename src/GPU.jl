@@ -1893,6 +1893,46 @@ end
     end
 end
 
+"""Novikov-Thorne flux F(r) = (3M/8πr³)(1 - √(r_isco/r))."""
+@inline function _gpu_novikov_thorne_flux(r::Float64, M::Float64, r_isco::Float64)
+    r <= r_isco && return 0.0
+    (3.0 * M / (8.0 * π * r^3)) * (1.0 - sqrt(r_isco / r))
+end
+
+"""Novikov-Thorne disk temperature in Kelvin."""
+@inline function _gpu_disk_temperature(r::Float64, M::Float64, r_isco::Float64, T_inner::Float64)
+    F = _gpu_novikov_thorne_flux(r, M, r_isco)
+    F <= 0.0 && return 0.0
+    r_peak = (49.0 / 36.0) * r_isco
+    F_max = _gpu_novikov_thorne_flux(r_peak, M, r_isco)
+    F_max <= 0.0 && return 0.0
+    T_inner * (F / F_max)^0.25
+end
+
+"""Keplerian orbital 4-velocity for Schwarzschild: u^t, u^φ."""
+@inline function _gpu_keplerian_velocity(M::Float64, r::Float64)
+    ut = 1.0 / sqrt(max(1.0 - 3.0 * M / r, 1e-20))
+    uφ = sqrt(M / r^3) * ut
+    (ut, uφ)
+end
+
+"""Gravitational redshift factor (1+z) = (p_μ u^μ)_emit / (p_μ u^μ)_obs."""
+@inline function _gpu_redshift_factor(M::Float64, r_cross::Float64,
+        p1_cross::Float64, p4_cross::Float64,
+        p1_obs::Float64, cam_r::Float64)
+    # Emitter: Keplerian orbit at r_cross
+    ut_emit, uφ_emit = _gpu_keplerian_velocity(M, r_cross)
+    E_emit = p1_cross * ut_emit + p4_cross * uφ_emit  # p_μ u^μ at emission
+
+    # Observer: static at cam_r
+    f_obs = 1.0 - 2.0 * M / cam_r
+    ut_obs = 1.0 / sqrt(max(f_obs, 1e-20))
+    E_obs = p1_obs * ut_obs  # p_μ u^μ at observation (p_φ u^φ = 0 for static observer)
+
+    abs(E_obs) < 1e-20 && return 1.0
+    E_emit / E_obs
+end
+
 """Simple blackbody color ramp for disk emission."""
 @inline function _gpu_blackbody_color(T::Float64)
     T <= 0.0 && return (0.0, 0.0, 0.0)
@@ -1914,10 +1954,11 @@ end
     width::Int32, height::Int32,
     # Disk (inner=outer=0 for no disk)
     disk_inner::Float64, disk_outer::Float64,
+    r_isco::Float64, T_inner::Float64,
     # Integration
     dl_base::Float64, max_steps::Int32, r_max::Float64,
-    # Background (0=checkerboard, 1=black)
-    bg_mode::Int32)
+    # Redshift + background
+    use_redshift::Int32, bg_mode::Int32)
 
     idx = @index(Global, Linear)
     px = ((idx - Int32(1)) % width) + Int32(1)
@@ -1958,6 +1999,7 @@ end
 
     # Initial position
     x1 = 0.0; x2 = cam_r; x3 = cam_θ; x4 = cam_φ
+    p1_init = p1  # save initial p_t for redshift
 
     rh = 2.0 * M
     equator = π / 2.0
@@ -1983,8 +2025,20 @@ end
             frac = (equator - x3_prev) / (x3 - x3_prev)
             r_cross = x2_prev + frac * (x2 - x2_prev)
             if disk_inner <= r_cross <= disk_outer
-                intensity = (disk_inner / r_cross)^3
-                color_r, color_g, color_b = _gpu_blackbody_color(clamp(intensity * 5.0, 0.0, 2.0))
+                # Novikov-Thorne temperature profile
+                T_disk = _gpu_disk_temperature(r_cross, M, r_isco, T_inner)
+
+                # Gravitational redshift
+                if use_redshift == Int32(1)
+                    p1_cross = p1  # momentum at crossing ≈ current step
+                    p4_cross = p4
+                    z_plus_1 = _gpu_redshift_factor(M, r_cross, p1_cross, p4_cross, p1_init, cam_r)
+                    T_disk = T_disk / max(z_plus_1, 0.01)
+                end
+
+                # Normalize temperature for color mapping
+                T_norm = clamp(T_disk / max(T_inner, 1.0), 0.0, 2.0)
+                color_r, color_g, color_b = _gpu_blackbody_color(T_norm)
                 terminated = true
                 break
             end
@@ -2026,22 +2080,25 @@ Uses Float64 precision for accurate geodesic integration.
 function gpu_gr_render(M::Float64, cam_r::Float64, cam_θ::Float64, cam_φ::Float64,
                         cam_fov::Float64, width::Int, height::Int;
                         disk_inner::Float64=0.0, disk_outer::Float64=0.0,
+                        r_isco::Float64=6.0*M, T_inner::Float64=10000.0,
                         max_steps::Int=10000, step_size::Float64=-0.5,
                         r_max::Float64=200.0, background::Symbol=:checkerboard,
+                        use_redshift::Bool=true,
                         backend=_default_gpu_backend())
     npixels = width * height
     z3 = (0.0, 0.0, 0.0)
     output = Adapt.adapt(backend, fill(z3, npixels))
 
     bg_mode = background === :checkerboard ? Int32(0) : Int32(1)
+    rs_flag = use_redshift ? Int32(1) : Int32(0)
 
     kernel! = gr_schwarzschild_kernel!(backend)
     kernel!(output, M,
             cam_r, cam_θ, cam_φ, cam_fov,
             Int32(width), Int32(height),
-            disk_inner, disk_outer,
+            disk_inner, disk_outer, r_isco, T_inner,
             step_size, Int32(max_steps), r_max,
-            bg_mode;
+            rs_flag, bg_mode;
             ndrange=npixels)
     KernelAbstractions.synchronize(backend)
 

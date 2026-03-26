@@ -550,6 +550,16 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
         @test n_sky > 0
     end
 
+    @testset "gpu_gr_render: redshift changes disk colors" begin
+        # Same scene with and without redshift — colors should differ
+        args = (1.0, 30.0, π/2, 0.0, 60.0, 8, 8)
+        kwargs = (disk_inner=6.0, disk_outer=20.0, max_steps=5000, step_size=-0.3)
+        img_rs = gpu_gr_render(args...; kwargs..., use_redshift=true)
+        img_no = gpu_gr_render(args...; kwargs..., use_redshift=false)
+        @test img_rs != img_no  # redshift modifies colors
+        @test all(p -> all(isfinite, p), img_rs)
+    end
+
     @testset "gpu_gr_render: Minkowski limit (M=0) — no lensing" begin
         # M=0: flat space, no bending, all rays escape
         img = gpu_gr_render(0.0, 30.0, π/2, 0.0, 40.0, 8, 8;
