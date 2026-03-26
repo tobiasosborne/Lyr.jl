@@ -421,6 +421,103 @@ end
 end
 
 """
+    _gpu_hg_eval(g, cos_theta) -> Float32
+
+Evaluate the Henyey-Greenstein phase function on GPU.
+Returns p(cos_theta) = (1-g²) / (4π (1+g²-2g·cos_theta)^(3/2)).
+For |g| < 1e-6, returns isotropic 1/(4π).
+"""
+@inline function _gpu_hg_eval(g::Float32, cos_theta::Float32)::Float32
+    inv4pi = 1.0f0 / (4.0f0 * Float32(π))
+    abs(g) < 1.0f-6 && return inv4pi
+    denom = 1.0f0 + g * g - 2.0f0 * g * cos_theta
+    (1.0f0 - g * g) / (4.0f0 * Float32(π) * denom * sqrt(denom))
+end
+
+"""Sample cos_theta from HG inverse CDF. For |g|<1e-6, uniform sphere sampling."""
+@inline function _gpu_hg_sample_cos_theta(g::Float32, xi::Float32)::Float32
+    if abs(g) < 1.0f-6
+        return 1.0f0 - 2.0f0 * xi
+    end
+    s = (1.0f0 - g * g) / (1.0f0 + g - 2.0f0 * g * xi)
+    ct = (1.0f0 + g * g - s * s) / (2.0f0 * g)
+    clamp(ct, -1.0f0, 1.0f0)
+end
+
+"""Build orthonormal basis (tx,ty,tz, bx,by,bz) from direction (wx,wy,wz)."""
+@inline function _gpu_build_basis(wx::Float32, wy::Float32, wz::Float32)
+    # Choose helper axis with smallest component to avoid cancellation
+    ax = abs(wx); ay = abs(wy); az = abs(wz)
+    if ax < ay
+        hx, hy, hz = ax < az ? (1.0f0, 0.0f0, 0.0f0) : (0.0f0, 0.0f0, 1.0f0)
+    else
+        hx, hy, hz = ay < az ? (0.0f0, 1.0f0, 0.0f0) : (0.0f0, 0.0f0, 1.0f0)
+    end
+    # Gram-Schmidt: t = normalize(h - (h·w)*w)
+    d = hx * wx + hy * wy + hz * wz
+    tx = hx - d * wx; ty = hy - d * wy; tz = hz - d * wz
+    tlen = sqrt(tx * tx + ty * ty + tz * tz)
+    tlen = max(tlen, 1.0f-10)
+    tx /= tlen; ty /= tlen; tz /= tlen
+    # b = w × t
+    bx = wy * tz - wz * ty
+    by = wz * tx - wx * tz
+    bz = wx * ty - wy * tx
+    (tx, ty, tz, bx, by, bz)
+end
+
+"""Sample scatter direction from HG phase function. Returns (new_dx, new_dy, new_dz, rng_state)."""
+@inline function _gpu_sample_scatter(dx::Float32, dy::Float32, dz::Float32,
+        phase_g::Float32, rng_state::UInt32)
+    xi1, rng_state = _gpu_xorshift(rng_state)
+    cos_theta = _gpu_hg_sample_cos_theta(phase_g, xi1)
+    sin_theta = sqrt(max(0.0f0, 1.0f0 - cos_theta * cos_theta))
+    xi2, rng_state = _gpu_xorshift(rng_state)
+    phi = 2.0f0 * Float32(π) * xi2
+    tx, ty, tz, bx, by, bz = _gpu_build_basis(dx, dy, dz)
+    cp = cos(phi); sp = sin(phi)
+    new_dx = sin_theta * cp * tx + sin_theta * sp * bx + cos_theta * dx
+    new_dy = sin_theta * cp * ty + sin_theta * sp * by + cos_theta * dy
+    new_dz = sin_theta * cp * tz + sin_theta * sp * bz + cos_theta * dz
+    # Normalize
+    dlen = sqrt(new_dx * new_dx + new_dy * new_dy + new_dz * new_dz)
+    dlen = max(dlen, 1.0f-10)
+    (new_dx / dlen, new_dy / dlen, new_dz / dlen, rng_state)
+end
+
+"""Read a packed light from the GPU light buffer. 7 floats per light: [type, x, y, z, r, g, b]."""
+@inline function _gpu_read_light(light_buf, li::Int32)
+    base = (li - Int32(1)) * Int32(7)
+    @inbounds (light_buf[base + Int32(1)], light_buf[base + Int32(2)],
+               light_buf[base + Int32(3)], light_buf[base + Int32(4)],
+               light_buf[base + Int32(5)], light_buf[base + Int32(6)],
+               light_buf[base + Int32(7)])
+end
+
+"""Compute light direction and effective intensity at a scatter point.
+Returns (dir_x, dir_y, dir_z, eff_r, eff_g, eff_b).
+Directional: fixed direction, no falloff. Point: direction from pos, 1/r² falloff."""
+@inline function _gpu_light_contribution(light_buf, li::Int32,
+        pos_x::Float32, pos_y::Float32, pos_z::Float32)
+    ltype, lx, ly, lz, lr, lg, lb = _gpu_read_light(light_buf, li)
+    if ltype < 0.5f0
+        # Directional light: (lx,ly,lz) = direction toward light
+        return (lx, ly, lz, lr, lg, lb, Inf32)
+    else
+        # Point light: (lx,ly,lz) = position
+        ddx = lx - pos_x
+        ddy = ly - pos_y
+        ddz = lz - pos_z
+        dist = sqrt(ddx * ddx + ddy * ddy + ddz * ddz)
+        dist = max(dist, 1.0f-10)
+        inv_dist = 1.0f0 / dist
+        inv_dist2 = inv_dist * inv_dist
+        return (ddx * inv_dist, ddy * inv_dist, ddz * inv_dist,
+                lr * inv_dist2, lg * inv_dist2, lb * inv_dist2, dist)
+    end
+end
+
+"""
     delta_tracking_kernel!
 
 GPU kernel implementing unbiased delta tracking volume rendering.
@@ -434,6 +531,7 @@ For shadow rays, uses ratio tracking transmittance estimation.
                                          sigma_maj::Float32,
                                          albedo::Float32,
                                          emission_scale::Float32,
+                                         phase_g::Float32,
                                          # Camera: position, forward, right, up, fov
                                          cam_px::Float32, cam_py::Float32, cam_pz::Float32,
                                          cam_fx::Float32, cam_fy::Float32, cam_fz::Float32,
@@ -445,15 +543,15 @@ For shadow rays, uses ratio tracking transmittance estimation.
                                          # Volume bounds
                                          bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
                                          bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
-                                         # Light direction + intensity
-                                         light_dx::Float32, light_dy::Float32, light_dz::Float32,
-                                         light_r::Float32, light_g::Float32, light_b::Float32,
+                                         # Lights (packed buffer + count)
+                                         light_buf, n_lights::Int32,
                                          # Transfer function density range
                                          tf_dmin::Float32, tf_dmax::Float32,
                                          # Sizeof(T) for NanoGrid
                                          header_T_size::Int32,
                                          # RNG seed
-                                         seed::UInt32)
+                                         seed::UInt32,
+                                         max_bounces::Int32)
     idx = @index(Global, Linear)
     px = ((idx - Int32(1)) % width) + Int32(1)
     py = ((idx - Int32(1)) ÷ width) + Int32(1)
@@ -484,106 +582,108 @@ For shadow rays, uses ratio tracking transmittance estimation.
     dy /= dlen
     dz /= dlen
 
-    # Inverse direction for ray-box
-    idx_r = dx == 0.0f0 ? copysign(Inf32, dx) : 1.0f0 / dx
-    idy_r = dy == 0.0f0 ? copysign(Inf32, dy) : 1.0f0 / dy
-    idz_r = dz == 0.0f0 ? copysign(Inf32, dz) : 1.0f0 / dz
-
-    # Ray-volume intersection
-    t_enter, t_exit = _gpu_ray_box_intersect(cam_px, cam_py, cam_pz,
-                                              idx_r, idy_r, idz_r,
-                                              bmin_x, bmin_y, bmin_z,
-                                              bmax_x, bmax_y, bmax_z)
-
-    acc_r = 0.0f0
-    acc_g = 0.0f0
-    acc_b = 0.0f0
+    ray_ox = cam_px; ray_oy = cam_py; ray_oz = cam_pz
+    acc_r = 0.0f0; acc_g = 0.0f0; acc_b = 0.0f0
     throughput = 1.0f0
 
-    if t_enter < t_exit
-        # Delta tracking loop
-        t = t_enter
-        max_iter = Int32(1024)
-        for _ in Int32(1):max_iter
-            # Sample free-flight distance
-            xi, rng_state = _gpu_xorshift(rng_state)
-            xi = max(xi, 1.0f-10)  # avoid log(0)
-            t += -log(xi) / sigma_maj
+    for bounce in Int32(0):max_bounces
+        idx_r = dx == 0.0f0 ? copysign(Inf32, dx) : 1.0f0 / dx
+        idy_r = dy == 0.0f0 ? copysign(Inf32, dy) : 1.0f0 / dy
+        idz_r = dz == 0.0f0 ? copysign(Inf32, dz) : 1.0f0 / dz
 
+        t_enter, t_exit = _gpu_ray_box_intersect(ray_ox, ray_oy, ray_oz,
+                                                  idx_r, idy_r, idz_r,
+                                                  bmin_x, bmin_y, bmin_z,
+                                                  bmax_x, bmax_y, bmax_z)
+        t_enter >= t_exit && break
+
+        did_scatter = false
+        hit_x = 0.0f0; hit_y = 0.0f0; hit_z = 0.0f0
+        t = t_enter
+        for _ in Int32(1):Int32(1024)
+            xi, rng_state = _gpu_xorshift(rng_state)
+            xi = max(xi, 1.0f-10)
+            t += -log(xi) / sigma_maj
             t >= t_exit && break
 
-            # Sample density at current position (trilinear interpolation)
-            pos_x = cam_px + t * dx
-            pos_y = cam_py + t * dy
-            pos_z = cam_pz + t * dz
+            pos_x = ray_ox + t * dx
+            pos_y = ray_oy + t * dy
+            pos_z = ray_oz + t * dz
             density = _gpu_get_value_trilinear(buf, background, pos_x, pos_y, pos_z, header_T_size)
             density = max(0.0f0, density)
 
-            sigma_real = density * sigma_maj
-            accept_prob = sigma_real / sigma_maj
-
+            accept_prob = density * sigma_maj / sigma_maj
             xi2, rng_state = _gpu_xorshift(rng_state)
             if xi2 < accept_prob
-                # Real collision — evaluate transfer function
                 tf_r, tf_g, tf_b, tf_a = _gpu_tf_lookup(tf_lut, density, tf_dmin, tf_dmax)
-
                 xi3, rng_state = _gpu_xorshift(rng_state)
                 if xi3 < albedo
-                    # Scattering event — shadow ray via ratio tracking
-                    shadow_ox = pos_x + 0.01f0 * light_dx
-                    shadow_oy = pos_y + 0.01f0 * light_dy
-                    shadow_oz = pos_z + 0.01f0 * light_dz
-                    s_idx = light_dx == 0.0f0 ? copysign(Inf32, light_dx) : 1.0f0 / light_dx
-                    s_idy = light_dy == 0.0f0 ? copysign(Inf32, light_dy) : 1.0f0 / light_dy
-                    s_idz = light_dz == 0.0f0 ? copysign(Inf32, light_dz) : 1.0f0 / light_dz
-
-                    st_enter, st_exit = _gpu_ray_box_intersect(
-                        shadow_ox, shadow_oy, shadow_oz,
-                        s_idx, s_idy, s_idz,
-                        bmin_x, bmin_y, bmin_z,
-                        bmax_x, bmax_y, bmax_z)
-
-                    transmittance = 1.0f0
-                    if st_enter < st_exit
-                        st = st_enter
-                        for _ in Int32(1):Int32(256)
-                            xi_s, rng_state = _gpu_xorshift(rng_state)
-                            xi_s = max(xi_s, 1.0f-10)
-                            st += -log(xi_s) / sigma_maj
-                            st >= st_exit && break
-
-                            sp_x = shadow_ox + st * light_dx
-                            sp_y = shadow_oy + st * light_dy
-                            sp_z = shadow_oz + st * light_dz
-                            sd = _gpu_get_value_trilinear(buf, background, sp_x, sp_y, sp_z, header_T_size)
-                            sd = max(0.0f0, sd)
-
-                            s_real = sd * sigma_maj
-                            transmittance *= (1.0f0 - s_real / sigma_maj)
-                            transmittance < 1.0f-10 && break
+                    did_scatter = true
+                    hit_x = pos_x; hit_y = pos_y; hit_z = pos_z
+                    for li in Int32(1):n_lights
+                        l_dx, l_dy, l_dz, l_r, l_g, l_b, l_dist =
+                            _gpu_light_contribution(light_buf, li, pos_x, pos_y, pos_z)
+                        shadow_ox = pos_x + 0.01f0 * l_dx
+                        shadow_oy = pos_y + 0.01f0 * l_dy
+                        shadow_oz = pos_z + 0.01f0 * l_dz
+                        s_idx = l_dx == 0.0f0 ? copysign(Inf32, l_dx) : 1.0f0 / l_dx
+                        s_idy = l_dy == 0.0f0 ? copysign(Inf32, l_dy) : 1.0f0 / l_dy
+                        s_idz = l_dz == 0.0f0 ? copysign(Inf32, l_dz) : 1.0f0 / l_dz
+                        st_enter, st_exit = _gpu_ray_box_intersect(
+                            shadow_ox, shadow_oy, shadow_oz, s_idx, s_idy, s_idz,
+                            bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z)
+                        st_exit = min(st_exit, l_dist)
+                        transmittance = 1.0f0
+                        if st_enter < st_exit
+                            st = st_enter
+                            for _ in Int32(1):Int32(256)
+                                xi_s, rng_state = _gpu_xorshift(rng_state)
+                                xi_s = max(xi_s, 1.0f-10)
+                                st += -log(xi_s) / sigma_maj
+                                st >= st_exit && break
+                                sp_x = shadow_ox + st * l_dx
+                                sp_y = shadow_oy + st * l_dy
+                                sp_z = shadow_oz + st * l_dz
+                                sd = _gpu_get_value_trilinear(buf, background, sp_x, sp_y, sp_z, header_T_size)
+                                sd = max(0.0f0, sd)
+                                s_real = sd * sigma_maj
+                                transmittance *= (1.0f0 - s_real / sigma_maj)
+                                transmittance < 1.0f-10 && break
+                            end
                         end
+                        cos_theta = dx * l_dx + dy * l_dy + dz * l_dz
+                        phase = _gpu_hg_eval(phase_g, cos_theta)
+                        scale = throughput * transmittance * phase * emission_scale
+                        acc_r += tf_r * l_r * scale
+                        acc_g += tf_g * l_g * scale
+                        acc_b += tf_b * l_b * scale
                     end
-
-                    # Isotropic phase function = 1/(4π)
-                    phase = 1.0f0 / (4.0f0 * Float32(π))
-                    scale = throughput * transmittance * phase * emission_scale
-
-                    acc_r += tf_r * light_r * scale
-                    acc_g += tf_g * light_g * scale
-                    acc_b += tf_b * light_b * scale
                 end
-                break  # single-scatter: terminate after first real collision
+                break  # terminate after first real collision in this bounce
             end
-            # Null collision — continue
         end
+
+        !did_scatter && break
+
+        # Multi-bounce: sample new scatter direction, update ray
+        throughput *= albedo
+        dx, dy, dz, rng_state = _gpu_sample_scatter(dx, dy, dz, phase_g, rng_state)
+        ray_ox = hit_x + 1.0f-4 * dx
+        ray_oy = hit_y + 1.0f-4 * dy
+        ray_oz = hit_z + 1.0f-4 * dz
+
+        if bounce >= Int32(3)
+            rr_prob = clamp(throughput, 0.05f0, 1.0f0)
+            xi_rr, rng_state = _gpu_xorshift(rng_state)
+            xi_rr > rr_prob && break
+            throughput /= rr_prob
+        end
+        throughput < 1.0f-10 && break
     end
 
-    # Clamp output
-    acc_r = clamp(acc_r, 0.0f0, 1.0f0)
-    acc_g = clamp(acc_g, 0.0f0, 1.0f0)
-    acc_b = clamp(acc_b, 0.0f0, 1.0f0)
-
-    @inbounds output[idx] = (acc_r, acc_g, acc_b)
+    @inbounds output[idx] = (clamp(acc_r, 0.0f0, 1.0f0),
+                              clamp(acc_g, 0.0f0, 1.0f0),
+                              clamp(acc_b, 0.0f0, 1.0f0))
 end
 
 # ============================================================================
@@ -885,7 +985,7 @@ end
 
 # --- Delta tracking within a single HDDA span ---
 
-"""Run delta tracking within [t0, t1] with leaf caching. Returns (acc_r,g,b, throughput, rng, terminated, cache_ox,oy,oz,off)."""
+"""Run delta tracking within [t0, t1] with leaf caching. Returns (acc_r,g,b, throughput, rng, terminated, hit_x,y,z, cache_ox,oy,oz,off)."""
 @inline function _gpu_integrate_span(
     buf, tf_lut,
     ox::Float32, oy::Float32, oz::Float32,
@@ -893,10 +993,9 @@ end
     idx_r::Float32, idy_r::Float32, idz_r::Float32,
     t0::Float32, t1::Float32,
     background::Float32, header_T_size::Int32,
-    sigma_maj::Float32, albedo::Float32, emission_scale::Float32,
+    sigma_maj::Float32, albedo::Float32, emission_scale::Float32, phase_g::Float32,
     tf_dmin::Float32, tf_dmax::Float32,
-    light_dx::Float32, light_dy::Float32, light_dz::Float32,
-    light_r::Float32, light_g::Float32, light_b::Float32,
+    light_buf, n_lights::Int32,
     bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
     bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
     acc_r::Float32, acc_g::Float32, acc_b::Float32,
@@ -904,6 +1003,8 @@ end
     cache_ox::Int32, cache_oy::Int32, cache_oz::Int32, cache_off::Int32)
 
     terminated = false
+    scattered = false
+    hit_x = 0.0f0; hit_y = 0.0f0; hit_z = 0.0f0
     t = t0
     for _ in Int32(1):Int32(512)
         xi, rng_state = _gpu_xorshift(rng_state)
@@ -925,46 +1026,55 @@ end
             tf_r, tf_g, tf_b, tf_a = _gpu_tf_lookup(tf_lut, density, tf_dmin, tf_dmax)
             xi3, rng_state = _gpu_xorshift(rng_state)
             if xi3 < albedo
-                # Shadow ray with independent cache
-                shadow_ox = pos_x + 0.01f0 * light_dx
-                shadow_oy = pos_y + 0.01f0 * light_dy
-                shadow_oz = pos_z + 0.01f0 * light_dz
-                s_idx = light_dx == 0.0f0 ? copysign(Inf32, light_dx) : 1.0f0 / light_dx
-                s_idy = light_dy == 0.0f0 ? copysign(Inf32, light_dy) : 1.0f0 / light_dy
-                s_idz = light_dz == 0.0f0 ? copysign(Inf32, light_dz) : 1.0f0 / light_dz
-                st_enter, st_exit = _gpu_ray_box_intersect(
-                    shadow_ox, shadow_oy, shadow_oz, s_idx, s_idy, s_idz,
-                    bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z)
-                transmittance = 1.0f0
-                if st_enter < st_exit
-                    sc_ox = Int32(0); sc_oy = Int32(0); sc_oz = Int32(0); sc_off = Int32(0)
-                    st = st_enter
-                    for _ in Int32(1):Int32(256)
-                        xi_s, rng_state = _gpu_xorshift(rng_state)
-                        xi_s = max(xi_s, 1.0f-10)
-                        st += -log(xi_s) / sigma_maj
-                        st >= st_exit && break
-                        sd, sc_ox, sc_oy, sc_oz, sc_off =
-                            _gpu_get_value_trilinear_cached(buf, background,
-                                shadow_ox + st * light_dx, shadow_oy + st * light_dy,
-                                shadow_oz + st * light_dz, header_T_size,
-                                sc_ox, sc_oy, sc_oz, sc_off)
-                        sd = max(0.0f0, sd)
-                        transmittance *= (1.0f0 - sd)
-                        transmittance < 1.0f-10 && break
+                scattered = true
+                # Scattering event — evaluate all lights with independent cache per light
+                for li in Int32(1):n_lights
+                    l_dx, l_dy, l_dz, l_r, l_g, l_b, l_dist =
+                        _gpu_light_contribution(light_buf, li, pos_x, pos_y, pos_z)
+                    shadow_ox = pos_x + 0.01f0 * l_dx
+                    shadow_oy = pos_y + 0.01f0 * l_dy
+                    shadow_oz = pos_z + 0.01f0 * l_dz
+                    s_idx = l_dx == 0.0f0 ? copysign(Inf32, l_dx) : 1.0f0 / l_dx
+                    s_idy = l_dy == 0.0f0 ? copysign(Inf32, l_dy) : 1.0f0 / l_dy
+                    s_idz = l_dz == 0.0f0 ? copysign(Inf32, l_dz) : 1.0f0 / l_dz
+                    st_enter, st_exit = _gpu_ray_box_intersect(
+                        shadow_ox, shadow_oy, shadow_oz, s_idx, s_idy, s_idz,
+                        bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z)
+                    st_exit = min(st_exit, l_dist)
+                    transmittance = 1.0f0
+                    if st_enter < st_exit
+                        sc_ox = Int32(0); sc_oy = Int32(0); sc_oz = Int32(0); sc_off = Int32(0)
+                        st = st_enter
+                        for _ in Int32(1):Int32(256)
+                            xi_s, rng_state = _gpu_xorshift(rng_state)
+                            xi_s = max(xi_s, 1.0f-10)
+                            st += -log(xi_s) / sigma_maj
+                            st >= st_exit && break
+                            sd, sc_ox, sc_oy, sc_oz, sc_off =
+                                _gpu_get_value_trilinear_cached(buf, background,
+                                    shadow_ox + st * l_dx, shadow_oy + st * l_dy,
+                                    shadow_oz + st * l_dz, header_T_size,
+                                    sc_ox, sc_oy, sc_oz, sc_off)
+                            sd = max(0.0f0, sd)
+                            transmittance *= (1.0f0 - sd)
+                            transmittance < 1.0f-10 && break
+                        end
                     end
+                    cos_theta = dx * l_dx + dy * l_dy + dz * l_dz
+                    phase = _gpu_hg_eval(phase_g, cos_theta)
+                    scale = throughput * transmittance * phase * emission_scale
+                    acc_r += tf_r * l_r * scale
+                    acc_g += tf_g * l_g * scale
+                    acc_b += tf_b * l_b * scale
                 end
-                phase = 1.0f0 / (4.0f0 * Float32(π))
-                scale = throughput * transmittance * phase * emission_scale
-                acc_r += tf_r * light_r * scale
-                acc_g += tf_g * light_g * scale
-                acc_b += tf_b * light_b * scale
             end
+            hit_x = pos_x; hit_y = pos_y; hit_z = pos_z
             terminated = true
             break
         end
     end
-    (acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+    (acc_r, acc_g, acc_b, throughput, rng_state, terminated, scattered,
+     hit_x, hit_y, hit_z,
      cache_ox, cache_oy, cache_oz, cache_off)
 end
 
@@ -983,23 +1093,23 @@ active spans. Skips ~97% of empty space on sparse grids.
     dx::Float32, dy::Float32, dz::Float32,
     idx_r::Float32, idy_r::Float32, idz_r::Float32,
     background::Float32, header_T_size::Int32,
-    sigma_maj::Float32, albedo::Float32, emission_scale::Float32,
+    sigma_maj::Float32, albedo::Float32, emission_scale::Float32, phase_g::Float32,
     tf_dmin::Float32, tf_dmax::Float32,
-    light_dx::Float32, light_dy::Float32, light_dz::Float32,
-    light_r::Float32, light_g::Float32, light_b::Float32,
+    light_buf, n_lights::Int32,
     bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
     bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
     rng_state::UInt32)
 
     acc_r = 0.0f0; acc_g = 0.0f0; acc_b = 0.0f0
     throughput = 1.0f0
+    hit_x = 0.0f0; hit_y = 0.0f0; hit_z = 0.0f0
     # Per-ray leaf cache (persists across spans for spatial coherence)
     cache_ox = Int32(0); cache_oy = Int32(0); cache_oz = Int32(0); cache_off = Int32(0)
 
     # Phase 0: collect root hits
     n_roots, rt1, ro1, rt2, ro2, rt3, ro3, rt4, ro4 =
         _gpu_collect_root_hits(buf, ox, oy, oz, idx_r, idy_r, idz_r, header_T_size)
-    n_roots == Int32(0) && return (acc_r, acc_g, acc_b, rng_state)
+    n_roots == Int32(0) && return (acc_r, acc_g, acc_b, rng_state, false, hit_x, hit_y, hit_z)
 
     span_t0 = -1.0f0  # no open span
 
@@ -1064,18 +1174,18 @@ active spans. Skips ~97% of empty space on sparse grids.
                             end
                         elseif span_t0 >= 0.0f0
                             # Close span and integrate
-                            acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                            acc_r, acc_g, acc_b, throughput, rng_state, terminated, scattered,
+                                    hit_x, hit_y, hit_z,
                                     cache_ox, cache_oy, cache_oz, cache_off =
                                 _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                                     idx_r, idy_r, idz_r, span_t0, i1_t_entry,
-                                    background, header_T_size, sigma_maj, albedo, emission_scale,
-                                    tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
-                                    light_r, light_g, light_b,
+                                    background, header_T_size, sigma_maj, albedo, emission_scale, phase_g,
+                                    tf_dmin, tf_dmax, light_buf, n_lights,
                                     bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
                                     acc_r, acc_g, acc_b, throughput, rng_state,
                                     cache_ox, cache_oy, cache_oz, cache_off)
                             span_t0 = -1.0f0
-                            terminated && return (acc_r, acc_g, acc_b, rng_state)
+                            terminated && return (acc_r, acc_g, acc_b, rng_state, scattered, hit_x, hit_y, hit_z)
                         end
 
                         i1_t_entry = _gpu_cell_time(i1_tmax_x, i1_tmax_y, i1_tmax_z)
@@ -1089,18 +1199,18 @@ active spans. Skips ~97% of empty space on sparse grids.
                 else
                     # Ray misses I1 AABB — close span if open
                     if span_t0 >= 0.0f0
-                        acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                        acc_r, acc_g, acc_b, throughput, rng_state, terminated, scattered,
+                                hit_x, hit_y, hit_z,
                                 cache_ox, cache_oy, cache_oz, cache_off =
                             _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                                 idx_r, idy_r, idz_r, span_t0, i2_t_entry,
-                                background, header_T_size, sigma_maj, albedo, emission_scale,
-                                tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
-                                light_r, light_g, light_b,
+                                background, header_T_size, sigma_maj, albedo, emission_scale, phase_g,
+                                tf_dmin, tf_dmax, light_buf, n_lights,
                                 bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
                                 acc_r, acc_g, acc_b, throughput, rng_state,
                                 cache_ox, cache_oy, cache_oz, cache_off)
                         span_t0 = -1.0f0
-                        terminated && return (acc_r, acc_g, acc_b, rng_state)
+                        terminated && return (acc_r, acc_g, acc_b, rng_state, scattered, hit_x, hit_y, hit_z)
                     end
                 end
             else
@@ -1111,18 +1221,18 @@ active spans. Skips ~97% of empty space on sparse grids.
                         span_t0 = i2_t_entry
                     end
                 elseif span_t0 >= 0.0f0
-                    acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+                    acc_r, acc_g, acc_b, throughput, rng_state, terminated, scattered,
+                        hit_x, hit_y, hit_z,
                         cache_ox, cache_oy, cache_oz, cache_off =
                         _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                             idx_r, idy_r, idz_r, span_t0, i2_t_entry,
-                            background, header_T_size, sigma_maj, albedo, emission_scale,
-                            tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
-                            light_r, light_g, light_b,
+                            background, header_T_size, sigma_maj, albedo, emission_scale, phase_g,
+                            tf_dmin, tf_dmax, light_buf, n_lights,
                             bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
                             acc_r, acc_g, acc_b, throughput, rng_state,
                             cache_ox, cache_oy, cache_oz, cache_off)
                     span_t0 = -1.0f0
-                    terminated && return (acc_r, acc_g, acc_b, rng_state)
+                    terminated && return (acc_r, acc_g, acc_b, rng_state, scattered, hit_x, hit_y, hit_z)
                 end
             end
 
@@ -1136,29 +1246,29 @@ active spans. Skips ~97% of empty space on sparse grids.
 
         # Root entry exhausted — close any open span
         if span_t0 >= 0.0f0
-            acc_r, acc_g, acc_b, throughput, rng_state, terminated,
+            acc_r, acc_g, acc_b, throughput, rng_state, terminated, scattered,
+                hit_x, hit_y, hit_z,
                 cache_ox, cache_oy, cache_oz, cache_off =
                 _gpu_integrate_span(buf, tf_lut, ox, oy, oz, dx, dy, dz,
                     idx_r, idy_r, idz_r, span_t0, i2_t_entry,
-                    background, header_T_size, sigma_maj, albedo, emission_scale,
-                    tf_dmin, tf_dmax, light_dx, light_dy, light_dz,
-                    light_r, light_g, light_b,
+                    background, header_T_size, sigma_maj, albedo, emission_scale, phase_g,
+                    tf_dmin, tf_dmax, light_buf, n_lights,
                     bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z,
                     acc_r, acc_g, acc_b, throughput, rng_state,
                     cache_ox, cache_oy, cache_oz, cache_off)
             span_t0 = -1.0f0
-            terminated && return (acc_r, acc_g, acc_b, rng_state)
+            terminated && return (acc_r, acc_g, acc_b, rng_state, scattered, hit_x, hit_y, hit_z)
         end
     end
 
-    (acc_r, acc_g, acc_b, rng_state)
+    (acc_r, acc_g, acc_b, rng_state, false, hit_x, hit_y, hit_z)
 end
 
 # --- HDDA delta tracking kernel ---
 
 """GPU kernel with HDDA empty-space skipping. Same interface as delta_tracking_kernel!."""
 @kernel function delta_tracking_hdda_kernel!(output, buf, tf_lut,
-    background::Float32, sigma_maj::Float32, albedo::Float32, emission_scale::Float32,
+    background::Float32, sigma_maj::Float32, albedo::Float32, emission_scale::Float32, phase_g::Float32,
     cam_px::Float32, cam_py::Float32, cam_pz::Float32,
     cam_fx::Float32, cam_fy::Float32, cam_fz::Float32,
     cam_rx::Float32, cam_ry::Float32, cam_rz::Float32,
@@ -1166,10 +1276,10 @@ end
     cam_fov::Float32, width::Int32, height::Int32,
     bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
     bmax_x::Float32, bmax_y::Float32, bmax_z::Float32,
-    light_dx::Float32, light_dy::Float32, light_dz::Float32,
-    light_r::Float32, light_g::Float32, light_b::Float32,
+    light_buf, n_lights::Int32,
     tf_dmin::Float32, tf_dmax::Float32,
-    header_T_size::Int32, seed::UInt32)
+    header_T_size::Int32, seed::UInt32,
+    max_bounces::Int32)
 
     idx = @index(Global, Linear)
     px = ((idx - Int32(1)) % width) + Int32(1)
@@ -1189,15 +1299,42 @@ end
     dlen = sqrt(dx * dx + dy * dy + dz * dz)
     dlen = max(dlen, 1.0f-10)
     dx /= dlen; dy /= dlen; dz /= dlen
-    idx_r = dx == 0.0f0 ? copysign(Inf32, dx) : 1.0f0 / dx
-    idy_r = dy == 0.0f0 ? copysign(Inf32, dy) : 1.0f0 / dy
-    idz_r = dz == 0.0f0 ? copysign(Inf32, dz) : 1.0f0 / dz
+    ray_ox = cam_px; ray_oy = cam_py; ray_oz = cam_pz
+    acc_r = 0.0f0; acc_g = 0.0f0; acc_b = 0.0f0
+    throughput = 1.0f0
 
-    acc_r, acc_g, acc_b, _ = _gpu_hdda_delta_track(
-        buf, tf_lut, cam_px, cam_py, cam_pz, dx, dy, dz, idx_r, idy_r, idz_r,
-        background, header_T_size, sigma_maj, albedo, emission_scale,
-        tf_dmin, tf_dmax, light_dx, light_dy, light_dz, light_r, light_g, light_b,
-        bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z, rng_state)
+    for bounce in Int32(0):max_bounces
+        idx_r = dx == 0.0f0 ? copysign(Inf32, dx) : 1.0f0 / dx
+        idy_r = dy == 0.0f0 ? copysign(Inf32, dy) : 1.0f0 / dy
+        idz_r = dz == 0.0f0 ? copysign(Inf32, dz) : 1.0f0 / dz
+
+        b_acc_r, b_acc_g, b_acc_b, rng_state, did_scatter, hx, hy, hz = _gpu_hdda_delta_track(
+            buf, tf_lut, ray_ox, ray_oy, ray_oz, dx, dy, dz, idx_r, idy_r, idz_r,
+            background, header_T_size, sigma_maj, albedo, emission_scale, phase_g,
+            tf_dmin, tf_dmax, light_buf, n_lights,
+            bmin_x, bmin_y, bmin_z, bmax_x, bmax_y, bmax_z, rng_state)
+
+        acc_r += throughput * b_acc_r
+        acc_g += throughput * b_acc_g
+        acc_b += throughput * b_acc_b
+        !did_scatter && break
+
+        # Multi-bounce: sample new scatter direction, update ray
+        throughput *= albedo
+        dx, dy, dz, rng_state = _gpu_sample_scatter(dx, dy, dz, phase_g, rng_state)
+        ray_ox = hx + 1.0f-4 * dx
+        ray_oy = hy + 1.0f-4 * dy
+        ray_oz = hz + 1.0f-4 * dz
+
+        # Russian roulette after bounce 3
+        if bounce >= Int32(3)
+            rr_prob = clamp(throughput, 0.05f0, 1.0f0)
+            xi_rr, rng_state = _gpu_xorshift(rng_state)
+            xi_rr > rr_prob && break
+            throughput /= rr_prob
+        end
+        throughput < 1.0f-10 && break
+    end
 
     @inbounds output[idx] = (clamp(acc_r, 0.0f0, 1.0f0),
                               clamp(acc_g, 0.0f0, 1.0f0),
@@ -1279,7 +1416,8 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
                             backend=_default_gpu_backend(),
-                            hdda::Bool=true) where T
+                            hdda::Bool=true,
+                            max_bounces::Int=0) where T
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera
@@ -1304,38 +1442,40 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     cam_ux, cam_uy, cam_uz = Float32.(cam.up)
     cam_fov = Float32(cam.fov)
 
-    # Light data (use first light — directional)
-    light = scene.lights[1]
-    if light isa DirectionalLight
-        light_dx, light_dy, light_dz = Float32.(light.direction)
-        light_r, light_g, light_b = Float32.(light.intensity)
-    elseif light isa PointLight
-        # Use direction from volume center to point light
-        cx = (bmin_x + bmax_x) / 2.0f0
-        cy = (bmin_y + bmax_y) / 2.0f0
-        cz = (bmin_z + bmax_z) / 2.0f0
-        lx, ly, lz = Float32.(light.position)
-        ddx, ddy, ddz = lx - cx, ly - cy, lz - cz
-        dlen = sqrt(ddx^2 + ddy^2 + ddz^2)
-        dlen = max(dlen, 1.0f-10)
-        light_dx, light_dy, light_dz = ddx / dlen, ddy / dlen, ddz / dlen
-        light_r, light_g, light_b = Float32.(light.intensity)
-    else
-        light_dx, light_dy, light_dz = 0.577f0, 0.577f0, 0.577f0
-        light_r, light_g, light_b = 1.0f0, 1.0f0, 1.0f0
+    # Pack lights into flat buffer: 7 Float32 per light [type, x, y, z, r, g, b]
+    light_data = Float32[]
+    for light in scene.lights
+        if light isa DirectionalLight
+            push!(light_data, 0.0f0)  # type = directional
+            push!(light_data, Float32.(light.direction)...)
+            push!(light_data, Float32.(light.intensity)...)
+        elseif light isa PointLight
+            push!(light_data, 1.0f0)  # type = point
+            push!(light_data, Float32.(light.position)...)
+            push!(light_data, Float32.(light.intensity)...)
+        end
+        # Skip ConstantEnvironmentLight — contributes via ray escape, not direct lighting
+    end
+    n_lights = Int32(length(light_data) ÷ 7)
+    if n_lights == Int32(0)
+        # Fallback: default directional light
+        light_data = Float32[0.0, 0.577, 0.577, 0.577, 1.0, 1.0, 1.0]
+        n_lights = Int32(1)
     end
 
     background_f32 = Float32(nano_background(nanogrid))
     sigma_maj = Float32(mat.sigma_scale)
     albedo_f32 = Float32(mat.scattering_albedo)
     emission_f32 = Float32(mat.emission_scale)
+    phase_g = mat.phase_function isa HenyeyGreensteinPhase ? Float32(mat.phase_function.g) : 0.0f0
     header_T_size = Int32(sizeof(T))
     w = Int32(width)
     h = Int32(height)
 
-    # Adapt buffer for backend
+    # Adapt buffers for backend
     dev_buf = Adapt.adapt(backend, nanogrid.buffer)
     dev_tf = Adapt.adapt(backend, tf_lut)
+    dev_lights = Adapt.adapt(backend, light_data)
 
     # Allocate output — use fill + adapt since NTuple has no zero() method
     npixels = width * height
@@ -1349,7 +1489,7 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
 
     for s in 1:spp
         kernel!(output, dev_buf, dev_tf,
-                background_f32, sigma_maj, albedo_f32, emission_f32,
+                background_f32, sigma_maj, albedo_f32, emission_f32, phase_g,
                 cam_px, cam_py, cam_pz,
                 cam_fx, cam_fy, cam_fz,
                 cam_rx, cam_ry, cam_rz,
@@ -1358,11 +1498,11 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                 w, h,
                 bmin_x, bmin_y, bmin_z,
                 bmax_x, bmax_y, bmax_z,
-                light_dx, light_dy, light_dz,
-                light_r, light_g, light_b,
+                dev_lights, n_lights,
                 Float32(dmin), Float32(dmax),
                 header_T_size,
-                UInt32(seed + UInt64(s));
+                UInt32(seed + UInt64(s)),
+                Int32(max_bounces);
                 ndrange=npixels)
         KernelAbstractions.synchronize(backend)
 

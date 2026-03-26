@@ -549,7 +549,30 @@ Requires `build_nanogrid(grid.tree)` on all volume entries before rendering.
 """
 function render_volume_image(scene::Scene, width::Int, height::Int;
                              spp::Int=1, seed::UInt64=UInt64(42),
-                             max_bounces::Int=1)
+                             max_bounces::Int=1,
+                             backend::Symbol=:cpu)
+    if backend === :gpu || backend === :auto
+        if gpu_available()
+            nanogrid = scene.volumes[1].nanogrid
+            nanogrid === nothing && throw(ArgumentError(
+                "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
+            gpu_img = gpu_render_volume(nanogrid, scene, width, height;
+                                        spp=spp, seed=seed, max_bounces=max_bounces)
+            # Convert Float32 → Float64 for API consistency
+            return Matrix{NTuple{3, Float64}}(
+                map(p -> (Float64(p[1]), Float64(p[2]), Float64(p[3])), gpu_img))
+        elseif backend === :gpu
+            throw(ArgumentError(
+                "GPU backend requested but no GPU available. Load CUDA.jl first: `using CUDA`"))
+        end
+        # :auto fallback to CPU
+    end
+    _render_volume_image_cpu(scene, width, height; spp=spp, seed=seed, max_bounces=max_bounces)
+end
+
+function _render_volume_image_cpu(scene::Scene, width::Int, height::Int;
+                                   spp::Int=1, seed::UInt64=UInt64(42),
+                                   max_bounces::Int=1)
     for vol in scene.volumes
         vol.nanogrid === nothing && throw(ArgumentError(
             "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))

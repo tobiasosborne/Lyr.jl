@@ -7,7 +7,9 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
              _gpu_buf_mask_is_on, _gpu_buf_count_on_before,
              _gpu_buf_load, _gpu_ray_box_intersect, _gpu_xorshift, _gpu_wang_hash,
              _bake_tf_lut, _estimate_density_range,
-             gpu_volume_march_cpu!,
+             gpu_volume_march_cpu!, _gpu_hg_eval,
+             _gpu_read_light, _gpu_light_contribution,
+             _gpu_hg_sample_cos_theta, _gpu_build_basis, _gpu_sample_scatter,
              _I2_CMASK_OFF, _I2_VMASK_OFF, _I2_CPREFIX_OFF, _I2_VPREFIX_OFF,
              _I2_CHILDCOUNT_OFF, _I2_DATA_OFF,
              _I1_CMASK_OFF, _I1_VMASK_OFF, _I1_CPREFIX_OFF, _I1_VPREFIX_OFF,
@@ -279,5 +281,226 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
         for px in output
             @test px == (0.0f0, 0.0f0, 0.0f0)
         end
+    end
+
+    @testset "_gpu_hg_eval: matches CPU PhaseFunction" begin
+        # g=0: isotropic — should be 1/(4π) for any cos_theta
+        inv4pi = Float32(1.0 / (4π))
+        for ct in Float32[-1.0, -0.5, 0.0, 0.5, 1.0]
+            @test _gpu_hg_eval(0.0f0, ct) ≈ inv4pi atol=1.0f-6
+        end
+        # Match CPU HenyeyGreensteinPhase for various g values
+        for g in [0.3, 0.6, 0.8, 0.95, -0.5]
+            cpu_pf = HenyeyGreensteinPhase(Float64(g))
+            for ct in [-1.0, -0.5, 0.0, 0.5, 0.99]
+                cpu_val = Float32(evaluate(cpu_pf, Float64(ct)))
+                gpu_val = _gpu_hg_eval(Float32(g), Float32(ct))
+                @test gpu_val ≈ cpu_val rtol=1.0f-4
+            end
+        end
+        # Forward scattering (g>0) peaks at cos_theta=1
+        @test _gpu_hg_eval(0.8f0, 1.0f0) > _gpu_hg_eval(0.8f0, 0.0f0)
+        @test _gpu_hg_eval(0.8f0, 0.0f0) > _gpu_hg_eval(0.8f0, -1.0f0)
+        # Backward scattering (g<0) peaks at cos_theta=-1
+        @test _gpu_hg_eval(-0.8f0, -1.0f0) > _gpu_hg_eval(-0.8f0, 0.0f0)
+    end
+
+    @testset "gpu_render_volume: HG phase g=0 matches isotropic" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        light = DirectionalLight((0.577, 0.577, 0.577))
+
+        # IsotropicPhase (default) — g=0
+        mat_iso = VolumeMaterial(tf_smoke(); sigma_scale=5.0)
+        scene_iso = Scene(cam, light, VolumeEntry(grid, nanogrid, mat_iso))
+
+        # HenyeyGreensteinPhase with g=0 — should be identical
+        mat_hg0 = VolumeMaterial(tf_smoke(); sigma_scale=5.0, phase_function=HenyeyGreensteinPhase(0.0))
+        scene_hg0 = Scene(cam, light, VolumeEntry(grid, nanogrid, mat_hg0))
+
+        seed = UInt64(42)
+        # Test both kernels
+        for hdda in [false, true]
+            p_iso = gpu_render_volume(nanogrid, scene_iso, 8, 8; spp=1, seed=seed, hdda=hdda)
+            p_hg0 = gpu_render_volume(nanogrid, scene_hg0, 8, 8; spp=1, seed=seed, hdda=hdda)
+            @test p_iso == p_hg0
+        end
+    end
+
+    @testset "gpu_render_volume: HG phase g=0.8 forward scattering" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+
+        # Camera looking toward the light (forward scattering should be bright)
+        light_dir = (0.577, 0.577, 0.577)
+        # Camera behind the volume, looking in light direction
+        cam_fwd = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        light = DirectionalLight(light_dir)
+
+        mat_iso = VolumeMaterial(tf_smoke(); sigma_scale=5.0, scattering_albedo=0.9, emission_scale=3.0)
+        mat_hg = VolumeMaterial(tf_smoke(); sigma_scale=5.0, scattering_albedo=0.9, emission_scale=3.0,
+                                phase_function=HenyeyGreensteinPhase(0.8))
+
+        scene_iso = Scene(cam_fwd, light, VolumeEntry(grid, nanogrid, mat_iso))
+        scene_hg = Scene(cam_fwd, light, VolumeEntry(grid, nanogrid, mat_hg))
+
+        p_iso = gpu_render_volume(nanogrid, scene_iso, 8, 8; spp=4, seed=UInt64(99))
+        p_hg = gpu_render_volume(nanogrid, scene_hg, 8, 8; spp=4, seed=UInt64(99))
+
+        # With HG g=0.8, pixels should differ from isotropic
+        @test p_iso != p_hg
+        # Both should produce valid output
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p_hg)
+        @test all(p -> all(isfinite, p), p_hg)
+    end
+
+    @testset "_gpu_read_light: round-trip packing" begin
+        # Directional light
+        buf = Float32[0.0, 0.577, 0.577, 0.577, 1.0, 0.8, 0.6]
+        ltype, lx, ly, lz, lr, lg, lb = _gpu_read_light(buf, Int32(1))
+        @test ltype == 0.0f0
+        @test lx ≈ 0.577f0
+        @test lr ≈ 1.0f0
+        # Point light (2nd entry)
+        buf2 = Float32[0.0, 0.577, 0.577, 0.577, 1.0, 0.8, 0.6,
+                        1.0, 100.0, 50.0, 200.0, 2.0, 1.5, 1.0]
+        ltype2, lx2, ly2, lz2, lr2, lg2, lb2 = _gpu_read_light(buf2, Int32(2))
+        @test ltype2 == 1.0f0
+        @test lx2 == 100.0f0
+        @test lr2 == 2.0f0
+    end
+
+    @testset "_gpu_light_contribution: directional vs point" begin
+        # Directional light: fixed direction, no falloff
+        buf = Float32[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        ldx, ldy, ldz, lr, lg, lb, ldist = _gpu_light_contribution(buf, Int32(1), 0.0f0, 0.0f0, 0.0f0)
+        @test ldx == 0.0f0
+        @test ldz == 1.0f0
+        @test lr == 1.0f0
+        @test isinf(ldist)
+
+        # Point light: direction from scatter point to light, 1/r² falloff
+        buf2 = Float32[1.0, 100.0, 0.0, 0.0, 4.0, 4.0, 4.0]
+        ldx, ldy, ldz, lr, lg, lb, ldist = _gpu_light_contribution(buf2, Int32(1), 0.0f0, 0.0f0, 0.0f0)
+        @test ldx ≈ 1.0f0 atol=1.0f-5  # pointing toward light at x=100
+        @test ldy ≈ 0.0f0 atol=1.0f-5
+        @test ldist ≈ 100.0f0 atol=1.0f-3
+        @test lr ≈ 4.0f0 / 10000.0f0 atol=1.0f-5  # intensity * 1/r² = 4/10000
+    end
+
+    @testset "gpu_render_volume: multi-light (directional + point)" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        mat = VolumeMaterial(tf_smoke(); sigma_scale=5.0, scattering_albedo=0.9, emission_scale=3.0)
+
+        # Scene with 1 directional light
+        scene1 = Scene(cam, [DirectionalLight((0.577, 0.577, 0.577))],
+                       [VolumeEntry(grid, nanogrid, mat)])
+
+        # Scene with 2 lights (directional + point)
+        scene2 = Scene(cam, [DirectionalLight((0.577, 0.577, 0.577)),
+                             PointLight((200.0, 50.0, 100.0), (5.0, 5.0, 5.0))],
+                       [VolumeEntry(grid, nanogrid, mat)])
+
+        seed = UInt64(77)
+        p1 = gpu_render_volume(nanogrid, scene1, 8, 8; spp=2, seed=seed)
+        p2 = gpu_render_volume(nanogrid, scene2, 8, 8; spp=2, seed=seed)
+
+        # Two-light render should differ from single-light
+        @test p1 != p2
+        # Both should be valid
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p1)
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p2)
+        @test all(p -> all(isfinite, p), p2)
+    end
+
+    @testset "_gpu_hg_sample_cos_theta: range and isotropy" begin
+        # g=0: should produce uniform cos_theta in [-1, 1]
+        for xi in Float32[0.0, 0.25, 0.5, 0.75, 1.0]
+            ct = _gpu_hg_sample_cos_theta(0.0f0, xi)
+            @test -1.0f0 <= ct <= 1.0f0
+        end
+        # xi=0.5 with g=0 should give cos_theta=0
+        @test _gpu_hg_sample_cos_theta(0.0f0, 0.5f0) ≈ 0.0f0 atol=1.0f-5
+        # g=0.8: forward scattering peak — xi near 0 gives cos_theta near 1
+        ct_fwd = _gpu_hg_sample_cos_theta(0.8f0, 0.01f0)
+        @test ct_fwd > 0.5f0
+    end
+
+    @testset "_gpu_build_basis: orthonormality" begin
+        for (wx, wy, wz) in [(1.0f0, 0.0f0, 0.0f0), (0.0f0, 1.0f0, 0.0f0),
+                              (0.577f0, 0.577f0, 0.577f0)]
+            tx, ty, tz, bx, by, bz = _gpu_build_basis(wx, wy, wz)
+            # t · w ≈ 0
+            @test abs(tx*wx + ty*wy + tz*wz) < 2.0f-3
+            # b · w ≈ 0
+            @test abs(bx*wx + by*wy + bz*wz) < 2.0f-3
+            # t · b ≈ 0
+            @test abs(tx*bx + ty*by + tz*bz) < 2.0f-3
+            # |t| ≈ 1
+            @test sqrt(tx^2 + ty^2 + tz^2) ≈ 1.0f0 atol=2.0f-3
+        end
+    end
+
+    @testset "_gpu_sample_scatter: unit direction" begin
+        for g in Float32[0.0, 0.5, 0.8, -0.3]
+            rng = UInt32(12345)
+            ndx, ndy, ndz, _ = _gpu_sample_scatter(0.0f0, 0.0f0, 1.0f0, g, rng)
+            len = sqrt(ndx^2 + ndy^2 + ndz^2)
+            @test len ≈ 1.0f0 atol=1.0f-4
+        end
+    end
+
+    @testset "gpu_render_volume: multi-bounce (max_bounces > 0)" begin
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+            return
+        end
+        vdb = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nanogrid = build_nanogrid(grid.tree)
+        cam = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        light = DirectionalLight((0.577, 0.577, 0.577))
+        mat = VolumeMaterial(tf_smoke(); sigma_scale=5.0, scattering_albedo=0.9, emission_scale=3.0)
+        scene = Scene(cam, light, VolumeEntry(grid, nanogrid, mat))
+
+        seed = UInt64(42)
+        # Single-scatter (default)
+        p0 = gpu_render_volume(nanogrid, scene, 8, 8; spp=2, seed=seed, max_bounces=0)
+        # Multi-bounce
+        p8 = gpu_render_volume(nanogrid, scene, 8, 8; spp=2, seed=seed, max_bounces=8)
+
+        # Multi-bounce should differ from single-scatter (more light reaches camera)
+        @test p0 != p8
+        # Both valid
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p0)
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p8)
+        @test all(p -> all(isfinite, p), p8)
+
+        # Also test HDDA path
+        p8_hdda = gpu_render_volume(nanogrid, scene, 8, 8; spp=2, seed=seed, max_bounces=8, hdda=true)
+        @test all(p -> all(c -> 0.0f0 <= c <= 1.0f0, p), p8_hdda)
+        @test all(p -> all(isfinite, p), p8_hdda)
     end
 end
