@@ -212,10 +212,8 @@ This replaces the brute-force `intersect_leaves` which tests every leaf.
 function intersect_leaves_dda(ray::Ray, tree::Tree{T}) where T
     results = LeafIntersection{T}[]
 
-    for (root_key, entry) in tree.table
-        if entry isa InternalNode2{T}
-            _dda_internal2!(results, ray, entry)
-        end
+    for (_, child) in tree.children
+        _dda_internal2!(results, ray, child)
     end
 
     sort!(results, by=x -> x.t_enter)
@@ -342,9 +340,8 @@ function Base.iterate(vri::VolumeRayIntersector{T}) where T
     ray = vri.ray
     roots = Tuple{Float64, InternalNode2{T}}[]
 
-    for (_, entry) in vri.tree.table
-        if entry isa InternalNode2{T}
-            o = entry.origin
+    for (_, entry) in vri.tree.children
+        o = entry.origin
             aabb = AABB(
                 SVec3d(Float64(o[1]), Float64(o[2]), Float64(o[3])),
                 SVec3d(Float64(o[1]) + 4096.0, Float64(o[2]) + 4096.0, Float64(o[3]) + 4096.0)
@@ -353,7 +350,6 @@ function Base.iterate(vri::VolumeRayIntersector{T}) where T
             if hit !== nothing
                 push!(roots, (hit[1], entry))
             end
-        end
     end
 
     sort!(roots, by=first)

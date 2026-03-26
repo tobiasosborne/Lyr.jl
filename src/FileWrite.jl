@@ -300,16 +300,8 @@ Phase 2 (values): for each leaf in same order:
 """
 function write_tree!(io::IO, tree::RootNode{T}, codec::Codec=NoCompression(); half_precision::Bool=false) where T
     # Separate root table into tiles and I2 children (sorted by origin for determinism)
-    tiles = Tuple{Coord, Tile{T}}[]
-    children = Tuple{Coord, InternalNode2{T}}[]
-
-    for (origin, entry) in tree.table
-        if entry isa Tile{T}
-            push!(tiles, (origin, entry))
-        else
-            push!(children, (origin, entry::InternalNode2{T}))
-        end
-    end
+    tiles = [(origin, tile) for (origin, tile) in tree.tiles]
+    children = [(origin, child) for (origin, child) in tree.children]
 
     # Sort for deterministic output
     sort!(tiles; by = t -> (t[1].x, t[1].y, t[1].z))

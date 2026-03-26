@@ -72,11 +72,11 @@ end
 function _get_from_root(acc::ValueAccessor{T}, c::Coord)::T where T
     tree = acc.tree
     i2_origin = internal2_origin(c)
-    entry = get(tree.table, i2_origin, nothing)
-    entry === nothing && return tree.background
-    entry isa Tile{T} && return entry.value
+    tile = get(tree.tiles, i2_origin, nothing)
+    tile !== nothing && return tile.value
 
-    node2 = entry::InternalNode2{T}
+    node2 = get(tree.children, i2_origin, nothing)
+    node2 === nothing && return tree.background
     acc.i2 = node2
     acc.i2_origin = i2_origin
     return _get_from_i2(acc, node2, c)
@@ -154,10 +154,12 @@ end
 
 """Navigate tree from root, returning (value, is_active)."""
 function _tree_probe(tree::Tree{T}, c::Coord) where T
-    entry = get(tree.table, internal2_origin(c), nothing)
-    entry === nothing && return (tree.background, false)
-    entry isa Tile{T} && return (entry.value, entry.active)
-    _probe_node(entry::InternalNode2{T}, c, tree.background)
+    origin = internal2_origin(c)
+    tile = get(tree.tiles, origin, nothing)
+    tile !== nothing && return (tile.value, tile.active)
+    child = get(tree.children, origin, nothing)
+    child === nothing && return (tree.background, false)
+    _probe_node(child, c, tree.background)
 end
 
 """
@@ -208,8 +210,11 @@ Count the total number of active voxels in the tree.
 """
 function active_voxel_count(tree::Tree{T})::Int where T
     total = 0
-    for (_, entry) in tree.table
-        total += entry isa Tile{T} ? (entry.active ? ROOT_TILE_VOXELS : 0) : _count_active(entry::InternalNode2{T})
+    for (_, tile) in tree.tiles
+        tile.active && (total += ROOT_TILE_VOXELS)
+    end
+    for (_, child) in tree.children
+        total += _count_active(child)
     end
     total
 end
@@ -221,8 +226,8 @@ Count the number of leaf nodes in the tree.
 """
 function leaf_count(tree::Tree{T})::Int where T
     total = 0
-    for (_, entry) in tree.table
-        entry isa InternalNode2{T} && (total += sum(c -> count_on(c.child_mask), entry.children; init=0))
+    for (_, child) in tree.children
+        total += sum(c -> count_on(c.child_mask), child.children; init=0)
     end
     total
 end
@@ -267,7 +272,14 @@ end
 
 """Collect root pairs for iteration. Returns empty vector for empty trees."""
 @inline function _collect_root_pairs(tree::Tree{T}) where T
-    collect(tree.table)
+    result = Pair{Coord, Union{InternalNode2{T}, Tile{T}}}[]
+    for (k, v) in tree.children
+        push!(result, k => v)
+    end
+    for (k, v) in tree.tiles
+        push!(result, k => v)
+    end
+    result
 end
 
 """
@@ -498,14 +510,11 @@ Base.IteratorSize(::Type{I2NodesIterator{T}}) where T = Base.SizeUnknown()
 Base.eltype(::Type{I2NodesIterator{T}}) where T = Tuple{InternalNode2{T}, Coord}
 
 function Base.iterate(it::I2NodesIterator{T}, state=nothing) where T
-    pairs = state === nothing ? collect(it.tree.table) : state[1]
+    pairs = state === nothing ? collect(it.tree.children) : state[1]
     idx = state === nothing ? 1 : state[2]
     while idx <= length(pairs)
-        origin, entry = pairs[idx]
-        if entry isa InternalNode2{T}
-            return ((entry, origin), (pairs, idx + 1))
-        end
-        idx += 1
+        origin, child = pairs[idx]
+        return ((child, origin), (pairs, idx + 1))
     end
     nothing
 end
@@ -535,7 +544,7 @@ Base.eltype(::Type{I1NodesIterator{T}}) where T = Tuple{InternalNode1{T}, Coord}
 
 function Base.iterate(it::I1NodesIterator{T}, state=nothing) where T
     if state === nothing
-        root_pairs = collect(it.tree.table)
+        root_pairs = _collect_root_pairs(it.tree)
         return _advance_i1_nodes(root_pairs, 1, 1)
     else
         root_pairs, root_idx, i2_idx = state

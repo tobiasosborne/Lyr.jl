@@ -448,9 +448,11 @@ function build_nanogrid(tree::Tree{T})::NanoGrid{T} where T
 
     # Collect root entries sorted by Coord (lexicographic)
     root_entries = Tuple{Coord, Bool, Union{InternalNode2{T}, Tile{T}}}[]
-    for (origin, entry) in tree.table
-        is_child = entry isa InternalNode2{T}
-        push!(root_entries, (origin, is_child, entry))
+    for (origin, child) in tree.children
+        push!(root_entries, (origin, true, child))
+    end
+    for (origin, tile) in tree.tiles
+        push!(root_entries, (origin, false, tile))
     end
     sort!(root_entries, by=e -> (e[1].x, e[1].y, e[1].z))
 

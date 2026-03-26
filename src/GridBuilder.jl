@@ -42,7 +42,7 @@ function build_grid(data::Dict{Coord, T}, background::T;
                     voxel_size::Float64=1.0) where T
     isempty(data) && return Grid{T}(name, grid_class,
         UniformScaleTransform(voxel_size),
-        RootNode{T}(background, Dict{Coord, Union{InternalNode2{T}, Tile{T}}}()))
+        RootNode{T}(background))
 
     # Step 1: Group voxels by leaf origin, build LeafNodes
     leaf_groups = Dict{Coord, Vector{Pair{Int, T}}}()  # origin → [(offset, value)]

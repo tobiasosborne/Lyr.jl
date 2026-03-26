@@ -105,16 +105,13 @@ pruned = prune(grid; tolerance=0.01f0) # allow small variation
 function prune(grid::Grid{T}; tolerance=zero(T)) where T
     tree = grid.tree
 
-    # Rebuild root table with pruned I2 nodes
-    new_table = Dict{Coord, Union{InternalNode2{T}, Tile{T}}}()
-    for (origin, entry) in tree.table
-        if entry isa Tile{T}
-            new_table[origin] = entry
-        else
-            new_table[origin] = _prune_i2(entry::InternalNode2{T}, tolerance)
-        end
+    # Rebuild root with pruned I2 nodes
+    new_children = Dict{Coord, InternalNode2{T}}()
+    for (origin, child) in tree.children
+        new_children[origin] = _prune_i2(child, tolerance)
     end
+    new_tiles = copy(tree.tiles)
 
-    new_tree = RootNode{T}(tree.background, new_table)
+    new_tree = RootNode{T}(tree.background, new_children, new_tiles)
     Grid{T}(grid.name, grid.grid_class, grid.transform, new_tree)
 end

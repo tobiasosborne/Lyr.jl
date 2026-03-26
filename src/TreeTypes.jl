@@ -97,16 +97,37 @@ end
 """
     RootNode{T} <: AbstractNode{T}
 
-The root node of a VDB tree. Uses a hash map for sparse storage of top-level children.
+The root node of a VDB tree. Uses separate hash maps for children and tiles,
+eliminating Union-typed dispatch on every access.
 
 # Fields
 - `background::T` - Background value for empty space
-- `table::Dict{Coord, Union{InternalNode2{T}, Tile{T}}}` - Children indexed by origin
+- `children::Dict{Coord, InternalNode2{T}}` - Internal node children indexed by origin
+- `tiles::Dict{Coord, Tile{T}}` - Active tiles indexed by origin
 """
 struct RootNode{T} <: AbstractNode{T}
     background::T
-    table::Dict{Coord, Union{InternalNode2{T}, Tile{T}}}
+    children::Dict{Coord, InternalNode2{T}}
+    tiles::Dict{Coord, Tile{T}}
 end
+
+"""Construct RootNode by splitting a Union-typed table into children and tiles."""
+function RootNode{T}(background::T, table::Dict{Coord, Union{InternalNode2{T}, Tile{T}}}) where T
+    children = Dict{Coord, InternalNode2{T}}()
+    tiles = Dict{Coord, Tile{T}}()
+    for (k, v) in table
+        if v isa InternalNode2{T}
+            children[k] = v
+        else
+            tiles[k] = v::Tile{T}
+        end
+    end
+    RootNode{T}(background, children, tiles)
+end
+
+"""Construct empty RootNode with given background."""
+RootNode{T}(background::T) where T = RootNode{T}(background,
+    Dict{Coord, InternalNode2{T}}(), Dict{Coord, Tile{T}}())
 
 """
     Tree{T}
@@ -139,6 +160,6 @@ function Base.show(io::IO, node::InternalNode2{T}) where T
 end
 
 function Base.show(io::IO, tree::RootNode{T}) where T
-    n = length(tree.table)
+    n = length(tree.children) + length(tree.tiles)
     print(io, "Tree{", T, "}(background=", tree.background, ", ", n, " root entr", n == 1 ? "y" : "ies", ")")
 end
