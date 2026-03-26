@@ -26,9 +26,9 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-03-26) -- GPU Feature Sprint: Phase Function + Multi-Light + Multi-Bounce
+## Latest Session (2026-03-26) -- GPU Feature Sprint + GR Christoffel Symbols
 
-**Status**: GREEN -- 4 GPU issues closed (`xzai`, `u8wt`, `nu0j`, `e7yt`). 367 GPU tests passing. Code committed and pushed.
+**Status**: GREEN -- 6 issues closed (`xzai`, `u8wt`, `nu0j`, `e7yt`, `vbej`, `g2ld`). 367 GPU tests + 458 Schwarzschild + 613 Kerr tests passing. All committed and pushed.
 
 ### What Was Done
 
@@ -59,8 +59,21 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 - Auto-detect dispatches to GPU when available, Float32→Float64 conversion for API consistency
 - Informative error when `:gpu` requested but no GPU available
 
+**P5.1 (`vbej`) — Schwarzschild Christoffel Symbols: CLOSED**
+- 9 non-zero components as 4 symmetric `SMatrix{4,4}`, pure arithmetic
+- Verified against Hamiltonian formulation at 100 random points (rtol=1e-8)
+- Note: existing integrator already had analytic `metric_inverse_partials` — ForwardDiff was never called for Schwarzschild
+- Exported as `christoffel(::Schwarzschild, x)`
+
+**P5.2 (`g2ld`) — Kerr BL Christoffel Symbols: CLOSED**
+- Computed from Γ^μ_{αβ} = ½ g^{μσ}(g_{σα,β} + g_{σβ,α} - g_{αβ,σ}) with analytic metric derivatives
+- Verified: Schwarzschild limit (a=0), Hamiltonian cross-check at 100 random (r,θ,a) points, symmetry
+- Unblocks `kzfy` (GPU geodesic integrator kernel)
+
 ### Commits
 - `d1f296b` feat: GPU rendering — HG phase function, multi-light, multi-bounce path tracing
+- `f0205a6` feat: analytic Schwarzschild Christoffel symbols
+- `4f69788` feat: analytic Kerr BL Christoffel symbols
 
 ---
 
@@ -178,13 +191,13 @@ write_ppm("output.ppm", img)
 - `b30ac79` fix: default hdda=false until HDDA bug resolved
 - `512a525` fix: GPU HDDA — Float32 DDA nudge too small (session 2, fjo9 FIXED)
 
-### GPU Issues Closed (21)
+### GPU/GR Issues Closed (23)
 
-jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug), xzai (HG phase), u8wt (multi-light), nu0j (multi-bounce), e7yt (API export)
+jcom (EPIC), i7h1 (ext), arjg (auto-detect), 0nr4 (kernel validation), 7g1c (buffer transfer), pxwe (HDDA design), fkde (root intersection), xcie (I2 DDA), 9wpk (I1 DDA), daxz (HDDA integration), ap19 (shadow rays), 929g (leaf cache), 9eqt (trilinear fast path), g0pb (CUDA test suite), bolc (benchmarks), fjo9 (HDDA correctness bug), xzai (HG phase), u8wt (multi-light), nu0j (multi-bounce), e7yt (API export), vbej (Schwarzschild Christoffel), g2ld (Kerr Christoffel)
 
 ### What's Next (Priority Order)
 
-1. **`vbej` P5.1** — Analytic Schwarzschild Christoffel symbols (independent, unblocks GR on GPU)
+1. **`kzfy` P5.3** — GPU geodesic integrator kernel (now unblocked by Christoffel symbols)
 2. **`wmqg` P4.3** — Multi-volume GPU rendering
 3. **`hecg` P1** — HDDA state machine dedup (refactor)
 4. **GR improvements** — `esr2` RK4 integrator → unblocks `a5ze`, `bjox`, `o9zw`, `837k`
