@@ -1411,13 +1411,24 @@ is pre-baked into a 256-entry LUT for device-side evaluation.
 - `spp` - Samples per pixel (accumulated with progressive averaging)
 - `seed` - RNG seed
 - `backend` - KernelAbstractions backend (default: auto-detected via `_default_gpu_backend()`)
+- `profile` - when `true`, returns `(image, timing)` where `timing::NamedTuple` reports
+  per-phase wall-clock ms: `upload_ms`, `kernel_ms`, `accum_ms`, `readback_ms`, `total_ms`.
+  Adds explicit `KernelAbstractions.synchronize` bracketing around each phase so timings
+  reflect actual device work; this slightly stalls the pipeline, so leave `false` (default)
+  for production rendering. When `false` the function returns just the image (legacy).
+
+# Ref
+Ground truth: docs/stocktake/08_perf_vs_webgl.md §1 (architectural gap, reason #3)
+and §4 (low-hanging fruit) — the H2D upload, per-spp kernel launches, and D2H
+readback are the three phases identified as WebGL-gap costs worth measuring.
 """
 function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
                             backend=_default_gpu_backend(),
                             hdda::Bool=true,
-                            max_bounces::Int=0) where T
+                            max_bounces::Int=0,
+                            profile::Bool=false) where T
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera
@@ -1472,22 +1483,43 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     w = Int32(width)
     h = Int32(height)
 
-    # Adapt buffers for backend
-    dev_buf = Adapt.adapt(backend, nanogrid.buffer)
-    dev_tf = Adapt.adapt(backend, tf_lut)
-    dev_lights = Adapt.adapt(backend, light_data)
-
-    # Allocate output — use fill + adapt since NTuple has no zero() method
     npixels = width * height
     z3 = (0.0f0, 0.0f0, 0.0f0)
-    output = Adapt.adapt(backend, fill(z3, npixels))
 
-    # Progressive accumulation for multi-spp
-    acc_buf = Adapt.adapt(backend, fill(z3, npixels))
+    # Timing accumulators (nanoseconds). Only populated when profile=true —
+    # this avoids adding sync barriers to the hot path for ordinary renders.
+    t_total0  = profile ? time_ns() : zero(UInt64)
+    upload_ns = zero(UInt64)
+    kernel_ns = zero(UInt64)
+    accum_ns  = zero(UInt64)
 
-    kernel! = hdda ? delta_tracking_hdda_kernel!(backend) : delta_tracking_kernel!(backend)
+    # --- UPLOAD phase -------------------------------------------------------
+    if profile
+        KernelAbstractions.synchronize(backend)
+        t0 = time_ns()
+        dev_buf    = Adapt.adapt(backend, nanogrid.buffer)
+        dev_tf     = Adapt.adapt(backend, tf_lut)
+        dev_lights = Adapt.adapt(backend, light_data)
+        output     = Adapt.adapt(backend, fill(z3, npixels))
+        acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
+        KernelAbstractions.synchronize(backend)
+        upload_ns = time_ns() - t0
+    else
+        dev_buf    = Adapt.adapt(backend, nanogrid.buffer)
+        dev_tf     = Adapt.adapt(backend, tf_lut)
+        dev_lights = Adapt.adapt(backend, light_data)
+        output     = Adapt.adapt(backend, fill(z3, npixels))
+        acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
+    end
 
+    kernel!     = hdda ? delta_tracking_hdda_kernel!(backend) : delta_tracking_kernel!(backend)
+    # Hoisted out of the spp loop: the accumulation kernel launcher is stateless,
+    # so recreating it per iteration was redundant closure work.
+    acc_kernel! = _accumulate_kernel!(backend)
+
+    # --- KERNEL + ACCUMULATION phases --------------------------------------
     for s in 1:spp
+        t_k = profile ? time_ns() : zero(UInt64)
         kernel!(output, dev_buf, dev_tf,
                 background_f32, sigma_maj, albedo_f32, emission_f32, phase_g,
                 cam_px, cam_py, cam_pz,
@@ -1505,16 +1537,26 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                 Int32(max_bounces);
                 ndrange=npixels)
         KernelAbstractions.synchronize(backend)
+        if profile
+            kernel_ns += time_ns() - t_k
+        end
 
-        # Accumulate on device
-        acc_kernel! = _accumulate_kernel!(backend)
+        t_a = profile ? time_ns() : zero(UInt64)
         acc_kernel!(acc_buf, output; ndrange=npixels)
         KernelAbstractions.synchronize(backend)
+        if profile
+            accum_ns += time_ns() - t_a
+        end
     end
 
-    # Copy accumulated results to host, then reshape
-    inv_spp = 1.0f0 / Float32(spp)
+    # --- READBACK phase ----------------------------------------------------
+    # Time only the D2H transfer. The CPU-side reshape/clamp loop below is
+    # not a GPU cost and must not be conflated with the transfer window.
+    t_rb = profile ? time_ns() : zero(UInt64)
     host_buf = Array(acc_buf)  # device → host transfer
+    readback_ns = profile ? (time_ns() - t_rb) : zero(UInt64)
+
+    inv_spp = 1.0f0 / Float32(spp)
     result = Matrix{NTuple{3, Float32}}(undef, height, width)
     for i in 1:npixels
         r, g, b = host_buf[i]
@@ -1523,6 +1565,17 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
         result[y, x] = (clamp(r * inv_spp, 0.0f0, 1.0f0),
                          clamp(g * inv_spp, 0.0f0, 1.0f0),
                          clamp(b * inv_spp, 0.0f0, 1.0f0))
+    end
+
+    if profile
+        total_ns = time_ns() - t_total0
+        ns_to_ms = ns -> Float64(ns) / 1_000_000
+        timing = (upload_ms   = ns_to_ms(upload_ns),
+                  kernel_ms   = ns_to_ms(kernel_ns),
+                  accum_ms    = ns_to_ms(accum_ns),
+                  readback_ms = ns_to_ms(readback_ns),
+                  total_ms    = ns_to_ms(total_ns))
+        return result, timing
     end
 
     result
