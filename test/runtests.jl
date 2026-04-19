@@ -159,6 +159,7 @@ import Lyr:
     include("test_gpu.jl")
     include("test_gpu_cuda.jl")
     include("test_gpu_perf_instrumentation.jl")
+    include("test_gpu_nanogrid.jl")
     include("test_output.jl")
     include("test_show.jl")
     include("test_properties.jl")

@@ -9,5 +9,6 @@
 {"key":"compact_tier2_dep_levels","value":"5"}
 {"key":"compaction_enabled","value":"false"}
 {"key":"issue_prefix","value":"path-tracer"}
+{"key":"kv.memory.gpu-hdda-bug-fjo9-root-cause-float32-absolute","value":"GPU HDDA bug fjo9 root cause: Float32 absolute nudge 1e-6 in _gpu_dda_init is below ULP at typical tmin values. Fix: relative nudge max(abs(tmin)*1e-5, 1e-5). Diagnostic approach: CPU emulation of GPU HDDA span collection was key — static analysis across 3 subagents failed to find the bug."}
 {"key":"schema_version","value":"7"}
 {"key":"types.custom","value":"molecule,gate,convoy,merge-request,slot,agent,role,rig,message"}

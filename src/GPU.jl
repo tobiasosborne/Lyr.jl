@@ -64,28 +64,32 @@ _gpu_info(backend) = "GPU backend: $(typeof(backend))"
 # ============================================================================
 
 """
-    GPUNanoGrid{T,B}
+    GPUNanoGrid{B, BUF, TF, L}
 
-GPU-resident NanoGrid wrapping a device buffer. Mirrors NanoGrid's buffer layout
-but stores data in a GPU-compatible array type B (e.g. CuArray{UInt8}).
+Device-side cache of everything `gpu_render_volume` needs resident on the GPU
+across render calls: the NanoVDB byte buffer, the pre-baked transfer-function
+LUT, and the packed lights buffer. Callers build one per (grid, material,
+lights) combination and reuse it, eliminating the per-call `Adapt.adapt(...)`
+H2D transfer (GPU.jl — the loop around the `spp` kernel launches).
+
+Fully parametric so the compiler sees the concrete device-array types; a
+`CuArray` buffer gives different specialization than an on-host `Array`
+under the CPU backend.
+
+The constructor that reads scene/material/nanogrid and populates the fields
+lives in C2 (`path-tracer-htby`). This type defines only the shape.
 
 # Fields
-- `buffer::B` - GPU device buffer
-- `background::T` - Background value (scalar, on host)
+- `backend::B`   — the `KernelAbstractions.Backend` these buffers live on
+- `buffer::BUF`  — device NanoVDB byte buffer (e.g. `CuArray{UInt8}`)
+- `tf_lut::TF`   — device 256-entry RGBA transfer-function LUT
+- `lights::L`    — device packed lights buffer (7 Float32 per light)
 """
-struct GPUNanoGrid{T, B}
-    buffer::B
-    background::T
-end
-
-"""
-    adapt_nanogrid(ArrayType, nanogrid::NanoGrid) -> GPUNanoGrid
-
-Transfer a NanoGrid to GPU memory using the given array type (e.g. CuArray).
-"""
-function adapt_nanogrid(ArrayType, nanogrid::NanoGrid{T}) where T
-    gpu_buf = ArrayType(nanogrid.buffer)
-    GPUNanoGrid{T, typeof(gpu_buf)}(gpu_buf, nanogrid.background)
+struct GPUNanoGrid{B, BUF, TF, L}
+    backend::B
+    buffer::BUF
+    tf_lut::TF
+    lights::L
 end
 
 # ============================================================================
