@@ -162,6 +162,7 @@ import Lyr:
     include("test_gpu_nanogrid.jl")
     include("test_perf_baseline.jl")
     include("test_gpu_preview.jl")
+    include("test_gpu_preview_texture.jl")
     include("test_output.jl")
     include("test_show.jl")
     include("test_properties.jl")

@@ -42,40 +42,48 @@ Interpretation:
 ### 1.2 Preview path (`gpu_render_volume_preview`, `src/GPU.jl`)
 
 Source: `bench/results/2026-04-19-preview-1080p.json`. Config: **1920 × 1080,
-spp=1, fixed-step Beer-Lambert EA compositing**. This is the WebGL-fair
-comparison mode — the GPU port landed in bead `path-tracer-9kad` (P0). No
-shadow rays, no multi-scatter; matches the Usher raycaster algorithm
-(see §2 below). Per-phase instrumentation is not yet wired on the preview
-kernel — `total_ms` is measured with `@elapsed` bracketed by
-`KernelAbstractions.synchronize`.
+spp=1, fixed-step Beer-Lambert EA compositing**. WebGL-fair comparison mode
+— GPU port in bead `path-tracer-9kad` (P0), CuTexture hardware-trilinear
+fast path added in bead `path-tracer-kbhm` (E2), default `use_texture=:auto`
+(picks CuTexture when dense size ≤ 512 MB, else NanoVDB). Per-phase
+instrumentation not yet wired on the preview kernel; `total_ms` measured
+with `@elapsed` bracketed by `KernelAbstractions.synchronize`.
 
-| Scene | Width×Height | spp | **Total (ms)** | WebGL target (ms) | **Gap** |
-|---|---:|---:|---:|---:|---:|
-| smoke.vdb (sparse fog) | 1920 × 1080 | 1 | **54.2** | 16.7 | 3.2× |
-| bunny_cloud.vdb (dense cloud) | 1920 × 1080 | 1 | **279.4** | 16.7 | 16.7× |
-| level_set_sphere (synthetic) | 1920 × 1080 | 1 | **49.3** | 16.7 | 3.0× |
+| Scene | Dense size | Path | **Total (ms)** | WebGL target (ms) | **Gap** |
+|---|---:|:---:|---:|---:|---:|
+| smoke.vdb (sparse fog) | 11.5 MB | CuTexture | **30.0** | 16.7 | **1.8×** |
+| bunny_cloud.vdb (dense cloud) | 564.6 MB | NanoVDB (over ceiling) | 335.6 | 16.7 | 20× |
+| level_set_sphere (synthetic) | 4 MB | CuTexture | **45.1** | 16.7 | 2.7× |
+
+Pre-E2 baseline for comparison (same scenes, NanoVDB-only path):
+
+| Scene | Pre-E2 (NanoVDB) | Post-E2 (CuTexture where eligible) | Speedup |
+|---|---:|---:|---:|
+| smoke.vdb | 54.2 ms | 30.0 ms | **1.8×** |
+| bunny_cloud.vdb | 279.4 ms | 335.6 ms | 0.83× (noise) |
+| level_set_sphere | 49.3 ms | 45.1 ms | 1.1× |
+
+Synthetic peak: on a 128³ dense radial-fog grid at 256×192 (the E2
+acceptance test, `test/test_gpu_preview_texture.jl`), CuTexture gives a
+**4.47× speedup over NanoVDB** (45 ms → 10 ms) with PSNR 61 dB. The 1.8×
+on smoke is smaller because (a) per-render densification cost (~5-10 ms to
+fill a 11.5 MB CuTextureArray from NanoVDB) eats into the savings, and (b)
+AABB fill ratio is lower than for the synthetic scene.
 
 Interpretation:
 
-- **Preview mode is 18–48× faster than stochastic** at the same workload
-  (compare 1.2 to 1.1 scaled by 4.32× pixels). For smoke.vdb:
-  `946 ms × (1920·1080)/(800·600) = 4085 ms stochastic`; preview gets the
-  same scene to 54 ms — the expected win of dropping 8 samples × shadow
-  rays × phase function evaluations.
-- **Gap to WebGL 60 FPS target is 3–17×**, not the 50–150× of the
-  stochastic path. smoke.vdb at 3.2× and level_set_sphere at 3.0× are
-  realistically closeable with the remaining epic work:
-  - **C (device-cache `GPUNanoGrid`)**: eliminates per-call H2D upload.
-    Not a big win on single-frame but critical for animations.
-  - **D (fused-spp kernel)**: doesn't apply to spp=1 preview.
-  - **E (CuTexture hardware trilinear)**: the 95% bucket. Per
-    `docs/stocktake/10_cutexture_feasibility.md`, expected 10–30× on the
-    sampling component; translates to 5–10× on wall time. With this, smoke
-    and level_set_sphere drop to ~5–10 ms — under the 16.7 ms budget.
-  - **bunny_cloud.vdb (16.7× gap)**: dense 19M-voxel cloud won't fit the
-    CuTexture ceiling (138 MB NanoVDB → ~500 MB dense). Falls back to
-    NanoVDB software path; gap stays wider. Not targeted by the epic's
-    primary milestones.
+- **Preview mode is 18–48× faster than stochastic** at the same workload.
+- **smoke.vdb is now 1.8× from the WebGL budget** — down from 3.2× before
+  E2. Further closing requires amortising the per-call densification
+  (bead `path-tracer-htby`, C2: cache `GPUNanoGrid` across calls) or
+  densifying on GPU more efficiently.
+- **level_set_sphere at 2.7×** — similar story; densification dominates
+  for small grids with few real samples.
+- **bunny_cloud (20× gap)**: 565 MB dense exceeds the 512 MB CuTexture
+  ceiling and falls back to NanoVDB. Closing this would require either
+  raising the ceiling (user env flag: `ENV["LYR_TEXTURE_CEILING_MB"]`) on
+  systems with enough VRAM (RTX 3090 24 GB can fit) or NanoVDB-specific
+  kernel optimisation. Not targeted by the epic's primary milestones.
 
 ### 1.3 Equivalence to CPU (P0 acceptance)
 

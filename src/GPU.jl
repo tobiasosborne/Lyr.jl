@@ -1958,9 +1958,31 @@ Deterministic (no RNG). Composites background with remaining transmittance."""
 end
 
 """
+    _gpu_preview_texture_try(nanogrid, scene, w, h; step_size, max_steps,
+                             backend, use_texture_mode) -> Matrix | Nothing
+
+Extension entry point for the CuTexture hardware-trilinear fast path
+(bead path-tracer-kbhm, E2). Populated by `ext/LyrCUDAExt.jl` when CUDA.jl
+is loaded; the fallback method here signals "unsupported" by returning
+`nothing` (or throwing if `use_texture_mode === :force`).
+
+Returning `nothing` means the caller should take the NanoVDB software
+path. `:force` corresponds to the user passing `use_texture=true` and
+expects a hard failure rather than silent fallback.
+"""
+function _gpu_preview_texture_try(nanogrid, scene, w, h;
+                                   step_size, max_steps, backend, use_texture_mode)
+    use_texture_mode === :force && error(
+        "use_texture=true requested but no CUDA.jl extension loaded. " *
+        "`using CUDA` first, or set use_texture=false (the NanoVDB path).")
+    nothing
+end
+
+"""
     gpu_render_volume_preview(nanogrid, scene, width, height;
                               step_size=0.5f0, max_steps=Int32(2000),
-                              backend=_default_gpu_backend())
+                              backend=_default_gpu_backend(),
+                              use_texture=:auto)
         -> Matrix{NTuple{3, Float32}}
 
 GPU port of `render_volume_preview`: fixed-step Beer-Lambert front-to-back
@@ -1972,6 +1994,13 @@ Reads the first volume + first material from `scene.volumes[1]`. Background
 comes from `scene.background` (or a `ConstantEnvironmentLight` if present,
 mirroring `_escape_radiance` in VolumeIntegrator.jl).
 
+# `use_texture` — hardware trilinear fast path (E2, bead path-tracer-kbhm)
+
+- `:auto` (default) — use CuTexture hardware trilinear when CUDA is loaded
+  and the dense-voxel footprint is ≤ 512 MB; else fall back to NanoVDB.
+- `true` — force the CuTexture path; throw if unavailable.
+- `false` — force the NanoVDB software path.
+
 Bead: path-tracer-9kad (P0 of EPIC path-tracer-ooul). Fair-comparison
 target against Will Usher's webgl-volume-raycaster (16.7 ms/frame at
 1920×1080); see `docs/perf_baseline.md`.
@@ -1980,11 +2009,26 @@ function gpu_render_volume_preview(nanogrid::NanoGrid{T}, scene::Scene,
                                     width::Int, height::Int;
                                     step_size::Float32=0.5f0,
                                     max_steps::Int=2000,
-                                    backend=_default_gpu_backend()) where T
+                                    backend=_default_gpu_backend(),
+                                    use_texture::Union{Bool,Symbol}=:auto) where T
     isempty(scene.volumes) && throw(ArgumentError("Scene has no volumes"))
     length(scene.volumes) > 1 && throw(ArgumentError(
         "gpu_render_volume_preview renders a single volume; got $(length(scene.volumes)). " *
         "Multi-volume support requires compositing logic equivalent to gpu_render_multi_volume."))
+
+    # CuTexture fast path (bead path-tracer-kbhm). Dispatches into the
+    # LyrCUDAExt extension when backend is CUDABackend and dense size fits.
+    # Falls back to NanoVDB below when :auto + ineligible.
+    if use_texture === true || use_texture === :auto
+        mode = use_texture === true ? :force : :auto
+        tex_result = _gpu_preview_texture_try(nanogrid, scene, width, height;
+                                               step_size=step_size,
+                                               max_steps=max_steps,
+                                               backend=backend,
+                                               use_texture_mode=mode)
+        tex_result !== nothing && return tex_result
+    end
+
     vol = scene.volumes[1]
     mat = vol.material
     cam = scene.camera
