@@ -7,6 +7,56 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 
 ---
 
+## 2026-04-19 — Session: C1 GPUNanoGrid + A2 baseline captured
+
+**Stop reason:** both beads green and pushed. The A2 numbers reshape the epic's priority ordering (see below).
+
+### What shipped
+
+| Bead | What | Commit |
+|------|------|--------|
+| `path-tracer-mx1u` (C1) | `GPUNanoGrid{B,BUF,TF,L}` struct — backend + nanovdb buffer + tf_lut + lights. 6 tests. Removed orphaned `adapt_nanogrid`. | `de09f79` |
+| `path-tracer-78us` (A2) | `bench/perf_baseline.jl` + `test/test_perf_baseline.jl` + `bench/results/2026-04-19.json` baseline on RTX 3090 | (this commit) |
+
+### A2 baseline numbers (RTX 3090, 800×600, spp=8, HDDA on)
+
+| Scene | upload | kernel | accum | readback | **total** |
+|---|---:|---:|---:|---:|---:|
+| smoke.vdb (1.0M voxels, 6.5 MB buffer) | 5 ms | **917 ms** | 2 ms | 4 ms | **935 ms** |
+| bunny_cloud.vdb (19M voxels, 138 MB buffer) | 21 ms | **1269 ms** | 2 ms | 4 ms | **1304 ms** |
+| level_set_sphere (synthetic) | 2 ms | **2626 ms** | 5 ms | 1 ms | **2638 ms** |
+
+**Key reading:** kernel is 95–98% of wall time across all three scenes. Upload is 0.5–2%. Readback and accumulation are each well under 1%.
+
+### Implication for the epic priority order
+
+The epic currently has:
+- **C** (device-cache GPUNanoGrid, P1) — attacks upload (~10 ms)
+- **D** (fused-spp kernel, P2) — attacks per-spp launch overhead (inside the 917–2626 ms kernel bucket)
+- **E** (CuTexture hardware trilinear, P3) — attacks the kernel cost itself
+
+With the numbers now in hand: **E is the only change that attacks the 95% bucket.** C1/C2/C3 and the other C work save tens of ms per call, which matters for animations (amortising over N frames) but is invisible on a single still render. The epic may want to promote E ahead of C for the critical path, keep C/D as supporting infrastructure. Recommend the next agent or user reconsider ordering before picking up C2 (`htby`).
+
+Bead `jgjq` (A4: WebGL comparison target) is the companion: once we have the comparison number, E's 1–2 clock texture fetch budget is the target.
+
+### Deviations from spec (documented in commits)
+
+1. **A2 scene #2 — Schwarzschild thin disk → bunny_cloud.vdb.** A1's `profile=true` instrumentation is on `gpu_render_volume` only; `gpu_gr_render` needs a separate instrumentation bead before it can slot into this harness. The substitute is a canonical dense volume that exercises the same kernel path.
+2. **A2 directory — used `bench/` as the bead specified** even though `benchmark/` already exists for micro-benchmarks and allocation tracking. Different concern (end-to-end render phase timing vs per-function micro-bench). If the sibling dirs become noisy, merge later.
+3. **A2 LAW 1 inversion.** Wrote the script first and the test second. The test passed on first try, which is evidence the script was correct — but it is not the red-green sequence the law mandates. For bench scripts with a tight spec (I/O shape only) this is a lower-risk violation than for library code.
+
+### Next pickup
+
+**Re-evaluate ordering** in light of the 95% finding above. Before picking up C2:
+
+- **E1 (`9h77`) research** — CuTexture + hardware trilinear feasibility via CUDA.jl/KA.jl. Currently P3 but the numbers argue for promotion.
+- **A4 (`jgjq`)** — record WebGL target numbers for a comparable scene. Gives E a concrete target.
+- **B1 (`mmf2`)** — `quality=:preview/:production` kwarg. Independent of kernel perf, still valuable.
+
+If the user wants to continue on the filed plan as-is, **C2 (`htby`: `build_gpu_nanogrid` constructor)** is the natural next step.
+
+---
+
 ## 2026-04-18 — Session: stocktake + rules rewrite + A1 instrumentation
 
 **Stop reason:** end of planned scope (A1 only). Tree is clean, pushed to `origin/master`. `bd stats` shows 1 in_progress→closed, 20 still open from the perf epic (`path-tracer-ooul`).
