@@ -14,6 +14,7 @@ Eight subsystem reports produced by parallel Sonnet subagents surveying all 84 `
 | 06 | [Field Protocol + physics](06_field_protocol.md) | `AbstractField`, voxelize/visualize, ScalarQED, Wavepackets, Hydrogen, Animation | 7 |
 | 07 | [Grid ops + main module](07_grid_ops.md) | CSG, level sets, filtering, morphology, fast sweeping, meshing, `Lyr.jl` | 17 |
 | 08 | [**Perf diagnosis vs WebGL**](08_perf_vs_webgl.md) | Why Lyr GPU lags a WebGL volume shader — concrete bottlenecks + fixes | cross-cutting |
+| 10 | [CuTexture feasibility (E1)](10_cutexture_feasibility.md) | Go/no-go + code sketch for hardware trilinear via CUDA.jl `CuTexture{Float32,3}` | cross-cutting |
 
 ## Headline findings
 
