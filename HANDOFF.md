@@ -26,7 +26,50 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-03-26) -- GPU Feature Sprint + GR Christoffel Symbols
+## Latest Sessions (2026-04-18 / 2026-04-19) -- WebGL perf epic: stocktake → E2 shipped
+
+**Status**: GREEN. Filed EPIC `path-tracer-ooul` (21 sub-beads) to close the WebGL perf gap. Shipped 5 beads so far; CuTexture preview path (E2) running at 4.47× vs NanoVDB on 128³ dense acceptance test. Smoke.vdb 1080p preview down from 54 ms pre-epic to 30 ms post-E2 (WebGL target 16.7 ms → now 1.8× away, was 3.2×).
+
+**Canonical docs:**
+- `docs/stocktake/INDEX.md` — full architectural map (9 subsystem reports).
+- `docs/stocktake/08_perf_vs_webgl.md` — why Lyr lagged WebGL.
+- `docs/stocktake/10_cutexture_feasibility.md` — E1 research output; go/no-go + code sketch for hardware trilinear.
+- `docs/perf_baseline.md` — A4 WebGL target + current baseline tables.
+- `WORKLOG.md` — day-by-day detail (commits, measurements, gotchas).
+
+### What shipped in this epic so far
+
+| Bead | Phase | Deliverable | Commit |
+|---|---|---|---|
+| `path-tracer-605p` (A1) | Instrument | `gpu_render_volume(...; profile=true)` returns per-phase timings | `6ed8b86` |
+| `path-tracer-mx1u` (C1) | Device cache | `GPUNanoGrid{B,BUF,TF,L}` struct (type only; C2 builds it) | `de09f79` |
+| `path-tracer-78us` (A2) | Bench | `bench/perf_baseline.jl` + JSON baseline — found kernel is 95-98% of wall time | `da9788a` |
+| `path-tracer-9h77` (E1) | Research | CuTexture feasibility doc (CONDITIONAL-GO, 3-5 day effort) | `b9e14ee` |
+| `path-tracer-jgjq` (A4) | Research | WebGL target pinned: Will Usher's webgl-volume-raycaster, 16.7 ms @ 1920×1080 | `b9e14ee` |
+| `path-tracer-9kad` (P0) | GPU preview | `gpu_render_volume_preview` — WebGL-fair mode on GPU | `bb80565` |
+| `path-tracer-kbhm` (E2) | CuTexture | Hardware trilinear fast path in `ext/LyrCUDAExt.jl` (4.47× on dense acceptance test) | `c828d39` |
+
+### Open beads on the epic
+
+- **`path-tracer-htby` (C2)** — critical path. Cache `GPUNanoGrid` (NanoVDB buffer + CuTextureArray + TF LUT + lights) across calls to amortise the per-call densification that eats the CuTexture win on small grids. Unblocked. Ready.
+- `path-tracer-mmf2` (B1) — `quality=:preview/:production` kwarg on public render API. Small.
+- `path-tracer-vs5y` (D1) — research kernel-internal spp accumulation. Low priority now that preview is fast.
+- `path-tracer-acxp` (P3, filed) — Float32 HDDA grazing-ray robustness. Level_set_sphere silhouette drops to 27 dB; production scenes hit 40+ dB.
+- ~10 more beads in A/B/C/D/F phases. `bd ready` for the queue.
+
+### Bench numbers (RTX 3090, 1920×1080, spp=1 preview, `use_texture=:auto`)
+
+| Scene | Dense size | Path | Total | WebGL gap |
+|---|---:|:---:|---:|---:|
+| smoke.vdb | 11.5 MB | CuTexture | 30 ms | **1.8×** |
+| bunny_cloud.vdb | 565 MB | NanoVDB (ceiling) | 336 ms | 20× |
+| level_set_sphere | 4 MB | CuTexture | 45 ms | 2.7× |
+
+Synthetic 128³ dense, 256×192: **4.47× speedup**, PSNR 61 dB.
+
+---
+
+## Previous Session (2026-03-26) -- GPU Feature Sprint + GR Christoffel Symbols
 
 **Status**: GREEN -- 21 issues closed (14 new implementations, 7 stale closures). 382 GPU + 458 Schwarzschild + 613 Kerr + ~200 unit tests passing. 9 open issues remain (from 22 at session start). All committed and pushed.
 

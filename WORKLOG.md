@@ -7,6 +7,82 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 
 ---
 
+## 2026-04-19 — Session (evening): P0 preview port + E2 CuTexture + follow-up beads
+
+**Stop reason:** E2 green and pushed. Epic critical path now runs: **C2 `htby`** next (cache `GPUNanoGrid` to amortise the texture densification that eats the CuTexture win on small grids).
+
+### What shipped
+
+| Bead | What | Commit |
+|------|------|--------|
+| `path-tracer-9kad` (P0) | `gpu_render_volume_preview` — GPU port of the CPU EA march. 7/7 tests, 40+ dB PSNR on production fixtures. | `bb80565` |
+| `path-tracer-kbhm` (E2) | CuTexture hardware-trilinear fast path in `ext/LyrCUDAExt.jl`. **4.47× speedup**, PSNR 61 dB on 128³ dense acceptance test. | `c828d39` |
+| `path-tracer-acxp` (filed, P3) | Follow-up for Float32 HDDA grazing-ray robustness on silhouette rays (level_set_sphere drops to 27 dB; production scenes hit 40+ dB). | n/a |
+
+### Measured numbers (RTX 3090, 1920×1080 preview, `use_texture=:auto`)
+
+| Scene | Dense | Path | Pre-E2 | Post-E2 | Speedup | WebGL gap |
+|---|---:|:---:|---:|---:|---:|---:|
+| smoke.vdb | 11.5 MB | CuTexture | 54 ms | **30 ms** | 1.8× | **1.8× WebGL target** |
+| bunny_cloud.vdb | 565 MB | NanoVDB (over ceiling) | 279 | 336 | 0.83× | 20× |
+| level_set_sphere | 4 MB | CuTexture | 49 | 45 | 1.1× | 2.7× |
+
+Synthetic 128³ dense radial fog at 256×192 (the E2 acceptance test):
+**45 ms → 10 ms = 4.47×.** PSNR 61 dB.
+
+### Interesting asymmetries
+
+1. **Densification dominates for small grids.** For smoke.vdb (11.5 MB dense) the
+   4.47× peak drops to 1.8× on a single render because we pay `O(N³)` tree
+   traversals on every call to fill the `CuTextureArray`. C2 (`path-tracer-htby` —
+   cache `GPUNanoGrid` across calls) will amortise this; expect smoke to go
+   from 30 ms to under the 16.7 ms WebGL target after C2 lands.
+2. **bunny_cloud exceeds the 512 MB ceiling** and falls back to NanoVDB. This
+   is intentional — dense Float32 of a 584×576×440 bbox is 565 MB, above the
+   default cap. Either raise `ENV["LYR_TEXTURE_CEILING_MB"]` on systems with
+   VRAM to spare, or accept that large dense clouds stay on the sparse path.
+3. **Float32 HDDA silhouette precision** (acxp) drops level_set_sphere PSNR
+   to 27 dB on perfectly-grazing rays. The `_gpu_dda_init` relative nudge
+   from `fjo9` overshoots sub-ULP-wide grazing spans. Tightening the nudge
+   reopens fjo9; a proper fix needs a span-width-aware DDA init. Filed as P3.
+
+### Key decisions and gotchas
+
+1. **E2 applies to the preview kernel only, not delta-tracking.** The preview
+   kernel is 40 LOC (no HDDA needed for dense textures); the delta-tracking
+   kernel is 200+ LOC with shadow rays + bounce loop. Porting delta-tracking
+   is a separate bead if the need arises. The WebGL-fair comparison was the
+   point of E2 anyway — preview is what matters for that target.
+2. **`GC.@preserve` across `CUDA.synchronize()`.** `CuDeviceTexture` only
+   stores `(dims, handle)` — no parent reference back to the `CuTextureArray`.
+   Julia's liveness analysis could drop the array while the kernel still
+   holds its handle. `GC.@preserve tex tex_arr tf_lut_dev output` is
+   load-bearing; removing it would produce intermittent segfaults.
+3. **Narrowing-only AABB slack.** My first cut of the Float32 grazing-ray
+   slack widened both `tmin` and `tmax`; reviewer caught that widening
+   `tmax` could permit rays to extend past their true exit into adjacent
+   AABBs. Narrowing `tmin` alone is enough; tmax unchanged.
+4. **`_gpu_tf_lookup_lerp` is a separate function** from the nearest-bin
+   `_gpu_tf_lookup`. The existing nearest lookup is correct for stochastic
+   delta tracking (evaluated once per scatter event, averaged by spp); it
+   compounds unacceptably in the EA product chain (200+ multiplicative
+   steps per pixel). Both coexist; EA path uses lerp, delta path uses nearest.
+
+### Followups now visible
+
+- **C2 `path-tracer-htby`** (blocked on C1 ✓, depends on no open beads) —
+  the natural next step. Caches `GPUNanoGrid` across calls, which would
+  ship both the existing NanoVDB-buffer upload cache AND the new CuTexture
+  dense-array cache in one type.
+- **`path-tracer-acxp` P3** — Float32 HDDA grazing-ray fix. Low urgency.
+
+### A2 baseline regenerated (default now uses :auto → CuTexture)
+
+See `bench/results/2026-04-19.json` and `bench/results/2026-04-19-preview-1080p.json`.
+Numbers in table above. The bench script regenerates both files on each run.
+
+---
+
 ## 2026-04-19 — Session: C1 GPUNanoGrid + A2 baseline captured
 
 **Stop reason:** both beads green and pushed. The A2 numbers reshape the epic's priority ordering (see below).
