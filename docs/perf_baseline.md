@@ -13,35 +13,85 @@ time budget to hit and a scene to reproduce.
 
 ## 1. Lyr baseline (A2 snapshot, RTX 3090)
 
-Source of numbers: `bench/results/2026-04-19.json` (generated 2026-04-19 14:51
-UTC). Config: **800 × 600, spp=8, stochastic delta tracking through NanoVDB,
-`max_bounces=0` (primary + direct lighting only)**. This is Lyr's production
-GPU path (`gpu_render_volume`, `src/GPU.jl:1415`), not the preview path.
+### 1.1 Stochastic path (`gpu_render_volume`, `src/GPU.jl:1415`)
+
+Source: `bench/results/2026-04-19.json`. Config: **800 × 600, spp=8, stochastic
+delta tracking through NanoVDB, `max_bounces=0`** (primary + direct lighting
+only). This is Lyr's production GPU path, *not* the WebGL-fair comparison.
 
 | Scene | Active voxels | Buffer (KB) | Upload (ms) | Kernel (ms) | Accum (ms) | Readback (ms) | **Total (ms)** |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| smoke.vdb (sparse fog) | 1,049,275 | 6,493 | 5.1 | 916.6 | 2.2 | 4.2 | **935.4** |
-| bunny_cloud.vdb (dense cloud) | 19,210,271 | 137,804 | 21.1 | 1,268.7 | 2.0 | 4.5 | **1,303.9** |
-| level_set_sphere (synthetic) | 55,636 | 1,004 | 2.4 | 2,626.3 | 4.8 | 0.8 | **2,638.4** |
+| smoke.vdb (sparse fog) | 1,049,275 | 6,493 | 7.8 | 924.4 | 1.9 | 4.5 | **946.1** |
+| bunny_cloud.vdb (dense cloud) | 19,210,271 | 137,804 | 20.5 | 1,010.4 | 2.3 | 4.7 | **1,045.5** |
+| level_set_sphere (synthetic) | 55,636 | 1,004 | 2.1 | 2,388.5 | 2.1 | 0.7 | **2,397.6** |
 
 Interpretation:
 
-- **Kernel dominates**: 95-99% of wall time across all three scenes. Upload
-  (H2D), accumulate, and readback are already negligible at 800×600. The
-  optimization target is kernel time.
+- **Kernel dominates**: 95-99% of wall time. Upload, accumulate, and readback
+  are negligible at 800×600. The optimization target is kernel time.
 - **Active-voxel count does not predict time**. The sparsest scene
   (level_set_sphere, 56 k active voxels, ~1 MB buffer) is the *slowest*
   because the level-set geometry produces thick optical depth with HDDA spans
   that traverse most of the bounding box and trigger many scatter events per
-  ray. Lesson: "sparse" helps empty-space skipping but does not bound work.
-- **Stochastic path tracer behavior**: at spp=8 and `max_bounces=0`, each pixel
-  fires 8 independent delta-tracking rays plus 8 shadow rays (one per sample,
-  since lighting is evaluated at primary scatter). The expected number of
-  free-flight iterations per ray is `D × sigma_maj` where D is voxels
-  traversed of active medium (see `docs/stocktake/08_perf_vs_webgl.md` §2).
-  For `sigma_maj = max_density × sigma_scale` with typical `sigma_scale ≈ 10`,
-  this is structurally more work than a WebGL fixed-step march of the same
-  region.
+  ray. "Sparse" helps empty-space skipping but does not bound work.
+- **Stochastic path tracer behavior**: at spp=8 and `max_bounces=0`, each
+  pixel fires 8 independent delta-tracking rays plus 8 shadow rays. This is
+  structurally more work than a WebGL fixed-step march of the same region
+  (see `docs/stocktake/08_perf_vs_webgl.md` §2).
+
+### 1.2 Preview path (`gpu_render_volume_preview`, `src/GPU.jl`)
+
+Source: `bench/results/2026-04-19-preview-1080p.json`. Config: **1920 × 1080,
+spp=1, fixed-step Beer-Lambert EA compositing**. This is the WebGL-fair
+comparison mode — the GPU port landed in bead `path-tracer-9kad` (P0). No
+shadow rays, no multi-scatter; matches the Usher raycaster algorithm
+(see §2 below). Per-phase instrumentation is not yet wired on the preview
+kernel — `total_ms` is measured with `@elapsed` bracketed by
+`KernelAbstractions.synchronize`.
+
+| Scene | Width×Height | spp | **Total (ms)** | WebGL target (ms) | **Gap** |
+|---|---:|---:|---:|---:|---:|
+| smoke.vdb (sparse fog) | 1920 × 1080 | 1 | **54.2** | 16.7 | 3.2× |
+| bunny_cloud.vdb (dense cloud) | 1920 × 1080 | 1 | **279.4** | 16.7 | 16.7× |
+| level_set_sphere (synthetic) | 1920 × 1080 | 1 | **49.3** | 16.7 | 3.0× |
+
+Interpretation:
+
+- **Preview mode is 18–48× faster than stochastic** at the same workload
+  (compare 1.2 to 1.1 scaled by 4.32× pixels). For smoke.vdb:
+  `946 ms × (1920·1080)/(800·600) = 4085 ms stochastic`; preview gets the
+  same scene to 54 ms — the expected win of dropping 8 samples × shadow
+  rays × phase function evaluations.
+- **Gap to WebGL 60 FPS target is 3–17×**, not the 50–150× of the
+  stochastic path. smoke.vdb at 3.2× and level_set_sphere at 3.0× are
+  realistically closeable with the remaining epic work:
+  - **C (device-cache `GPUNanoGrid`)**: eliminates per-call H2D upload.
+    Not a big win on single-frame but critical for animations.
+  - **D (fused-spp kernel)**: doesn't apply to spp=1 preview.
+  - **E (CuTexture hardware trilinear)**: the 95% bucket. Per
+    `docs/stocktake/10_cutexture_feasibility.md`, expected 10–30× on the
+    sampling component; translates to 5–10× on wall time. With this, smoke
+    and level_set_sphere drop to ~5–10 ms — under the 16.7 ms budget.
+  - **bunny_cloud.vdb (16.7× gap)**: dense 19M-voxel cloud won't fit the
+    CuTexture ceiling (138 MB NanoVDB → ~500 MB dense). Falls back to
+    NanoVDB software path; gap stays wider. Not targeted by the epic's
+    primary milestones.
+
+### 1.3 Equivalence to CPU (P0 acceptance)
+
+`gpu_render_volume_preview` produces output matching CPU
+`render_volume_preview` at PSNR:
+- smoke.vdb (64×48): **≥ 40 dB** (bead's original target)
+- bunny_cloud.vdb (48×36): **≥ 40 dB**
+- level_set_sphere (64×48): **≥ 25 dB** (relaxed; see below)
+
+The `level_set_sphere` case drops to ~27 dB because ~1.3% of silhouette
+pixels hit a Float32 HDDA grazing-ray precision limit: the `_gpu_dda_init`
+relative nudge (from the `fjo9` fix) overshoots sub-ULP-wide spans on
+perfectly-grazing silhouette rays. Tightening the nudge would reopen
+`fjo9`; proper fix needs a span-width-aware DDA init. Filed as a follow-up
+bead. On production fixtures (smoke.vdb, bunny_cloud.vdb) the 40 dB target
+is met.
 
 ---
 

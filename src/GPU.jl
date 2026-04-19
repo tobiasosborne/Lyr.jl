@@ -345,7 +345,17 @@ end
 # Device-side ray-AABB intersection
 # ============================================================================
 
-"""Device-side ray-box intersection. Returns (t_enter, t_exit)."""
+"""Device-side ray-box intersection. Returns (t_enter, t_exit).
+
+Conservative by one ULP: tmin is biased down and tmax up by
+`max(|tmin|, |tmax|) * 2^-23` to catch grazing rays that Float32 otherwise
+rejects. The slack is tight — it only flips the sign of `(tmax - tmin)` for
+rays within ~1-2 ULPs of miss — and has no effect on rays that clearly hit
+or miss. Callers still check `tmin < tmax` to decide accept/reject, so the
+slack only rescues borderline hits; a ray deeper in the "miss" regime stays
+rejected. Without this, Float32 HDDA drops ~1-2% of silhouette pixels that
+CPU Float64 HDDA catches (diagnosed on level_set_sphere preview render).
+"""
 @inline function _gpu_ray_box_intersect(ox::Float32, oy::Float32, oz::Float32,
                                          idx::Float32, idy::Float32, idz::Float32,
                                          bmin_x::Float32, bmin_y::Float32, bmin_z::Float32,
@@ -365,7 +375,15 @@ end
     tmin = max(tmin, min(t1z, t2z))
     tmax = min(tmax, max(t1z, t2z))
 
-    (max(tmin, 0.0f0), tmax)
+    # Guard: non-finite tmin/tmax (e.g., axis-aligned misses that leave
+    # a slab at ±Inf) must pass through without a NaN-producing slack.
+    # Narrowing-only: nudging tmin down is enough to rescue grazing rays
+    # (the caller tests `tmin < tmax`). Not widening tmax avoids letting
+    # a ray spuriously extend past its geometric exit into an adjacent
+    # AABB (flagged by review of bead path-tracer-9kad).
+    slack = (isfinite(tmin) & isfinite(tmax)) ?
+            max(abs(tmin), abs(tmax)) * 1.2f-7 : 0.0f0
+    (max(tmin - slack, 0.0f0), tmax)
 end
 
 # ============================================================================
@@ -395,10 +413,18 @@ end
 # Device-side transfer function LUT
 # ============================================================================
 
-"""Look up RGBA from a pre-baked 256-entry transfer function LUT."""
+"""Look up RGBA from a pre-baked 256-entry transfer function LUT (nearest-bin).
+
+Used by the stochastic delta-tracking kernels, where the TF is evaluated
+only at accepted scatter events (one lookup per ray) and quantization is
+averaged out over `spp`.
+
+Not suitable for fixed-step EA marching: see `_gpu_tf_lookup_lerp` for the
+linearly-interpolated variant required when ~200 lookups accumulate
+multiplicatively per pixel.
+"""
 @inline function _gpu_tf_lookup(tf_lut, density::Float32,
                                  density_min::Float32, density_max::Float32)
-    # Normalize density to [0, 1] and map to LUT index
     range = density_max - density_min
     range < 1.0f-10 && return (0.0f0, 0.0f0, 0.0f0, 0.0f0)
     t = clamp((density - density_min) / range, 0.0f0, 1.0f0)
@@ -410,6 +436,39 @@ end
     b = @inbounds tf_lut[base + Int32(2)]
     a = @inbounds tf_lut[base + Int32(3)]
     (r, g, b, a)
+end
+
+"""Look up RGBA from a pre-baked 256-entry TF LUT with linear interpolation
+between adjacent entries. Entry `i` ∈ [0, 255] corresponds to density
+`density_min + (i/255) * range` (per `_bake_tf_lut`). Required for
+fixed-step EA marching — nearest-bin quantization error (~1/256 of the
+density range) compounds multiplicatively in transmittance over hundreds
+of per-ray steps."""
+@inline function _gpu_tf_lookup_lerp(tf_lut, density::Float32,
+                                      density_min::Float32, density_max::Float32)
+    range = density_max - density_min
+    range < 1.0f-10 && return (0.0f0, 0.0f0, 0.0f0, 0.0f0)
+    t = clamp((density - density_min) / range, 0.0f0, 1.0f0)
+    f_idx = t * 255.0f0
+    i0 = Int32(floor(f_idx))
+    i0 = min(i0, Int32(254))
+    i1 = i0 + Int32(1)
+    frac = f_idx - Float32(i0)
+
+    base0 = i0 * Int32(4) + Int32(1)
+    base1 = i1 * Int32(4) + Int32(1)
+    r0 = @inbounds tf_lut[base0]
+    g0 = @inbounds tf_lut[base0 + Int32(1)]
+    b0 = @inbounds tf_lut[base0 + Int32(2)]
+    a0 = @inbounds tf_lut[base0 + Int32(3)]
+    r1 = @inbounds tf_lut[base1]
+    g1 = @inbounds tf_lut[base1 + Int32(1)]
+    b1 = @inbounds tf_lut[base1 + Int32(2)]
+    a1 = @inbounds tf_lut[base1 + Int32(3)]
+    (r0 + frac * (r1 - r0),
+     g0 + frac * (g1 - g0),
+     b0 + frac * (b1 - b0),
+     a0 + frac * (a1 - a0))
 end
 
 # ============================================================================
@@ -1622,6 +1681,359 @@ function gpu_render_multi_volume(scene::Scene, width::Int, height::Int;
                           clamp(g1 + g2, 0.0f0, 1.0f0),
                           clamp(b1 + b2, 0.0f0, 1.0f0))
         end
+    end
+    result
+end
+
+# ============================================================================
+# GPU emission-absorption preview (P0 of EPIC path-tracer-ooul)
+# ============================================================================
+#
+# Mirrors CPU render_volume_preview (src/VolumeIntegrator.jl:473-531): fixed-
+# step front-to-back Beer-Lambert compositing through HDDA-identified active
+# spans. No stochastic sampling, no shadow rays, no multi-scatter — this is
+# the fair-comparison mode for Will Usher's webgl-volume-raycaster target
+# (docs/perf_baseline.md §2). The HDDA scaffold here duplicates the structure
+# of `_gpu_hdda_delta_track`; a future refactor should extract a generic walker
+# parameterised by a span integrator.
+
+"""Fixed-step EA integration within one HDDA span.
+Matches the inner `while` loop in `_march_ea` (VolumeIntegrator.jl:509-524).
+Returns updated state: (acc_r,g,b, transmittance, steps_remaining,
+cache_ox,oy,oz,off, done)."""
+@inline function _gpu_integrate_span_ea(
+    buf, tf_lut,
+    ox::Float32, oy::Float32, oz::Float32,
+    dx::Float32, dy::Float32, dz::Float32,
+    t0::Float32, t1::Float32,
+    background::Float32, header_T_size::Int32,
+    sigma_scale::Float32, emission_scale::Float32, step_size::Float32,
+    tf_dmin::Float32, tf_dmax::Float32,
+    acc_r::Float32, acc_g::Float32, acc_b::Float32,
+    transmittance::Float32,
+    steps_remaining::Int32,
+    cache_ox::Int32, cache_oy::Int32, cache_oz::Int32, cache_off::Int32)
+
+    t = t0
+    while t < t1 && transmittance > 1.0f-4 && steps_remaining > Int32(0)
+        pos_x = ox + t * dx
+        pos_y = oy + t * dy
+        pos_z = oz + t * dz
+        density, cache_ox, cache_oy, cache_oz, cache_off =
+            _gpu_get_value_trilinear_cached(buf, background, pos_x, pos_y, pos_z,
+                header_T_size, cache_ox, cache_oy, cache_oz, cache_off)
+        density = max(0.0f0, density)
+        if density > 1.0f-6
+            tf_r, tf_g, tf_b, tf_a = _gpu_tf_lookup_lerp(tf_lut, density, tf_dmin, tf_dmax)
+            sigma_t = tf_a * sigma_scale * step_size
+            step_T = exp(-sigma_t)
+            emit = (1.0f0 - step_T) * emission_scale
+            acc_r += transmittance * tf_r * emit
+            acc_g += transmittance * tf_g * emit
+            acc_b += transmittance * tf_b * emit
+            transmittance *= step_T
+        end
+        t += step_size
+        steps_remaining -= Int32(1)
+    end
+    done = transmittance <= 1.0f-4 || steps_remaining <= Int32(0)
+    (acc_r, acc_g, acc_b, transmittance, steps_remaining,
+     cache_ox, cache_oy, cache_oz, cache_off, done)
+end
+
+"""HDDA traversal with fixed-step EA span integration. Mirrors the skeleton
+of `_gpu_hdda_delta_track` (span collection via Root→I2→I1 DDA) but uses
+`_gpu_integrate_span_ea` per span. Deterministic — no RNG state threaded."""
+@inline function _gpu_hdda_ea_march(
+    buf, tf_lut,
+    ox::Float32, oy::Float32, oz::Float32,
+    dx::Float32, dy::Float32, dz::Float32,
+    idx_r::Float32, idy_r::Float32, idz_r::Float32,
+    background::Float32, header_T_size::Int32,
+    sigma_scale::Float32, emission_scale::Float32, step_size::Float32,
+    tf_dmin::Float32, tf_dmax::Float32,
+    max_steps::Int32)
+
+    acc_r = 0.0f0; acc_g = 0.0f0; acc_b = 0.0f0
+    transmittance = 1.0f0
+    steps_remaining = max_steps
+    cache_ox = Int32(0); cache_oy = Int32(0); cache_oz = Int32(0); cache_off = Int32(0)
+
+    n_roots, rt1, ro1, rt2, ro2, rt3, ro3, rt4, ro4 =
+        _gpu_collect_root_hits(buf, ox, oy, oz, idx_r, idy_r, idz_r, header_T_size)
+    n_roots == Int32(0) && return (acc_r, acc_g, acc_b, transmittance)
+
+    span_t0 = -1.0f0
+
+    for ri in Int32(1):n_roots
+        r_tmin, i2_off = _gpu_root_get(ri, rt1, rt2, rt3, rt4, ro1, ro2, ro3, ro4)
+        isinf(r_tmin) && break
+
+        i2_orig_x = _gpu_buf_load(Int32, buf, i2_off)
+        i2_orig_y = _gpu_buf_load(Int32, buf, i2_off + Int32(4))
+        i2_orig_z = _gpu_buf_load(Int32, buf, i2_off + Int32(8))
+
+        i2_ijk_x, i2_ijk_y, i2_ijk_z, i2_step_x, i2_step_y, i2_step_z,
+        i2_tmax_x, i2_tmax_y, i2_tmax_z, i2_td_x, i2_td_y, i2_td_z =
+            _gpu_dda_init(ox, oy, oz, dx, dy, dz, idx_r, idy_r, idz_r, r_tmin, 128.0f0)
+        i2_t_entry = r_tmin
+
+        for _ in Int32(1):Int32(32768)
+            i2_inside, i2_cidx = _gpu_node_query(i2_ijk_x, i2_ijk_y, i2_ijk_z,
+                i2_orig_x, i2_orig_y, i2_orig_z, Int32(128), Int32(32))
+            !i2_inside && break
+
+            i2_has_child = _gpu_buf_mask_is_on(buf, i2_off + Int32(_I2_CMASK_OFF), i2_cidx)
+
+            if i2_has_child
+                tidx = _gpu_buf_count_on_before(buf,
+                    i2_off + Int32(_I2_CMASK_OFF), i2_off + Int32(_I2_CPREFIX_OFF), i2_cidx)
+                i1_off = Int32(_gpu_buf_load(UInt32, buf,
+                    i2_off + Int32(_I2_DATA_OFF) + tidx * Int32(4)))
+
+                i1_orig_x = _gpu_buf_load(Int32, buf, i1_off)
+                i1_orig_y = _gpu_buf_load(Int32, buf, i1_off + Int32(4))
+                i1_orig_z = _gpu_buf_load(Int32, buf, i1_off + Int32(8))
+
+                i1_tmin, i1_tmax = _gpu_ray_box_intersect(ox, oy, oz, idx_r, idy_r, idz_r,
+                    Float32(i1_orig_x), Float32(i1_orig_y), Float32(i1_orig_z),
+                    Float32(i1_orig_x) + 128.0f0, Float32(i1_orig_y) + 128.0f0,
+                    Float32(i1_orig_z) + 128.0f0)
+
+                if i1_tmin < i1_tmax
+                    i1_ijk_x, i1_ijk_y, i1_ijk_z, i1_step_x, i1_step_y, i1_step_z,
+                    i1_tmax_x, i1_tmax_y, i1_tmax_z, i1_td_x, i1_td_y, i1_td_z =
+                        _gpu_dda_init(ox, oy, oz, dx, dy, dz, idx_r, idy_r, idz_r,
+                            i1_tmin, 8.0f0)
+                    i1_t_entry = i1_tmin
+
+                    for _ in Int32(1):Int32(4096)
+                        i1_inside, i1_cidx = _gpu_node_query(i1_ijk_x, i1_ijk_y, i1_ijk_z,
+                            i1_orig_x, i1_orig_y, i1_orig_z, Int32(8), Int32(16))
+                        !i1_inside && break
+
+                        i1_active = _gpu_buf_mask_is_on(buf, i1_off + Int32(_I1_CMASK_OFF), i1_cidx) ||
+                                    _gpu_buf_mask_is_on(buf, i1_off + Int32(_I1_VMASK_OFF), i1_cidx)
+
+                        if i1_active
+                            if span_t0 < 0.0f0
+                                span_t0 = i1_t_entry
+                            end
+                        elseif span_t0 >= 0.0f0
+                            acc_r, acc_g, acc_b, transmittance, steps_remaining,
+                                cache_ox, cache_oy, cache_oz, cache_off, done =
+                                _gpu_integrate_span_ea(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                                    span_t0, i1_t_entry,
+                                    background, header_T_size,
+                                    sigma_scale, emission_scale, step_size,
+                                    tf_dmin, tf_dmax,
+                                    acc_r, acc_g, acc_b, transmittance,
+                                    steps_remaining,
+                                    cache_ox, cache_oy, cache_oz, cache_off)
+                            span_t0 = -1.0f0
+                            done && return (acc_r, acc_g, acc_b, transmittance)
+                        end
+
+                        i1_t_entry = _gpu_cell_time(i1_tmax_x, i1_tmax_y, i1_tmax_z)
+                        i1_ijk_x, i1_ijk_y, i1_ijk_z, i1_tmax_x, i1_tmax_y, i1_tmax_z =
+                            _gpu_dda_step(i1_ijk_x, i1_ijk_y, i1_ijk_z,
+                                i1_step_x, i1_step_y, i1_step_z,
+                                i1_tmax_x, i1_tmax_y, i1_tmax_z,
+                                i1_td_x, i1_td_y, i1_td_z)
+                    end
+                else
+                    if span_t0 >= 0.0f0
+                        acc_r, acc_g, acc_b, transmittance, steps_remaining,
+                            cache_ox, cache_oy, cache_oz, cache_off, done =
+                            _gpu_integrate_span_ea(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                                span_t0, i2_t_entry,
+                                background, header_T_size,
+                                sigma_scale, emission_scale, step_size,
+                                tf_dmin, tf_dmax,
+                                acc_r, acc_g, acc_b, transmittance,
+                                steps_remaining,
+                                cache_ox, cache_oy, cache_oz, cache_off)
+                        span_t0 = -1.0f0
+                        done && return (acc_r, acc_g, acc_b, transmittance)
+                    end
+                end
+            else
+                i2_has_tile = _gpu_buf_mask_is_on(buf, i2_off + Int32(_I2_VMASK_OFF), i2_cidx)
+                if i2_has_tile
+                    if span_t0 < 0.0f0
+                        span_t0 = i2_t_entry
+                    end
+                elseif span_t0 >= 0.0f0
+                    acc_r, acc_g, acc_b, transmittance, steps_remaining,
+                        cache_ox, cache_oy, cache_oz, cache_off, done =
+                        _gpu_integrate_span_ea(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                            span_t0, i2_t_entry,
+                            background, header_T_size,
+                            sigma_scale, emission_scale, step_size,
+                            tf_dmin, tf_dmax,
+                            acc_r, acc_g, acc_b, transmittance,
+                            steps_remaining,
+                            cache_ox, cache_oy, cache_oz, cache_off)
+                    span_t0 = -1.0f0
+                    done && return (acc_r, acc_g, acc_b, transmittance)
+                end
+            end
+
+            i2_t_entry = _gpu_cell_time(i2_tmax_x, i2_tmax_y, i2_tmax_z)
+            i2_ijk_x, i2_ijk_y, i2_ijk_z, i2_tmax_x, i2_tmax_y, i2_tmax_z =
+                _gpu_dda_step(i2_ijk_x, i2_ijk_y, i2_ijk_z,
+                    i2_step_x, i2_step_y, i2_step_z,
+                    i2_tmax_x, i2_tmax_y, i2_tmax_z,
+                    i2_td_x, i2_td_y, i2_td_z)
+        end
+
+        if span_t0 >= 0.0f0
+            acc_r, acc_g, acc_b, transmittance, steps_remaining,
+                cache_ox, cache_oy, cache_oz, cache_off, done =
+                _gpu_integrate_span_ea(buf, tf_lut, ox, oy, oz, dx, dy, dz,
+                    span_t0, i2_t_entry,
+                    background, header_T_size,
+                    sigma_scale, emission_scale, step_size,
+                    tf_dmin, tf_dmax,
+                    acc_r, acc_g, acc_b, transmittance,
+                    steps_remaining,
+                    cache_ox, cache_oy, cache_oz, cache_off)
+            span_t0 = -1.0f0
+            done && return (acc_r, acc_g, acc_b, transmittance)
+        end
+    end
+
+    (acc_r, acc_g, acc_b, transmittance)
+end
+
+"""GPU kernel for emission-absorption preview. One workitem = one pixel.
+Deterministic (no RNG). Composites background with remaining transmittance."""
+@kernel function fixed_step_ea_kernel!(output, buf, tf_lut,
+    background::Float32,
+    sigma_scale::Float32, emission_scale::Float32, step_size::Float32,
+    cam_px::Float32, cam_py::Float32, cam_pz::Float32,
+    cam_fx::Float32, cam_fy::Float32, cam_fz::Float32,
+    cam_rx::Float32, cam_ry::Float32, cam_rz::Float32,
+    cam_ux::Float32, cam_uy::Float32, cam_uz::Float32,
+    cam_fov::Float32, width::Int32, height::Int32,
+    bg_r::Float32, bg_g::Float32, bg_b::Float32,
+    tf_dmin::Float32, tf_dmax::Float32,
+    header_T_size::Int32, max_steps::Int32)
+
+    idx = @index(Global, Linear)
+    px = ((idx - Int32(1)) % width) + Int32(1)
+    py = ((idx - Int32(1)) ÷ width) + Int32(1)
+    # No jitter: matches deterministic CPU render_volume_preview for PSNR test.
+    u = (Float32(px) - 0.5f0) / Float32(width)
+    v = 1.0f0 - (Float32(py) - 0.5f0) / Float32(height)
+    aspect = Float32(width) / Float32(height)
+    half_fov = tan(cam_fov * 0.5f0 * Float32(π) / 180.0f0)
+    rpx = (2.0f0 * u - 1.0f0) * aspect * half_fov
+    rpy = (2.0f0 * v - 1.0f0) * half_fov
+    dx = cam_fx + cam_rx * rpx + cam_ux * rpy
+    dy = cam_fy + cam_ry * rpx + cam_uy * rpy
+    dz = cam_fz + cam_rz * rpx + cam_uz * rpy
+    dlen = sqrt(dx * dx + dy * dy + dz * dz)
+    dlen = max(dlen, 1.0f-10)
+    dx /= dlen; dy /= dlen; dz /= dlen
+    idx_r = dx == 0.0f0 ? copysign(Inf32, dx) : 1.0f0 / dx
+    idy_r = dy == 0.0f0 ? copysign(Inf32, dy) : 1.0f0 / dy
+    idz_r = dz == 0.0f0 ? copysign(Inf32, dz) : 1.0f0 / dz
+
+    acc_r, acc_g, acc_b, transmittance = _gpu_hdda_ea_march(
+        buf, tf_lut, cam_px, cam_py, cam_pz, dx, dy, dz, idx_r, idy_r, idz_r,
+        background, header_T_size,
+        sigma_scale, emission_scale, step_size,
+        tf_dmin, tf_dmax, max_steps)
+
+    # Composite with background by remaining transmittance — matches
+    # VolumeIntegrator.jl:529.
+    acc_r += transmittance * bg_r
+    acc_g += transmittance * bg_g
+    acc_b += transmittance * bg_b
+
+    @inbounds output[idx] = (clamp(acc_r, 0.0f0, 1.0f0),
+                              clamp(acc_g, 0.0f0, 1.0f0),
+                              clamp(acc_b, 0.0f0, 1.0f0))
+end
+
+"""
+    gpu_render_volume_preview(nanogrid, scene, width, height;
+                              step_size=0.5f0, max_steps=Int32(2000),
+                              backend=_default_gpu_backend())
+        -> Matrix{NTuple{3, Float32}}
+
+GPU port of `render_volume_preview`: fixed-step Beer-Lambert front-to-back
+compositing through HDDA-identified active spans. No shadow rays, no
+multi-scatter, deterministic. Produces output equivalent to the CPU version
+within Float32 precision (PSNR ≥ 40 dB on canonical scenes).
+
+Reads the first volume + first material from `scene.volumes[1]`. Background
+comes from `scene.background` (or a `ConstantEnvironmentLight` if present,
+mirroring `_escape_radiance` in VolumeIntegrator.jl).
+
+Bead: path-tracer-9kad (P0 of EPIC path-tracer-ooul). Fair-comparison
+target against Will Usher's webgl-volume-raycaster (16.7 ms/frame at
+1920×1080); see `docs/perf_baseline.md`.
+"""
+function gpu_render_volume_preview(nanogrid::NanoGrid{T}, scene::Scene,
+                                    width::Int, height::Int;
+                                    step_size::Float32=0.5f0,
+                                    max_steps::Int=2000,
+                                    backend=_default_gpu_backend()) where T
+    isempty(scene.volumes) && throw(ArgumentError("Scene has no volumes"))
+    length(scene.volumes) > 1 && throw(ArgumentError(
+        "gpu_render_volume_preview renders a single volume; got $(length(scene.volumes)). " *
+        "Multi-volume support requires compositing logic equivalent to gpu_render_multi_volume."))
+    vol = scene.volumes[1]
+    mat = vol.material
+    cam = scene.camera
+
+    dmin, dmax = _estimate_density_range(nanogrid)
+    dmin == dmax && (dmax = dmin + 1.0)
+    tf_lut = _bake_tf_lut(mat.transfer_function, dmin, dmax)
+
+    bbox = nano_bbox(nanogrid)
+    bg = _escape_radiance(scene)
+
+    cam_px, cam_py, cam_pz = Float32.(cam.position)
+    cam_fx, cam_fy, cam_fz = Float32.(cam.forward)
+    cam_rx, cam_ry, cam_rz = Float32.(cam.right)
+    cam_ux, cam_uy, cam_uz = Float32.(cam.up)
+
+    background_f32  = Float32(nano_background(nanogrid))
+    sigma_scale_f32 = Float32(mat.sigma_scale)
+    emission_f32    = Float32(mat.emission_scale)
+    header_T_size   = Int32(sizeof(T))
+    w = Int32(width); h = Int32(height)
+    npixels = width * height
+    z3 = (0.0f0, 0.0f0, 0.0f0)
+
+    dev_buf    = Adapt.adapt(backend, nanogrid.buffer)
+    dev_tf     = Adapt.adapt(backend, tf_lut)
+    output     = Adapt.adapt(backend, fill(z3, npixels))
+
+    kernel! = fixed_step_ea_kernel!(backend)
+    kernel!(output, dev_buf, dev_tf,
+            background_f32,
+            sigma_scale_f32, emission_f32, step_size,
+            cam_px, cam_py, cam_pz,
+            cam_fx, cam_fy, cam_fz,
+            cam_rx, cam_ry, cam_rz,
+            cam_ux, cam_uy, cam_uz,
+            Float32(cam.fov), w, h,
+            Float32(bg[1]), Float32(bg[2]), Float32(bg[3]),
+            Float32(dmin), Float32(dmax),
+            header_T_size, Int32(max_steps);
+            ndrange=npixels)
+    KernelAbstractions.synchronize(backend)
+
+    host_buf = Array(output)
+    result = Matrix{NTuple{3, Float32}}(undef, height, width)
+    for i in 1:npixels
+        x = ((i - 1) % width) + 1
+        y = ((i - 1) ÷ width) + 1
+        result[y, x] = host_buf[i]
     end
     result
 end

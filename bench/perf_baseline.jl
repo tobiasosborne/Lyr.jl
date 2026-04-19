@@ -136,6 +136,7 @@ function bench_scene(name::String, build_fn;
                                   profile=true)
 
     (
+        mode        = "stochastic",
         name        = name,
         source      = string(path),
         active_vox  = active,
@@ -148,6 +149,54 @@ function bench_scene(name::String, build_fn;
         accum_ms    = timing.accum_ms,
         readback_ms = timing.readback_ms,
         total_ms    = timing.total_ms,
+    )
+end
+
+"""
+    bench_preview_scene(name, build_fn; width, height, warmup_res, backend, step_size)
+
+Time `gpu_render_volume_preview` — the WebGL-fair comparison mode (fixed-step
+EA, no shadows, no multi-scatter). Bead: path-tracer-9kad. Per-phase breakdown
+is not yet wired into the preview kernel; total_ms is measured with `@elapsed`
+bracketed by `KernelAbstractions.synchronize` for honest wall-clock time.
+"""
+function bench_preview_scene(name::String, build_fn;
+                             width::Int, height::Int,
+                             warmup_res::Int=32,
+                             backend=Lyr._default_gpu_backend(),
+                             step_size::Float32=0.5f0)
+    built = build_fn()
+    built === nothing && return nothing
+
+    (; grid, nano, scene, path) = built
+    active = Lyr.active_voxel_count(grid.tree)
+    buf_bytes = length(nano.buffer)
+
+    gpu_render_volume_preview(nano, scene, warmup_res, warmup_res;
+                              step_size=step_size, backend=backend)
+
+    GC.gc()
+    KernelAbstractions.synchronize(backend)
+    t0 = time_ns()
+    gpu_render_volume_preview(nano, scene, width, height;
+                              step_size=step_size, backend=backend)
+    KernelAbstractions.synchronize(backend)
+    total_ms = (time_ns() - t0) / 1_000_000.0
+
+    (
+        mode        = "preview",
+        name        = name,
+        source      = string(path),
+        active_vox  = active,
+        buffer_kb   = round(buf_bytes / 1024; digits=1),
+        width       = width,
+        height      = height,
+        spp         = 1,
+        upload_ms   = NaN,  # not instrumented on the preview kernel yet
+        kernel_ms   = NaN,
+        accum_ms    = NaN,
+        readback_ms = NaN,
+        total_ms    = total_ms,
     )
 end
 
@@ -190,7 +239,8 @@ Run the A2 baseline. Default config is the one the epic targets.
 """
 function run_baseline(; width::Int=800, height::Int=600, spp::Int=8,
                         warmup_res::Int=32,
-                        output_path=nothing)
+                        output_path=nothing,
+                        preview_only::Bool=false)
 
     scenes = [
         ("smoke.vdb (sparse fog)",         build_smoke_scene),
@@ -201,12 +251,29 @@ function run_baseline(; width::Int=800, height::Int=600, spp::Int=8,
     backend = Lyr._default_gpu_backend()
     records = NamedTuple[]
     skipped = String[]
+
+    if !preview_only
+        for (name, fn) in scenes
+            rec = bench_scene(name, fn;
+                              width=width, height=height, spp=spp,
+                              warmup_res=warmup_res, backend=backend)
+            if rec === nothing
+                push!(skipped, name)
+            else
+                push!(records, rec)
+            end
+        end
+    end
+
+    # Preview-path measurements at the same resolution. This is the
+    # WebGL-fair comparison mode (bead path-tracer-9kad; see
+    # docs/perf_baseline.md §2).
     for (name, fn) in scenes
-        rec = bench_scene(name, fn;
-                          width=width, height=height, spp=spp,
-                          warmup_res=warmup_res, backend=backend)
+        rec = bench_preview_scene(name, fn;
+                                   width=width, height=height,
+                                   warmup_res=warmup_res, backend=backend)
         if rec === nothing
-            push!(skipped, name)
+            preview_only && push!(skipped, name)
         else
             push!(records, rec)
         end
@@ -248,17 +315,19 @@ function print_summary(io::IO, records, output_path)
         println(io, "(no scenes rendered — fixtures missing)")
         return
     end
-    @printf(io, "%-36s %9s %9s %9s %9s %9s\n",
-            "Scene", "upload", "kernel", "accum", "readback", "total")
-    @printf(io, "%-36s %9s %9s %9s %9s %9s\n",
-            "", "(ms)", "(ms)", "(ms)", "(ms)", "(ms)")
-    println(io, "-" ^ 72)
+    @printf(io, "%-12s %-36s %9s %9s %9s %9s %9s\n",
+            "mode", "scene", "upload", "kernel", "accum", "readback", "total")
+    @printf(io, "%-12s %-36s %9s %9s %9s %9s %9s\n",
+            "", "", "(ms)", "(ms)", "(ms)", "(ms)", "(ms)")
+    println(io, "-" ^ 84)
+    _fmt(x::Real) = isnan(x) ? "     -   " : @sprintf("%9.2f", x)
     for r in records
-        @printf(io, "%-36s %9.2f %9.2f %9.2f %9.2f %9.2f\n",
-                r.name, r.upload_ms, r.kernel_ms, r.accum_ms,
-                r.readback_ms, r.total_ms)
+        @printf(io, "%-12s %-36s %s %s %s %s %s\n",
+                r.mode, r.name,
+                _fmt(r.upload_ms), _fmt(r.kernel_ms), _fmt(r.accum_ms),
+                _fmt(r.readback_ms), _fmt(r.total_ms))
     end
-    println(io, "-" ^ 72)
+    println(io, "-" ^ 84)
 end
 
 # ----------------------------------------------------------------------------
@@ -273,6 +342,18 @@ function main(args=ARGS)
     records, outpath = run_baseline(; width=width, height=height, spp=spp,
                                       warmup_res=warmup)
     print_summary(stdout, records, outpath)
+
+    # Also emit a preview-only run at 1920×1080 — the canonical WebGL-fair
+    # resolution (bead path-tracer-9kad; docs/perf_baseline.md §2.2).
+    if !("--smoke" in args)
+        outdir = joinpath(@__DIR__, "results")
+        out1080 = joinpath(outdir, Dates.format(today(), "yyyy-mm-dd") * "-preview-1080p.json")
+        println("\n--- 1920×1080 preview-only (WebGL-fair target 16.7 ms) ---\n")
+        records_1080, path_1080 = run_baseline(;
+            width=1920, height=1080, spp=1, warmup_res=warmup,
+            output_path=out1080, preview_only=true)
+        print_summary(stdout, records_1080, path_1080)
+    end
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

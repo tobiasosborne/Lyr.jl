@@ -30,14 +30,18 @@ const _BENCH_SCRIPT = joinpath(@__DIR__, "..", "bench", "perf_baseline.jl")
     @test outpath == tmp
     @test isfile(outpath)
 
-    @testset "3 canonical scenes all rendered" begin
-        # All three fixtures are present in this repo (smoke.vdb,
-        # bunny_cloud.vdb) or synthetic (level_set_sphere) — no skips expected.
-        @test length(records) == 3
+    @testset "3 canonical scenes × 2 modes (stochastic + preview)" begin
+        # Each of the three fixtures rendered once via gpu_render_volume
+        # (stochastic, 4 phases) and once via gpu_render_volume_preview
+        # (P0 — WebGL-fair mode, total_ms only).
+        @test length(records) == 6
+        @test count(r -> r.mode == "stochastic", records) == 3
+        @test count(r -> r.mode == "preview", records) == 3
     end
 
-    @testset "each record has all four A1 phases + total" begin
+    @testset "stochastic records have all four A1 phases + total" begin
         for rec in records
+            rec.mode == "stochastic" || continue
             for field in (:upload_ms, :kernel_ms, :accum_ms, :readback_ms, :total_ms)
                 @test hasproperty(rec, field)
                 @test getproperty(rec, field) isa Real
@@ -46,6 +50,16 @@ const _BENCH_SCRIPT = joinpath(@__DIR__, "..", "bench", "perf_baseline.jl")
             @test hasproperty(rec, :name)
             @test hasproperty(rec, :active_vox)
             @test hasproperty(rec, :buffer_kb)
+        end
+    end
+
+    @testset "preview records have total_ms (phases are NaN placeholders)" begin
+        for rec in records
+            rec.mode == "preview" || continue
+            @test hasproperty(rec, :total_ms)
+            @test rec.total_ms isa Real
+            @test rec.total_ms >= 0
+            @test rec.spp == 1
         end
     end
 

@@ -471,7 +471,25 @@ Increasing `step_size` speeds up rendering at the cost of accuracy;
 decreasing it improves quality but increases render time linearly.
 """
 function render_volume_preview(scene::Scene, width::Int, height::Int;
-                               step_size::Float64=0.5, max_steps::Int=2000)
+                               step_size::Float64=0.5, max_steps::Int=2000,
+                               backend::Symbol=:cpu)
+    if backend === :gpu || backend === :auto
+        if gpu_available()
+            nanogrid = scene.volumes[1].nanogrid
+            nanogrid === nothing && throw(ArgumentError(
+                "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
+            gpu_img = gpu_render_volume_preview(nanogrid, scene, width, height;
+                                                 step_size=Float32(step_size),
+                                                 max_steps=max_steps)
+            return Matrix{NTuple{3, Float64}}(
+                map(p -> (Float64(p[1]), Float64(p[2]), Float64(p[3])), gpu_img))
+        elseif backend === :gpu
+            throw(ArgumentError(
+                "GPU backend requested but no GPU available. Load CUDA.jl first: `using CUDA`"))
+        end
+        # :auto fallback to CPU
+    end
+
     for vol in scene.volumes
         vol.nanogrid === nothing && throw(ArgumentError(
             "VolumeEntry has no NanoGrid — call build_nanogrid(grid.tree) before rendering"))
