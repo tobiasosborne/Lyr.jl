@@ -1428,6 +1428,35 @@ function _bake_tf_lut(tf, density_min::Float64, density_max::Float64)::Vector{Fl
 end
 
 """
+    _pack_lights(lights) -> Vector{Float32}
+
+Pack a tuple/vector of lights into the flat 7-Float32-per-light layout the GPU
+kernels read: `[type, x, y, z, r, g, b]` per light. Type code: `0` directional,
+`1` point. `ConstantEnvironmentLight`s are skipped — they contribute via ray
+escape, not direct lighting. If no packable lights remain, a single default
+white directional light is substituted so downstream kernels always have at
+least one light to evaluate.
+"""
+function _pack_lights(lights)::Vector{Float32}
+    light_data = Float32[]
+    for light in lights
+        if light isa DirectionalLight
+            push!(light_data, 0.0f0)
+            push!(light_data, Float32.(light.direction)...)
+            push!(light_data, Float32.(light.intensity)...)
+        elseif light isa PointLight
+            push!(light_data, 1.0f0)
+            push!(light_data, Float32.(light.position)...)
+            push!(light_data, Float32.(light.intensity)...)
+        end
+    end
+    if isempty(light_data)
+        light_data = Float32[0.0, 0.577, 0.577, 0.577, 1.0, 1.0, 1.0]
+    end
+    light_data
+end
+
+"""
     _estimate_density_range(nanogrid::NanoGrid{T}) -> Tuple{Float64, Float64}
 
 Estimate the density range by sampling leaf values.
@@ -1454,6 +1483,40 @@ function _estimate_density_range(nanogrid::NanoGrid{T})::Tuple{Float64, Float64}
     dmin = isfinite(dmin) ? dmin : 0.0
     dmax = isfinite(dmax) ? dmax : 1.0
     (dmin, dmax)
+end
+
+"""
+    build_gpu_nanogrid(nanogrid::NanoGrid, scene::Scene;
+                       backend=_default_gpu_backend()) -> GPUNanoGrid
+
+Bake the per-render device-side state once and return a reusable
+`GPUNanoGrid`. This is the constructor referenced by the C1 struct: it packs
+lights into the 7-Float32 layout, bakes the transfer function into a 256-entry
+RGBA LUT, and `Adapt.adapt`s the NanoVDB byte buffer + LUT + lights onto the
+target backend.
+
+The returned handle can be passed to subsequent render calls (C3) to skip the
+per-call H2D upload that currently dominates short renders for medium grids
+(see `docs/stocktake/08_perf_vs_webgl.md` §4.2). Memory ownership stays with
+the underlying device-array fields — when the `GPUNanoGrid` goes out of scope,
+each `CuArray`'s own finalizer releases its allocation; no extra finalizer
+machinery is required because the struct itself holds no raw resources.
+
+Uses the first volume in the scene to source the transfer function and density
+range. Multi-volume scenes need one `GPUNanoGrid` per volume.
+
+Ref: bead path-tracer-htby (C2), EPIC path-tracer-ooul.
+"""
+function build_gpu_nanogrid(nanogrid::NanoGrid, scene::Scene;
+                              backend=_default_gpu_backend())
+    mat = scene.volumes[1].material
+    dmin, dmax = _estimate_density_range(nanogrid)
+    tf_lut_host    = _bake_tf_lut(mat.transfer_function, dmin, dmax)
+    light_data_host = _pack_lights(scene.lights)
+    GPUNanoGrid(backend,
+                Adapt.adapt(backend, nanogrid.buffer),
+                Adapt.adapt(backend, tf_lut_host),
+                Adapt.adapt(backend, light_data_host))
 end
 
 """
@@ -1516,26 +1579,10 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     cam_ux, cam_uy, cam_uz = Float32.(cam.up)
     cam_fov = Float32(cam.fov)
 
-    # Pack lights into flat buffer: 7 Float32 per light [type, x, y, z, r, g, b]
-    light_data = Float32[]
-    for light in scene.lights
-        if light isa DirectionalLight
-            push!(light_data, 0.0f0)  # type = directional
-            push!(light_data, Float32.(light.direction)...)
-            push!(light_data, Float32.(light.intensity)...)
-        elseif light isa PointLight
-            push!(light_data, 1.0f0)  # type = point
-            push!(light_data, Float32.(light.position)...)
-            push!(light_data, Float32.(light.intensity)...)
-        end
-        # Skip ConstantEnvironmentLight — contributes via ray escape, not direct lighting
-    end
+    # Pack lights into flat buffer: 7 Float32 per light [type, x, y, z, r, g, b].
+    # `_pack_lights` substitutes a default directional if no packable lights remain.
+    light_data = _pack_lights(scene.lights)
     n_lights = Int32(length(light_data) ÷ 7)
-    if n_lights == Int32(0)
-        # Fallback: default directional light
-        light_data = Float32[0.0, 0.577, 0.577, 0.577, 1.0, 1.0, 1.0]
-        n_lights = Int32(1)
-    end
 
     background_f32 = Float32(nano_background(nanogrid))
     sigma_maj = Float32(mat.sigma_scale)

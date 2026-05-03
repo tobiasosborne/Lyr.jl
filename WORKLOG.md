@@ -7,6 +7,50 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 
 ---
 
+## 2026-05-03 — Session: C2 build_gpu_nanogrid (cache constructor)
+
+**Stop reason:** C2 green, reviewer GREEN-light, all regression tests pass. Winding up at user request.
+
+### What shipped
+
+| Bead | What | Commit |
+|------|------|--------|
+| `path-tracer-htby` (C2) | `build_gpu_nanogrid(nano, scene; backend) -> GPUNanoGrid` constructor: bakes TF LUT, packs lights via new `_pack_lights` helper, `Adapt.adapt`s all three to backend. 24 RED→GREEN tests + CUDA 100-cycle leak test. | (this commit) |
+| `path-tracer-9syk` (filed, P2) | Follow-up: cache `(dmin, dmax)` on the struct so C3 doesn't repay `_estimate_density_range` (host-side leaf scan) per render. Discovered in review. | n/a |
+
+### Key decisions and gotchas
+
+1. **No explicit `finalizer` — relied on `CuArray` inner-field finalizers.** The C1 test asserts `!ismutabletype(GPUNanoGrid)`, foreclosing on `finalizer(f, g)` for the struct itself. Each `CuArray` field has its own finalizer; when the struct goes out of scope, GC drops references and the inner finalizers free VRAM. The bead description mentioned `CUDA.unsafe_free!`, but that's the deterministic-release escape hatch — not strictly needed for the leak test. The 100-cycle CUDA test passes on RTX 3090 with `GC.gc(); CUDA.reclaim()` between phases. Deferred opt-in `release!(g)` to a future bead.
+
+2. **Extracted `_pack_lights(lights) -> Vector{Float32}` from `gpu_render_volume`'s inline code.** Byte-for-byte equivalent: same type codes (0=directional, 1=point), same Float32 coercion, same `ConstantEnvironmentLight` skip rule, same fallback default `[0.0, 0.577, 0.577, 0.577, 1.0, 1.0, 1.0]`. Reviewer verified line-by-line. The refactor in `gpu_render_volume` collapses 17 LOC of inline packing to one call.
+
+3. **Tightened the leak test threshold.** First draft used a tiny `radius=2 voxel=1` sphere whose nanovdb buffer was ~30 KB, so `4 × cycle_bytes ≈ 120 KB` lost to the `8 MB` slop floor — the floor would mask `tf_lut`-only leaks (4 KB × 100 = 400 KB). Reviewer flagged it; switched to `radius=20 voxel=0.5` (~1 MB buffer) and dropped the slop to `max(2 MB, 4× cycle)`. Now 100 cycles of any real per-cycle leak ≥ 100 MB, well above the threshold.
+
+4. **HANDOFF.md C2 description called out a `CuTextureArray` field that is NOT in the C1 struct.** The C1 deliverable was `GPUNanoGrid{B,BUF,TF,L}` — backend, nanovdb buffer, tf_lut, lights. CuTextureArray caching for the E2 path is separate (`_gpu_preview_texture_try`). The HANDOFF wording will need a small correction; left as-is for now since this session only shipped C2.
+
+5. **Cache is incomplete for C3.** `gpu_render_volume` currently calls `_estimate_density_range` on every entry (host-side leaf scan, ~1 ms/MB of leaf data). The cache as built doesn't memoize `(dmin, dmax)`; C3 will either repay this scan per render or thread the values through a separate kwarg. Filed `path-tracer-9syk` as a P2 follow-up before C3 starts.
+
+### Current ready queue (epic perspective)
+
+```
+  bd ready
+  ○ path-tracer-9syk  P2   C2 follow-up: cache (dmin,dmax) on GPUNanoGrid
+  ○ path-tracer-hk1f  P1   A3: Record baseline perf numbers in docs/perf_baseline.md
+  ○ path-tracer-mmf2  P2   B1: Add quality=:preview/:production kwarg
+  ○ path-tracer-vs5y  P2   D1: Research KA/CUDA kernel-internal accumulation
+  ○ path-tracer-acxp  P3   Float32 HDDA grazing-ray robustness
+```
+
+C3 (`path-tracer-20xa`: `gpu_render_volume(::GPUNanoGrid, scene; ...)` overload) is the natural critical-path next pickup — but consider taking `path-tracer-9syk` first (cache dmin/dmax) so C3 lands clean.
+
+### Recommended next pickup
+
+- **`path-tracer-9syk` then `path-tracer-20xa` (C3)** — extend GPUNanoGrid with dmin/dmax, then ship the render overload that consumes the cache. This is what closes the WebGL gap on smoke.vdb (currently 30 ms post-E2; the per-call upload is ~5 ms, the leaf scan is ~1 ms, both should drop near zero with the cache).
+- `path-tracer-hk1f` (A3 docs) is independent — write up `docs/perf_baseline.md` with the A2 baseline + E2 numbers.
+- B1, D1, E1 follow-ups remain in the queue.
+
+---
+
 ## 2026-04-19 — Session (evening): P0 preview port + E2 CuTexture + follow-up beads
 
 **Stop reason:** E2 green and pushed. Epic critical path now runs: **C2 `htby`** next (cache `GPUNanoGrid` to amortise the texture densification that eats the CuTexture win on small grids).

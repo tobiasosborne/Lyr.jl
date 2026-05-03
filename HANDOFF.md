@@ -26,7 +26,13 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Sessions (2026-04-18 / 2026-04-19) -- WebGL perf epic: stocktake → E2 shipped
+## Latest Session (2026-05-03) — C2 build_gpu_nanogrid
+
+**Status**: GREEN. C2 (`path-tracer-htby`) shipped: `build_gpu_nanogrid(nano, scene; backend) -> GPUNanoGrid` packs lights, bakes TF LUT, and adapts all device-resident state to the backend in one place. The handle is the foundation for C3 (`path-tracer-20xa`), the render overload that skips the per-call H2D upload that currently dominates short renders. 24 RED→GREEN tests + CUDA 100-cycle leak test (1 MB × 100 = 100 MB minimum if leaking; threshold 4 MB). Reviewer GREEN-light, no blockers. No regression on test_gpu_cuda (318/318), test_gpu_preview_texture E2 (4/4, 12.6× speedup preserved), test_gpu (382/382 + 3 pre-existing Julia 1.12 errors). One follow-up filed: `path-tracer-9syk` — cache `(dmin, dmax)` on the struct so C3 doesn't repay `_estimate_density_range` per render.
+
+**Critical path next:** `path-tracer-9syk` (cache density range) → `path-tracer-20xa` (C3 render overload). C3 is what actually closes the WebGL gap on smoke.vdb.
+
+## Previous Sessions (2026-04-18 / 2026-04-19) -- WebGL perf epic: stocktake → E2 shipped
 
 **Status**: GREEN. Filed EPIC `path-tracer-ooul` (21 sub-beads) to close the WebGL perf gap. Shipped 5 beads so far; CuTexture preview path (E2) running at 4.47× vs NanoVDB on 128³ dense acceptance test. Smoke.vdb 1080p preview down from 54 ms pre-epic to 30 ms post-E2 (WebGL target 16.7 ms → now 1.8× away, was 3.2×).
 
