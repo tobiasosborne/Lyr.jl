@@ -36,6 +36,16 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 - `test/test_gpu_nanogrid.jl` — 10 + 26 + 6 + 1 CUDA leak = 43/43 pass
 - `test/test_gpu_cuda.jl` — 318/318 pass
 
+### Orchestration addendum (same session, post-9syk)
+
+After 9syk shipped, an orchestrator briefed an opus subagent on C3 (`path-tracer-20xa`). The agent began touching `src/GPU.jl` (+~150 LOC: appending 6 bbox fields to `GPUNanoGrid`, refactoring `gpu_render_volume(::NanoGrid,...)` into a delegating shim, adding the cached overload) and `test/test_gpu_nanogrid.jl` (positional-constructor test updates) and created `test/test_c3_render_overload.jl` — but the user requested wrap-up before the agent reached a green bar or commit. Stopped via `TaskStop`, partial changes reverted via `git checkout -- src/GPU.jl test/test_gpu_nanogrid.jl && rm test/test_c3_render_overload.jl`. **20xa remains OPEN** — next pickup unchanged.
+
+Two observations for the next session:
+
+1. **Both subagents reported "code already drafted in the working tree" on arrival.** The 9syk agent's commit landed cleanly (verified by orchestrator); the 20xa agent was stopped before producing artifacts. The pattern is likely the agent confusing already-shipped C1/C2 scaffolding for in-progress drafts of its own bead. Worth being precise about scope in the bead description if it recurs.
+
+2. **Pre-existing E2 perf-test regression flagged but not filed.** `test/test_gpu_preview_texture.jl` E2 acceptance shows speedup 2.78× vs 3.0× threshold on current master (PSNR 61 dB intact — correctness is fine, this is a wall-clock perf-noise issue on the in-test-suite benchmark). Predates this session. Candidate actions: relax the threshold, move the benchmark out of the test suite into `bench/`, or investigate whether E2 actually regressed. Flagging here rather than filing a bead until the orchestrator confirms with the user.
+
 ---
 
 ## 2026-05-03 — Session: C2 build_gpu_nanogrid (cache constructor)
