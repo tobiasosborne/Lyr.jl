@@ -68,28 +68,42 @@ _gpu_info(backend) = "GPU backend: $(typeof(backend))"
 
 Device-side cache of everything `gpu_render_volume` needs resident on the GPU
 across render calls: the NanoVDB byte buffer, the pre-baked transfer-function
-LUT, and the packed lights buffer. Callers build one per (grid, material,
-lights) combination and reuse it, eliminating the per-call `Adapt.adapt(...)`
-H2D transfer (GPU.jl — the loop around the `spp` kernel launches).
+LUT, the packed lights buffer, and the density range used to bake the LUT.
+Callers build one per (grid, material, lights) combination and reuse it,
+eliminating the per-call `Adapt.adapt(...)` H2D transfer (GPU.jl — the loop
+around the `spp` kernel launches) AND the per-call host-side leaf scan in
+`_estimate_density_range` (~1 ms/MB of leaf data on smoke.vdb).
 
 Fully parametric so the compiler sees the concrete device-array types; a
 `CuArray` buffer gives different specialization than an on-host `Array`
-under the CPU backend.
+under the CPU backend. `dmin`/`dmax` are concrete `Float32` scalars — no
+extra type parameter is needed for them.
 
 The constructor that reads scene/material/nanogrid and populates the fields
-lives in C2 (`path-tracer-htby`). This type defines only the shape.
+lives in C2 (`path-tracer-htby`); `dmin`/`dmax` baking added in
+`path-tracer-9syk`. This type defines only the shape.
 
 # Fields
-- `backend::B`   — the `KernelAbstractions.Backend` these buffers live on
-- `buffer::BUF`  — device NanoVDB byte buffer (e.g. `CuArray{UInt8}`)
-- `tf_lut::TF`   — device 256-entry RGBA transfer-function LUT
-- `lights::L`    — device packed lights buffer (7 Float32 per light)
+- `backend::B`     — the `KernelAbstractions.Backend` these buffers live on
+- `buffer::BUF`    — device NanoVDB byte buffer (e.g. `CuArray{UInt8}`)
+- `tf_lut::TF`     — device 256-entry RGBA transfer-function LUT
+- `lights::L`      — device packed lights buffer (7 Float32 per light)
+- `dmin::Float32`  — density range minimum used to bake `tf_lut` (cached so
+                     C3 doesn't repeat `_estimate_density_range` per render)
+- `dmax::Float32`  — density range maximum (matching `dmin`)
+
+# Ref
+- bead `path-tracer-mx1u` (C1, struct shape)
+- bead `path-tracer-htby` (C2, constructor)
+- bead `path-tracer-9syk` (this revision: `dmin`/`dmax` baked in)
 """
 struct GPUNanoGrid{B, BUF, TF, L}
     backend::B
     buffer::BUF
     tf_lut::TF
     lights::L
+    dmin::Float32
+    dmax::Float32
 end
 
 # ============================================================================
@@ -1505,7 +1519,13 @@ machinery is required because the struct itself holds no raw resources.
 Uses the first volume in the scene to source the transfer function and density
 range. Multi-volume scenes need one `GPUNanoGrid` per volume.
 
-Ref: bead path-tracer-htby (C2), EPIC path-tracer-ooul.
+The `(dmin, dmax)` pair returned by `_estimate_density_range` (a host-side
+leaf scan, ~1 ms/MB) is baked into the returned struct as `Float32` scalars
+so the C3 render overload can skip the scan entirely (bead
+`path-tracer-9syk`).
+
+Ref: bead path-tracer-htby (C2) + path-tracer-9syk (cache dmin/dmax),
+     EPIC path-tracer-ooul.
 """
 function build_gpu_nanogrid(nanogrid::NanoGrid, scene::Scene;
                               backend=_default_gpu_backend())
@@ -1516,7 +1536,9 @@ function build_gpu_nanogrid(nanogrid::NanoGrid, scene::Scene;
     GPUNanoGrid(backend,
                 Adapt.adapt(backend, nanogrid.buffer),
                 Adapt.adapt(backend, tf_lut_host),
-                Adapt.adapt(backend, light_data_host))
+                Adapt.adapt(backend, light_data_host),
+                Float32(dmin),
+                Float32(dmax))
 end
 
 """

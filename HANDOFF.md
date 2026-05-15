@@ -26,11 +26,15 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-05-03) — C2 build_gpu_nanogrid
+## Latest Session (2026-05-15) — 9syk cache (dmin, dmax) on GPUNanoGrid
+
+**Status**: GREEN. 9syk shipped: `GPUNanoGrid` gains `dmin::Float32, dmax::Float32` fields, baked by `build_gpu_nanogrid` from the same `_estimate_density_range` call that already feeds the TF LUT. C3 (`path-tracer-20xa`) can now skip the per-render host-side leaf scan (~1 ms/MB) entirely. 6 new green tests; existing C1 positional constructor test updated to pass `dmin/dmax`. `test_gpu_nanogrid.jl` 43/43 (incl. CUDA 100-cycle leak). `test_gpu_cuda.jl` 318/318. No regression.
+
+**Critical path next:** `path-tracer-20xa` (C3 render overload). C3 is what actually closes the WebGL gap on smoke.vdb — replace the `_estimate_density_range` call at `src/GPU.jl:1585` with `nanogrid.dmin, nanogrid.dmax` in the new overload.
+
+## Previous Session (2026-05-03) — C2 build_gpu_nanogrid
 
 **Status**: GREEN. C2 (`path-tracer-htby`) shipped: `build_gpu_nanogrid(nano, scene; backend) -> GPUNanoGrid` packs lights, bakes TF LUT, and adapts all device-resident state to the backend in one place. The handle is the foundation for C3 (`path-tracer-20xa`), the render overload that skips the per-call H2D upload that currently dominates short renders. 24 RED→GREEN tests + CUDA 100-cycle leak test (1 MB × 100 = 100 MB minimum if leaking; threshold 4 MB). Reviewer GREEN-light, no blockers. No regression on test_gpu_cuda (318/318), test_gpu_preview_texture E2 (4/4, 12.6× speedup preserved), test_gpu (382/382 + 3 pre-existing Julia 1.12 errors). One follow-up filed: `path-tracer-9syk` — cache `(dmin, dmax)` on the struct so C3 doesn't repay `_estimate_density_range` per render.
-
-**Critical path next:** `path-tracer-9syk` (cache density range) → `path-tracer-20xa` (C3 render overload). C3 is what actually closes the WebGL gap on smoke.vdb.
 
 ## Previous Sessions (2026-04-18 / 2026-04-19) -- WebGL perf epic: stocktake → E2 shipped
 

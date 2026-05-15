@@ -7,6 +7,37 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 
 ---
 
+## 2026-05-15 — Session: 9syk cache (dmin, dmax) on GPUNanoGrid
+
+**Stop reason:** 9syk GREEN. Targeted suite + CUDA regression pass. C3 (`path-tracer-20xa`) now unblocked.
+
+### What shipped
+
+| Bead | What | Commit |
+|------|------|--------|
+| `path-tracer-9syk` (C2 follow-up, P2) | Added `dmin::Float32, dmax::Float32` fields to `GPUNanoGrid`. `build_gpu_nanogrid` already computed `(dmin, dmax)` to bake the TF LUT — now it also Float32-casts and stores them on the struct so the upcoming C3 render overload can skip `_estimate_density_range` (host-side leaf scan, ~1 ms/MB of leaf data on smoke.vdb) entirely. 6 new green tests; existing C1 positional constructor test updated. | (this commit) |
+
+### Key decisions and gotchas
+
+1. **Field ordering: append at the end.** `dmin`/`dmax` go after `lights`, not in between. Two positional call-sites exist (`build_gpu_nanogrid` in `src/GPU.jl` and the C1 struct test in `test_gpu_nanogrid.jl`); appending keeps reader intuition that the device buffers come first and the cached scalars after. The C1 test was updated to pass `dmin=0.0f0, dmax=1.0f0`.
+
+2. **No new type parameter for `dmin`/`dmax`.** They're concrete `Float32` scalars — adding a `D` parameter would force every method dispatch to specialize on the same type that's hardcoded anyway. The struct stays `GPUNanoGrid{B,BUF,TF,L}`; the C1 immutability and parametric-shape assertions still hold.
+
+3. **Explicit `Float32` cast in the constructor.** `_estimate_density_range` returns `Tuple{Float64, Float64}` (it accumulates Inf-initialized `Float64`s). The constructor does `Float32(dmin), Float32(dmax)`. Storing Float64 would force the C3 kernel signature to either widen or coerce per-call, defeating the cache. Test `fields are concretely Float32, not Float64` guards against accidental widening.
+
+4. **Pre-existing E2 perf regression (NOT this bead's fault).** `test/test_gpu_preview_texture.jl` E2 acceptance fails on clean master HEAD with 2.78× speedup vs the 3.0× threshold (test passes 3 of 4 subtests; PSNR 61 dB intact). Reproduced on stashed working tree — no relation to 9syk's struct change. Flagged for the user as a potential follow-up bead.
+
+### What's now unblocked
+
+- **`path-tracer-20xa` (C3) — `gpu_render_volume(::GPUNanoGrid, scene; ...)` overload.** The cache now carries everything C3 needs: nanovdb buffer, TF LUT, packed lights, density range. Per-render `_estimate_density_range` call at `src/GPU.jl:1585` can be replaced with `nanogrid.dmin, nanogrid.dmax` in the new overload (legacy CPU-NanoGrid entry point untouched per scope).
+
+### Tests run (all green)
+
+- `test/test_gpu_nanogrid.jl` — 10 + 26 + 6 + 1 CUDA leak = 43/43 pass
+- `test/test_gpu_cuda.jl` — 318/318 pass
+
+---
+
 ## 2026-05-03 — Session: C2 build_gpu_nanogrid (cache constructor)
 
 **Stop reason:** C2 green, reviewer GREEN-light, all regression tests pass. Winding up at user request.
