@@ -97,3 +97,13 @@
 **Rule**: Never use absolute Float32 epsilons that get added to potentially large values. Use relative epsilons that scale with the value's magnitude. This applies to ANY Float32 DDA, ray marcher, or integrator that uses `t + epsilon`.
 
 **Diagnostic approach**: CPU emulation of GPU code (the `_gpu_*` functions are pure Julia, CPU-callable) comparing spans against CPU Float64 reference. This was far more effective than static code analysis — 3 research subagents couldn't find the bug, but the diagnostic found it in seconds.
+
+## Vacuous Render Bit-Identity Test (2026-06-01, C3 / path-tracer-20xa)
+
+**Problem**: The C3 acceptance test asserted `cached == legacy` for a GPU render path, and passed — but the render scene (a `create_level_set_sphere` SDF rendered as fog with `tf_smoke()`) produced an **all-black image**. So `cached == legacy` was `black == black`: a *vacuous* pass that never exercised the real render. A level-set SDF's values are signed distances, not fog densities; through `tf_smoke` they map to ~zero opacity.
+
+**Caught by**: an adversarial reviewer's "what if both sides are background?" nit → added a vacuity guard `@test any(p -> p != (0f0,0f0,0f0), probe)`, which then *failed*, exposing the black render.
+
+**Fix**: swap the render scene to the proven-renderable `smoke.vdb` fog fixture (gated on `isfile`, like `test_gpu_perf_instrumentation.jl`); the guard then passes (76/256 non-background px) and bit-identity is exercised on real pixels.
+
+**Rule**: Any test that asserts two render paths are bit-identical MUST also assert the render is **non-trivial** (some non-background pixel). Equality of two empty/black images proves nothing — it's the same family as the `fjo9` too-weak-test failure. For GPU render tests, use a known-renderable fog scene (`smoke.vdb`), not a level-set SDF sphere (which renders black through a fog TF). Level-set spheres are fine for *build*-only tests (C1/C2/9syk), not *render* tests.
