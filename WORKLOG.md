@@ -7,6 +7,50 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 
 ---
 
+## 2026-06-01 — Session: C3 (20xa) cached `gpu_render_volume(::GPUNanoGrid)` — orchestrated
+
+**Stop reason:** C3 GREEN, committed (`491a335`), pushed. User requested wrap-up. This **completes** the 20xa attempt that the 2026-05-15 session started and reverted (see that session's orchestration addendum — it was stopped before a green bar; this session redid it cleanly end-to-end).
+
+### What shipped
+
+| Bead | What | Commit |
+|------|------|--------|
+| `path-tracer-20xa` (C3, P1) | New `gpu_render_volume(gpunano::GPUNanoGrid, scene, w, h; spp, seed, hdda, max_bounces, profile)` renders from pre-loaded device buffers (skips per-call H2D upload + host density scan). Legacy `gpu_render_volume(::NanoGrid,...)` becomes a thin **build-then-delegate** wrapper — render logic lives once. `GPUNanoGrid` extended (9syk-style, no new type param) with 8 baked scalars: `bmin_x/y/z`, `bmax_x/y/z`, `background::Float32`, `header_T_size::Int32`. | `491a335` |
+
+### Orchestration (3 proposers → synthesis → TDD impl → adversarial reviewer → test fix)
+
+- **3 independent Opus research proposers** (parallel, read-only — no Julia) converged unanimously on struct-extension over passing the host `NanoGrid`.
+- **Orchestrator synthesis caught a delegation bug:** one proposer folded `build_ms` into `upload_ms` *only*. That violates `test_gpu_perf_instrumentation.jl:57` (`phases_sum ≤ total_ms + 1e-6`). Correct formulation folds `build_ms` into **both** `upload_ms` and `total_ms` (cancels in the invariant; also preserves `:58` `phases_sum ≥ 0.5*total_ms`). Verified by reading the actual assertions before implementing.
+- **Adversarial reviewer GREEN, but its vacuity nit exposed a weak test** — see the gotcha below. Fixed by a follow-up subagent.
+- **Discipline:** never ran Julia in parallel (only read-only research parallelized); re-ran the key tests myself rather than trusting subagent reports.
+
+### Key decisions and gotchas
+
+1. **Vacuous render bit-identity test (the catch of the session).** The implementer's C3 scene was a `create_level_set_sphere` SDF rendered as fog via `tf_smoke()` → **all-black image**. So `cached == legacy` was `black == black`: a vacuous pass. The reviewer's "what if both are background?" nit → added `@test any(p -> p != (0f0,0f0,0f0), probe)`, which *failed*, exposing it. Fix: render the proven `smoke.vdb` fog fixture (gated on `isfile`) → guard passes (76/256 non-background px), bit-identity now exercised on real pixels. Captured in `docs/lessons.md` + `bd remember`. Same family as `fjo9` (too-weak test). **Rule: render bit-identity tests MUST assert non-trivial output.**
+2. **`fjo9`-class invariant pinned.** `build_gpu_nanogrid` bakes the TF LUT from the **Float64** `_estimate_density_range` return, NOT the `Float32`-rounded `dmin`/`dmax` field — legacy does the same, so bit-identity holds. Added an inline comment so a future "tidy" doesn't silently break it.
+3. **No `backend` kwarg on the cached method.** It uses `gpunano.backend`; a kwarg that could disagree with where the buffers live would be a footgun.
+4. **Only 2 positional `GPUNanoGrid(...)` sites** (`build_gpu_nanogrid` + C1 test) — verified before extending the struct, so the 8-field growth was low-blast-radius.
+
+### What's now unblocked
+
+- **`path-tracer-a7wt` (C5, P2)** — `GPURenderContext` with preallocated `output`/`acc_buf`. New critical path; drives cached `upload_ms` toward zero.
+- **`path-tracer-4m72` (C4, P3)** — `@warn` on legacy per-call-upload path.
+- `path-tracer-ug5k` (C6 — 10-frame orbit benchmark) still waits on C5.
+
+### Follow-ups filed (from review)
+
+- `path-tracer-yew7` (bug, P3) — render path lacks the `dmin==dmax` degenerate guard the preview path has (`src/GPU.jl:~2204`); constant-valued grid → divide-by-zero in TF remap.
+- `path-tracer-mv7j` (task, P3) — GPUNanoGrid scene-coherence: baked TF vs live material mismatch.
+- `path-tracer-q4ji` (task, P3) — split GPU.jl (now 2793 LOC, Rule 11).
+
+### Tests run (all green, verified by orchestrator)
+
+- `test/test_gpu_nanogrid.jl` — 18 + 26 + 6 + **40 (C3)** + 1 CUDA leak = 91/91 pass (re-run independently)
+- `test/test_gpu_perf_instrumentation.jl` — 20/20 ; `test/test_perf_baseline.jl` — 86/86
+- `test/test_gpu_cuda.jl` — 318/318 (real RTX 3090)
+
+---
+
 ## 2026-05-15 — Session: 9syk cache (dmin, dmax) on GPUNanoGrid
 
 **Stop reason:** 9syk GREEN. Targeted suite + CUDA regression pass. C3 (`path-tracer-20xa`) now unblocked.
