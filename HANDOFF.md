@@ -26,7 +26,18 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
-## Latest Session (2026-05-15) — 9syk cache (dmin, dmax) on GPUNanoGrid
+## Latest Session (2026-06-01) — C3 (20xa): cached `gpu_render_volume(::GPUNanoGrid)` overload
+
+**Status**: GREEN. **C3 (`path-tracer-20xa`) shipped — the WebGL-perf-epic keystone.** Added `gpu_render_volume(gpunano::GPUNanoGrid, scene, w, h; spp, seed, hdda, max_bounces, profile)` that renders from the pre-loaded device buffers, skipping the per-call H2D upload + host density scan. The legacy `gpu_render_volume(::NanoGrid, ...)` is now a thin **build-then-delegate** wrapper (render logic lives in ONE place). `GPUNanoGrid` extended (9syk-style, no new type params) with 8 baked scalars: `bmin_x/y/z`, `bmax_x/y/z`, `background::Float32`, `header_T_size::Int32`, so the cached path needs no host `NanoGrid`.
+
+**Orchestrated workflow** (3 independent Opus research proposers → synthesis → TDD impl → adversarial reviewer): proposers converged on struct-extension; orchestrator verification caught a delegation bug (folding `build_ms` into `upload_ms` only would violate `test_gpu_perf_instrumentation.jl:57` `phases_sum ≤ total_ms` — fixed by folding into BOTH `upload_ms` and `total_ms`). Reviewer's vacuity nit caught a **weak test**: the original level-set-SDF-sphere scene rendered all-black, making `cached == legacy` pass vacuously — swapped to `smoke.vdb` fog (76/256 non-background px) + added an `any(p -> p != (0,0,0), probe)` guard.
+
+**Acceptance criteria met & tested:** `test_gpu_nanogrid.jl` C3 **40/40** — (1) 10 repeated cached renders **bit-identical** to 10 legacy calls (exact `==`, vacuity-guarded); (2) Σ cached `upload_ms` ≤ 1× legacy `upload_ms`. Pinned the `fjo9`-class invariant: `build_gpu_nanogrid` bakes the TF LUT from **Float64** dmin/dmax (not the Float32-rounded field). No regression: `test_gpu_perf_instrumentation` 20/20, `test_perf_baseline` 86/86, `test_gpu_cuda` 318/318 (real RTX 3090).
+
+**Critical path next:** `path-tracer-a7wt` (C5 — `GPURenderContext` with preallocated output+acc buffers; now unblocked) then `path-tracer-ug5k` (C6 — 10-frame orbit benchmark, legacy vs cached+context). `path-tracer-4m72` (C4 — @warn on legacy per-call-upload path) also unblocked.
+**Follow-ups filed (from review):** `yew7` (bug: render path lacks `dmin==dmax` degenerate guard the preview path has), `mv7j` (scene-coherence guard: baked TF vs live material), `q4ji` (split GPU.jl, now 2793 LOC, Rule 11).
+
+## Previous Session (2026-05-15) — 9syk cache (dmin, dmax) on GPUNanoGrid
 
 **Status**: GREEN. 9syk shipped: `GPUNanoGrid` gains `dmin::Float32, dmax::Float32` fields, baked by `build_gpu_nanogrid` from the same `_estimate_density_range` call that already feeds the TF LUT. C3 (`path-tracer-20xa`) can now skip the per-render host-side leaf scan (~1 ms/MB) entirely. 6 new green tests; existing C1 positional constructor test updated to pass `dmin/dmax`. `test_gpu_nanogrid.jl` 43/43 (incl. CUDA 100-cycle leak). `test_gpu_cuda.jl` 318/318. No regression.
 

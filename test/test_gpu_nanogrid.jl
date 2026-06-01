@@ -18,6 +18,7 @@ using Lyr
 using KernelAbstractions
 
 import Lyr: GPUNanoGrid, build_gpu_nanogrid, _estimate_density_range
+import Lyr: gpu_render_volume
 
 @testset "GPUNanoGrid struct (C1)" begin
     backend = KernelAbstractions.CPU()
@@ -27,7 +28,10 @@ import Lyr: GPUNanoGrid, build_gpu_nanogrid, _estimate_density_range
     dmin    = 0.0f0
     dmax    = 1.0f0
 
-    g = GPUNanoGrid(backend, buf, tf_lut, lights, dmin, dmax)
+    # C3 (path-tracer-20xa): struct gained 8 baked kernel-scalar fields →
+    # 14-arg positional construction. Values here are arbitrary sentinels.
+    g = GPUNanoGrid(backend, buf, tf_lut, lights, dmin, dmax,
+                    -1f0, -1f0, -1f0, 1f0, 1f0, 1f0, 0f0, Int32(4))
 
     @testset "field access" begin
         @test g.backend === backend
@@ -36,6 +40,17 @@ import Lyr: GPUNanoGrid, build_gpu_nanogrid, _estimate_density_range
         @test g.lights  === lights
         @test g.dmin    === dmin
         @test g.dmax    === dmax
+    end
+
+    @testset "field access (C3 baked scalars)" begin
+        @test g.bmin_x        === -1f0
+        @test g.bmin_y        === -1f0
+        @test g.bmin_z        === -1f0
+        @test g.bmax_x        === 1f0
+        @test g.bmax_y        === 1f0
+        @test g.bmax_z        === 1f0
+        @test g.background    === 0f0
+        @test g.header_T_size === Int32(4)
     end
 
     @testset "parametric over concrete types" begin
@@ -185,6 +200,114 @@ end
         # scans all 512 leaf slots, so dmin = 0.0 (background) and dmax = 0.75.
         @test g.dmin == 0.0f0
         @test g.dmax == 0.75f0
+    end
+end
+
+# ============================================================================
+# C3 (path-tracer-20xa): cached gpu_render_volume(::GPUNanoGrid, ...).
+# The cached render path reuses the pre-loaded device buffers in a GPUNanoGrid,
+# skipping the per-call H2D upload + host density scan the legacy
+# gpu_render_volume(::NanoGrid,...) repeats. It must be BIT-IDENTICAL to the
+# legacy path (criterion 1) and amortise upload cost (criterion 2).
+# ============================================================================
+@testset "C3 cached gpu_render_volume (path-tracer-20xa)" begin
+    @testset "struct carries baked bbox/background/header_T_size" begin
+        grid = create_level_set_sphere(center=(0.0, 0.0, 0.0), radius=2.0, voxel_size=1.0)
+        nano = build_nanogrid(grid.tree)
+        cam  = Camera((10.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 45.0)
+        mat  = VolumeMaterial(tf_smoke())
+        vol  = VolumeEntry(grid, nano, mat)
+        light = DirectionalLight((1.0, 1.0, 1.0), (1.0, 1.0, 1.0))
+        scene = Scene(cam, light, vol)
+        backend = KernelAbstractions.CPU()
+
+        g = build_gpu_nanogrid(nano, scene; backend=backend)
+        bbox = Lyr.nano_bbox(nano)
+        @test g.bmin_x        === Float32(bbox.min.x)
+        @test g.bmin_y        === Float32(bbox.min.y)
+        @test g.bmin_z        === Float32(bbox.min.z)
+        @test g.bmax_x        === Float32(bbox.max.x)
+        @test g.bmax_y        === Float32(bbox.max.y)
+        @test g.bmax_z        === Float32(bbox.max.z)
+        @test g.background    === Float32(Lyr.nano_background(nano))
+        @test g.header_T_size === Int32(sizeof(Float32))
+    end
+
+    @testset "criterion 1: bit-identical" begin
+        # Use the proven-renderable smoke.vdb fog (a real ~1M-voxel volume) so
+        # the camera actually hits density and the render produces non-background
+        # pixels. A level-set SDF sphere rendered as fog yields ~zero opacity →
+        # an all-black image → the bit-identity check would pass VACUOUSLY
+        # (black == black). Mirror test_gpu_perf_instrumentation.jl:11-24.
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+        else
+            vdb  = parse_vdb(smoke_path)
+            grid = vdb.grids[1]
+            nano = build_nanogrid(grid.tree)
+            cam  = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+            mat  = VolumeMaterial(tf_smoke(); sigma_scale=5.0)
+            vol  = VolumeEntry(grid, nano, mat)
+            scene = Scene(cam, DirectionalLight((0.577, 0.577, 0.577)), vol)
+            backend = KernelAbstractions.CPU()
+            # Small image: smoke.vdb is large and is rendered ~20 times here
+            # (1 probe + 10 cached + 10 legacy). Bound CPU render time.
+            W = 16; H = 16; SEED = UInt64(7)
+
+            gpunano = build_gpu_nanogrid(nano, scene; backend=backend)
+
+            # Guard against a vacuous match: if the camera missed the volume both
+            # paths would return all-background and `cached == legacy` would pass
+            # for the wrong reason (the fjo9 failure mode — a too-weak test). Require
+            # the render to actually produce non-background pixels.
+            probe = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED)
+            @test any(p -> p != (0.0f0, 0.0f0, 0.0f0), probe)
+
+            for k in 1:10
+                cached = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED)
+                legacy = gpu_render_volume(nano, scene, W, H; spp=2, seed=SEED, backend=backend)
+                @test cached == legacy
+                @test size(cached) == (H, W)
+            end
+        end
+    end
+
+    @testset "criterion 2: Σ cached upload_ms ≤ 1 legacy upload_ms" begin
+        # Same smoke.vdb fog scene as criterion 1. The ~6.5 MB legacy build
+        # upload dwarfs ten cached 16×16 pixel-buffer allocs → wide margin.
+        smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+        if !isfile(smoke_path)
+            @test_skip "fixture not found: $smoke_path"
+        else
+            vdb  = parse_vdb(smoke_path)
+            grid = vdb.grids[1]
+            nano = build_nanogrid(grid.tree)
+            cam  = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+            mat  = VolumeMaterial(tf_smoke(); sigma_scale=5.0)
+            vol  = VolumeEntry(grid, nano, mat)
+            scene = Scene(cam, DirectionalLight((0.577, 0.577, 0.577)), vol)
+            backend = KernelAbstractions.CPU()
+            W = 16; H = 16; SEED = UInt64(7)
+
+            gpunano = build_gpu_nanogrid(nano, scene; backend=backend)
+
+            # Warm up JIT so timings reflect steady state, not first-call compilation.
+            gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED, profile=true)
+            gpu_render_volume(nano, scene, W, H; spp=2, seed=SEED, backend=backend, profile=true)
+
+            _, legacy_t = gpu_render_volume(nano, scene, W, H; spp=2, seed=SEED,
+                                            backend=backend, profile=true)
+
+            total_cached_upload = 0.0
+            for _ in 1:10
+                _, t = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED, profile=true)
+                @test t.upload_ms >= 0.0
+                total_cached_upload += t.upload_ms
+            end
+
+            @test total_cached_upload <= legacy_t.upload_ms
+        end
     end
 end
 

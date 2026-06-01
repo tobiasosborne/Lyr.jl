@@ -91,11 +91,18 @@ lives in C2 (`path-tracer-htby`); `dmin`/`dmax` baking added in
 - `dmin::Float32`  — density range minimum used to bake `tf_lut` (cached so
                      C3 doesn't repeat `_estimate_density_range` per render)
 - `dmax::Float32`  — density range maximum (matching `dmin`)
+- `bmin_x/y/z::Float32` — `Float32(nano_bbox(nano).min)`, grid index-space lower
+                     bound, baked so the cached render needs no host `NanoGrid`
+- `bmax_x/y/z::Float32` — `Float32(nano_bbox(nano).max)`, upper bound
+- `background::Float32`  — `Float32(nano_background(nano))`, the empty-voxel value
+- `header_T_size::Int32` — `Int32(sizeof(T))`, value byte-width the kernel reads
 
 # Ref
 - bead `path-tracer-mx1u` (C1, struct shape)
 - bead `path-tracer-htby` (C2, constructor)
-- bead `path-tracer-9syk` (this revision: `dmin`/`dmax` baked in)
+- bead `path-tracer-9syk` (`dmin`/`dmax` baked in)
+- bead `path-tracer-20xa` (C3: bbox/background/header_T_size baked so the
+  cached render path is host-`NanoGrid`-free)
 """
 struct GPUNanoGrid{B, BUF, TF, L}
     backend::B
@@ -104,6 +111,13 @@ struct GPUNanoGrid{B, BUF, TF, L}
     lights::L
     dmin::Float32
     dmax::Float32
+    # C3 (path-tracer-20xa): grid-intrinsic kernel scalars baked once so the
+    # cached render path needs no host NanoGrid. All concrete isbits — no new
+    # type param (9syk precedent).
+    bmin_x::Float32; bmin_y::Float32; bmin_z::Float32   # Float32(nano_bbox(nano).min)
+    bmax_x::Float32; bmax_y::Float32; bmax_z::Float32   # Float32(nano_bbox(nano).max)
+    background::Float32                                  # Float32(nano_background(nano))
+    header_T_size::Int32                                 # Int32(sizeof(T))
 end
 
 # ============================================================================
@@ -1527,91 +1541,109 @@ so the C3 render overload can skip the scan entirely (bead
 Ref: bead path-tracer-htby (C2) + path-tracer-9syk (cache dmin/dmax),
      EPIC path-tracer-ooul.
 """
-function build_gpu_nanogrid(nanogrid::NanoGrid, scene::Scene;
-                              backend=_default_gpu_backend())
+function build_gpu_nanogrid(nanogrid::NanoGrid{T}, scene::Scene;
+                              backend=_default_gpu_backend()) where T
     mat = scene.volumes[1].material
     dmin, dmax = _estimate_density_range(nanogrid)
+    # bit-identity invariant (bead 20xa): bake the LUT from the Float64 dmin/dmax,
+    # NOT the Float32-rounded fields — the legacy path bakes from Float64 too.
     tf_lut_host    = _bake_tf_lut(mat.transfer_function, dmin, dmax)
     light_data_host = _pack_lights(scene.lights)
+    bbox = nano_bbox(nanogrid)
+    bg   = nano_background(nanogrid)
     GPUNanoGrid(backend,
                 Adapt.adapt(backend, nanogrid.buffer),
                 Adapt.adapt(backend, tf_lut_host),
                 Adapt.adapt(backend, light_data_host),
                 Float32(dmin),
-                Float32(dmax))
+                Float32(dmax),
+                Float32(bbox.min.x), Float32(bbox.min.y), Float32(bbox.min.z),
+                Float32(bbox.max.x), Float32(bbox.max.y), Float32(bbox.max.z),
+                Float32(bg),
+                Int32(sizeof(T)))
 end
 
 """
-    gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
+    gpu_render_volume(gpunano::GPUNanoGrid, scene::Scene,
                        width::Int, height::Int;
-                       spp=1, seed=UInt64(42),
-                       backend=_default_gpu_backend()) -> Matrix{NTuple{3, Float32}}
+                       spp=1, seed=UInt64(42), hdda=true,
+                       max_bounces=0, profile=false) -> Matrix{NTuple{3, Float32}}
 
-Render a volume using delta tracking on a KernelAbstractions backend.
+Cached render path: render using the PRE-LOADED device buffers held by
+`gpunano`, skipping the per-call H2D upload of the NanoVDB buffer, TF LUT, and
+lights AND the host-side `_estimate_density_range` leaf scan that the legacy
+`gpu_render_volume(::NanoGrid, ...)` repeats on every call. Build one
+`GPUNanoGrid` per (grid, material, lights) tuple via `build_gpu_nanogrid` and
+reuse it across renders.
 
-Uses the first volume and first light from the scene. The transfer function
-is pre-baked into a 256-entry LUT for device-side evaluation.
+What is **baked** in `gpunano` (uploaded/computed once at build time):
+- `buffer`     — device NanoVDB byte buffer
+- `tf_lut`     — device 256-entry RGBA transfer-function LUT
+- `lights`     — device packed lights buffer
+- `dmin/dmax`  — density range (already `Float32`)
+- `bmin/bmax`  — grid index-space AABB (already `Float32`)
+- `background` — empty-voxel value (already `Float32`)
+- `header_T_size` — value byte-width
 
-# Arguments
-- `nanogrid` - NanoGrid to render (must be Float32 values)
-- `scene` - Scene with camera, lights, and volume materials
-- `width`, `height` - Image dimensions
-- `spp` - Samples per pixel (accumulated with progressive averaging)
-- `seed` - RNG seed
-- `backend` - KernelAbstractions backend (default: auto-detected via `_default_gpu_backend()`)
-- `profile` - when `true`, returns `(image, timing)` where `timing::NamedTuple` reports
-  per-phase wall-clock ms: `upload_ms`, `kernel_ms`, `accum_ms`, `readback_ms`, `total_ms`.
-  Adds explicit `KernelAbstractions.synchronize` bracketing around each phase so timings
-  reflect actual device work; this slightly stalls the pipeline, so leave `false` (default)
-  for production rendering. When `false` the function returns just the image (legacy).
+What is read **live** (per call, cheap host scalars, no H2D of grid data):
+- camera basis + fov, and the material scalars
+  (`sigma_scale`, `scattering_albedo`, `emission_scale`, phase `g`)
+  from `scene.camera` / `scene.volumes[1].material`.
+
+The backend is taken from `gpunano.backend` — this method has **no** `backend`
+kwarg (the buffers already live on a fixed backend).
+
+`profile=true` returns `(image, timing::NamedTuple)`. Here `upload_ms` measures
+ONLY the per-call `output`/`acc` pixel-buffer allocation + sync — the grid/TF/
+lights upload is already amortised into `build_gpu_nanogrid` and is NOT
+repaid, so a sequence of cached renders has a tiny cumulative `upload_ms`
+(criterion 2 of bead 20xa).
+
+Must stay BIT-IDENTICAL to the legacy `::NanoGrid` path for the same seed
+(criterion 1): the kernel arguments, casts, and accumulation order are the
+verbatim legacy ones; the only difference is where the device buffers and
+scalars come from.
 
 # Ref
-Ground truth: docs/stocktake/08_perf_vs_webgl.md §1 (architectural gap, reason #3)
-and §4 (low-hanging fruit) — the H2D upload, per-spp kernel launches, and D2H
-readback are the three phases identified as WebGL-gap costs worth measuring.
+- bead `path-tracer-20xa` (C3), EPIC `path-tracer-ooul`.
+- Ground truth: docs/stocktake/08_perf_vs_webgl.md §1 (architectural gap,
+  reason #3) and §4.2 (the amortisation this enables).
 """
-function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
+function gpu_render_volume(gpunano::GPUNanoGrid, scene::Scene,
                             width::Int, height::Int;
                             spp::Int=1, seed::UInt64=UInt64(42),
-                            backend=_default_gpu_backend(),
                             hdda::Bool=true,
                             max_bounces::Int=0,
-                            profile::Bool=false) where T
-    vol = scene.volumes[1]
-    mat = vol.material
+                            profile::Bool=false)
+    backend = gpunano.backend
+    mat = scene.volumes[1].material
     cam = scene.camera
 
-    # Bake transfer function LUT
-    dmin, dmax = _estimate_density_range(nanogrid)
-    tf_lut = _bake_tf_lut(mat.transfer_function, dmin, dmax)
+    # Baked device state (uploaded/computed once in build_gpu_nanogrid).
+    dev_buf    = gpunano.buffer
+    dev_tf     = gpunano.tf_lut
+    dev_lights = gpunano.lights
+    n_lights   = Int32(length(gpunano.lights) ÷ 7)
+    dmin       = gpunano.dmin           # already Float32 — do NOT re-wrap
+    dmax       = gpunano.dmax           # already Float32 — do NOT re-wrap
+    background_f32 = gpunano.background  # already Float32
+    bmin_x = gpunano.bmin_x; bmin_y = gpunano.bmin_y; bmin_z = gpunano.bmin_z
+    bmax_x = gpunano.bmax_x; bmax_y = gpunano.bmax_y; bmax_z = gpunano.bmax_z
+    header_T_size = gpunano.header_T_size
 
-    # Get volume bounds
-    bbox = nano_bbox(nanogrid)
-    bmin_x = Float32(bbox.min.x)
-    bmin_y = Float32(bbox.min.y)
-    bmin_z = Float32(bbox.min.z)
-    bmax_x = Float32(bbox.max.x)
-    bmax_y = Float32(bbox.max.y)
-    bmax_z = Float32(bbox.max.z)
+    # Live material scalars — same Float32 casts as the legacy method (verbatim).
+    sigma_maj = Float32(mat.sigma_scale)
+    albedo_f32 = Float32(mat.scattering_albedo)
+    emission_f32 = Float32(mat.emission_scale)
+    phase_g = mat.phase_function isa HenyeyGreensteinPhase ? Float32(mat.phase_function.g) : 0.0f0
 
-    # Camera data
+    # Camera data (live).
     cam_px, cam_py, cam_pz = Float32.(cam.position)
     cam_fx, cam_fy, cam_fz = Float32.(cam.forward)
     cam_rx, cam_ry, cam_rz = Float32.(cam.right)
     cam_ux, cam_uy, cam_uz = Float32.(cam.up)
     cam_fov = Float32(cam.fov)
 
-    # Pack lights into flat buffer: 7 Float32 per light [type, x, y, z, r, g, b].
-    # `_pack_lights` substitutes a default directional if no packable lights remain.
-    light_data = _pack_lights(scene.lights)
-    n_lights = Int32(length(light_data) ÷ 7)
-
-    background_f32 = Float32(nano_background(nanogrid))
-    sigma_maj = Float32(mat.sigma_scale)
-    albedo_f32 = Float32(mat.scattering_albedo)
-    emission_f32 = Float32(mat.emission_scale)
-    phase_g = mat.phase_function isa HenyeyGreensteinPhase ? Float32(mat.phase_function.g) : 0.0f0
-    header_T_size = Int32(sizeof(T))
     w = Int32(width)
     h = Int32(height)
 
@@ -1626,20 +1658,17 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     accum_ns  = zero(UInt64)
 
     # --- UPLOAD phase -------------------------------------------------------
+    # Cached path: grid/TF/lights are already on-device. The only per-call
+    # allocation is the pixel output/accumulator pair, so upload_ms counts
+    # JUST that (sync-bracketed when profiling).
     if profile
         KernelAbstractions.synchronize(backend)
         t0 = time_ns()
-        dev_buf    = Adapt.adapt(backend, nanogrid.buffer)
-        dev_tf     = Adapt.adapt(backend, tf_lut)
-        dev_lights = Adapt.adapt(backend, light_data)
         output     = Adapt.adapt(backend, fill(z3, npixels))
         acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
         KernelAbstractions.synchronize(backend)
         upload_ns = time_ns() - t0
     else
-        dev_buf    = Adapt.adapt(backend, nanogrid.buffer)
-        dev_tf     = Adapt.adapt(backend, tf_lut)
-        dev_lights = Adapt.adapt(backend, light_data)
         output     = Adapt.adapt(backend, fill(z3, npixels))
         acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
     end
@@ -1663,7 +1692,7 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
                 bmin_x, bmin_y, bmin_z,
                 bmax_x, bmax_y, bmax_z,
                 dev_lights, n_lights,
-                Float32(dmin), Float32(dmax),
+                dmin, dmax,
                 header_T_size,
                 UInt32(seed + UInt64(s)),
                 Int32(max_bounces);
@@ -1711,6 +1740,75 @@ function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
     end
 
     result
+end
+
+"""
+    gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene,
+                       width::Int, height::Int;
+                       spp=1, seed=UInt64(42),
+                       backend=_default_gpu_backend()) -> Matrix{NTuple{3, Float32}}
+
+Render a volume using delta tracking on a KernelAbstractions backend.
+
+This is the legacy convenience entry point. As of bead `path-tracer-20xa` (C3)
+it builds a throwaway `GPUNanoGrid` (via `build_gpu_nanogrid`) and delegates to
+the cached `gpu_render_volume(::GPUNanoGrid, ...)` overload, so the render logic
+lives in exactly one place. For repeated renders of the same grid, prefer
+building one `GPUNanoGrid` yourself and reusing it — this method re-uploads the
+grid/TF/lights every call.
+
+Uses the first volume and first light from the scene. The transfer function
+is pre-baked into a 256-entry LUT for device-side evaluation.
+
+# Arguments
+- `nanogrid` - NanoGrid to render (must be Float32 values)
+- `scene` - Scene with camera, lights, and volume materials
+- `width`, `height` - Image dimensions
+- `spp` - Samples per pixel (accumulated with progressive averaging)
+- `seed` - RNG seed
+- `backend` - KernelAbstractions backend (default: auto-detected via `_default_gpu_backend()`)
+- `profile` - when `true`, returns `(image, timing)` where `timing::NamedTuple` reports
+  per-phase wall-clock ms: `upload_ms`, `kernel_ms`, `accum_ms`, `readback_ms`, `total_ms`.
+  Here `upload_ms` folds in the FULL upload (grid+TF+lights via `build_gpu_nanogrid`
+  PLUS the per-call pixel buffers) so the legacy instrumentation invariants still
+  hold; `build_gpu_nanogrid` is timed in a synchronized window and added to both
+  `upload_ms` and `total_ms`.
+
+# Ref
+Ground truth: docs/stocktake/08_perf_vs_webgl.md §1 (architectural gap, reason #3)
+and §4 (low-hanging fruit) — the H2D upload, per-spp kernel launches, and D2H
+readback are the three phases identified as WebGL-gap costs worth measuring.
+"""
+function gpu_render_volume(nanogrid::NanoGrid{T}, scene::Scene, width::Int, height::Int;
+                            spp::Int=1, seed::UInt64=UInt64(42),
+                            backend=_default_gpu_backend(),
+                            hdda::Bool=true, max_bounces::Int=0,
+                            profile::Bool=false) where T
+    if !profile
+        gpunano = build_gpu_nanogrid(nanogrid, scene; backend=backend)
+        return gpu_render_volume(gpunano, scene, width, height;
+                                 spp=spp, seed=seed, hdda=hdda,
+                                 max_bounces=max_bounces, profile=false)
+    end
+    # profile=true: legacy upload_ms must report the FULL upload (buffer+tf+lights
+    # + pixel buffers). Time build_gpu_nanogrid in a synchronized window and fold
+    # it into BOTH upload_ms and total_ms so the existing instrumentation
+    # invariants (test_gpu_perf_instrumentation.jl:57-58: phases_sum<=total_ms and
+    # phases_sum>=0.5*total_ms) keep holding.
+    KernelAbstractions.synchronize(backend)
+    t_build = time_ns()
+    gpunano = build_gpu_nanogrid(nanogrid, scene; backend=backend)
+    KernelAbstractions.synchronize(backend)
+    build_ms = Float64(time_ns() - t_build) / 1_000_000
+    img, t = gpu_render_volume(gpunano, scene, width, height;
+                               spp=spp, seed=seed, hdda=hdda,
+                               max_bounces=max_bounces, profile=true)
+    timing = (upload_ms   = t.upload_ms + build_ms,
+              kernel_ms   = t.kernel_ms,
+              accum_ms    = t.accum_ms,
+              readback_ms = t.readback_ms,
+              total_ms    = t.total_ms + build_ms)
+    return img, timing
 end
 
 """
