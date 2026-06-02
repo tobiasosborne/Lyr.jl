@@ -26,6 +26,27 @@ Lyr.jl is an agent-native physics visualization platform: pure Julia OpenVDB par
 
 ---
 
+## Latest Session (2026-06-02) — Device-cache sprint: C5 + D1 + C6 + A3 (orchestrated)
+
+**Status**: Code GREEN; **C6 ≥5× target honestly FALSIFIED** (documented, not gamed). Closed the device-cache (C) sub-chain and seeded the kernel-fusion (D) sub-chain of EPIC `path-tracer-ooul`.
+
+| Bead | What | Disposition | Commit |
+|------|------|-------------|--------|
+| `path-tracer-a7wt` (C5, P2) | `GPURenderContext{B,BUF}` + `build_gpu_render_context(w,h; backend)` + optional `context` kwarg on cached `gpu_render_volume(::GPUNanoGrid,...)`. Reuses preallocated `output`/`acc_buf` via `fill!` in place → **zero per-call device alloc**. `acc_buf` MUST be re-zeroed (accumulate kernel does `+=`). `context===nothing` byte-identical to before (fjo9). | SHIPPED, reviewed | `52713bb` |
+| `path-tracer-vs5y` (D1, P2) | Research spike: in-kernel spp-fusion patterns for D2. Findings → bead notes + `bd remember` + forwarded to D2 (`12tg`). KEY: fused spp WILL break bit-identity (FP reduction order) → D2 must use statistical/analytic oracles, not exact `==`. | CLOSED | docs only |
+| `path-tracer-ug5k` (C6, P2) | Orbit benchmark (`bench_orbit`, scene-parametric) in `bench/perf_baseline.jl`; 10-frame turntable, legacy-per-frame-upload vs GPUNanoGrid+GPURenderContext. | CLOSED on honest result | this push |
+| `path-tracer-hk1f` (A3, P1) | Baseline refresh on HEAD `52713bb`: 3-scene table re-measured, commit+hardware pinned. | CLOSED | this push |
+
+**C6 — headline finding (≥5× FALSIFIED, honestly):** "orbit speedup ≥5×" is **not achievable at any fair config**, on smoke.vdb OR bunny_cloud (RTX 3090, commit `52713bb`). smoke.vdb steady-state median **1.0–1.3×**; bunny_cloud best **3.71× total / 3.01× median at 128² spp=1**, collapsing to ~1.06× at 512² spp=8. ROOT CAUSE: the per-frame kernel is *identical/shared* between paths, so speedup = `(kernel + amortized)/kernel`; the amortized per-frame cost is bounded (~54 ms on bunny_cloud), and ≥5× needs `kernel ≤ ¼·amortized` — only at degenerate sub-64² renders no turntable user picks (Rule 1: measured, not manufactured). **The real, proven C5 win is (a) zero per-frame device alloc (`CUDA.@allocated==0`), (b) eliminated legacy allocator-stall tail latency (legacy max ~0.3–1.9 s/frame vs cached steady ~34 ms), (c) modest 1.3–3.7× steady-state for small/preview renders.** SURPRISE: the ~54 ms amortized cost on bunny_cloud ≈ **42 ms host `_estimate_density_range` scan + 39 ms 137 MB H2D** — the host per-voxel CPU loop is *co-equal with the PCIe transfer*, so ~half the device-cache value on big grids is eliminating a CPU scan, not transfer. Reinforces C4 (`4m72`, @warn the legacy per-call path) + motivates making `_estimate_density_range` incremental.
+
+**Orchestration:** C5 = 3 independent Opus proposers (parallel, read-only — converged) → orchestrator synthesis (chose `build_gpu_render_context`; `==`-not-`===` backend guard; verified `_default_gpu_backend()`/scene-API/alloc-site against source) → 1 Opus TDD implementer → 1 adversarial Opus reviewer (mutation-tested the `acc_buf` zeroing; re-ran on RTX 3090: `test_gpu_cuda` 322/322, `perf_instrumentation` 20/20). D1/C6/A3 = single-purpose Opus agents. Honest-benchmarking enforced (report the true number, never game W/H/spp). Never ran Julia in parallel (Rule 9).
+
+**Follow-ups:** multi-volume `context` threading (new bead); `q4ji` noted (dedup C5 buffer-acquisition if/else during GPU.jl split).
+
+**Critical path next:** D-chain (D2 `12tg` fuse spp loop → D3/D4) and B-chain (B1 `mmf2` quality kwarg → B2/B3). F1 (`pjrr`, README perf) must cite the corrected "1.3–3.7× + zero-alloc + latency" framing — NOT a ≥5× claim.
+
+---
+
 ## Latest Session (2026-06-01) — C3 (20xa): cached `gpu_render_volume(::GPUNanoGrid)` overload
 
 **Status**: GREEN. **C3 (`path-tracer-20xa`) shipped — the WebGL-perf-epic keystone.** Added `gpu_render_volume(gpunano::GPUNanoGrid, scene, w, h; spp, seed, hdda, max_bounces, profile)` that renders from the pre-loaded device buffers, skipping the per-call H2D upload + host density scan. The legacy `gpu_render_volume(::NanoGrid, ...)` is now a thin **build-then-delegate** wrapper (render logic lives in ONE place). `GPUNanoGrid` extended (9syk-style, no new type params) with 8 baked scalars: `bmin_x/y/z`, `bmax_x/y/z`, `background::Float32`, `header_T_size::Int32`, so the cached path needs no host `NanoGrid`.

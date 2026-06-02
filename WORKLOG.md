@@ -7,6 +7,29 @@ Rule 0 of CLAUDE.md is implicit: *maintain this file*.
 
 ---
 
+## 2026-06-02 — Session: Device-cache sprint (C5 + D1 + C6 + A3), orchestrated
+
+**Stop reason:** User requested wind-up after C6 (bunny_cloud orbit). C5 shipped+committed (`52713bb`); D1/C6/A3 done; bench+docs+handoff committed and pushed this session.
+
+### What shipped
+- **C5 (`a7wt`)**: `GPURenderContext` — zero per-call device alloc on the cached render path. 3-proposer → TDD → adversarial-review (mutation-tested). `CUDA.@allocated==0` verified on RTX 3090. Commit `52713bb`.
+- **D1 (`vs5y`)**: kernel-fusion research spike → findings forwarded to D2.
+- **C6 (`ug5k`)**: orbit benchmark. ≥5× target FALSIFIED honestly (best 3.71× on bunny_cloud).
+- **A3 (`hk1f`)**: 3-scene baseline refreshed on HEAD.
+
+### Gotchas / learnings (institutional memory)
+1. **The "orbit ≥5×" premise was wrong.** The per-frame *kernel is shared* between legacy and cached paths, so orbit speedup = `(kernel+amortized)/kernel`, bounded by `amortized/kernel`. smoke.vdb amortized upload ~5 ms vs ~30 ms kernel → ~1.3×. bunny_cloud amortized ~54 ms vs ~30 ms+ dense-fog kernel at 128² → 3.7× max. **Lesson: a per-frame-upload-amortization speedup is bounded by the upload/kernel ratio — derive the benchmark target from that ratio, not a hoped-for multiplier.**
+2. **`_estimate_density_range` host scan ≈ H2D transfer on large grids.** bunny_cloud amortized ~54 ms = ~42 ms host per-voxel scan + ~39 ms 137 MB H2D. ~Half the device-cache value on big grids is eliminating a *CPU loop*, not PCIe. (9syk bakes dmin/dmax onto GPUNanoGrid so the cached path skips it; the *legacy per-call* path repays it every frame → reinforces C4 `4m72`.)
+3. **`fill!(::CuArray, ::NTuple{3,Float32})` is an in-place kernel, 0 device alloc** — the load-bearing primitive for C5's zero-alloc reuse. `CUDA.@allocated` measures device-pool bytes only (host `Array(acc_buf)` readback doesn't count). Warm up once before measuring (first call JIT-specializes / may allocate).
+4. **Backend equality: use `==`, not `===`.** `CUDABackend()==CUDABackend()` is true but two instances aren't `===`; a `===` guard would false-fail a legitimate cross-instance context reuse.
+5. **Honest-benchmarking discipline held.** Every perf agent was told: report the true number, never game W/H/spp to manufacture ≥5×. Result: an honest negative + a useful cost decomposition, not a cherry-picked 16² "win".
+
+### Orchestration notes
+- C5: 3 parallel read-only Opus proposers converged → I synthesized + verified all load-bearing assumptions against source (alloc site `GPU.jl:1660-1674`, `_default_gpu_backend()` exists, proven scene block from `test_gpu_nanogrid.jl:246-272`) before delegating impl. Reviewer mutation-tested the test (deleting `fill!(acc_buf,z3)` → 4 failures), confirming non-vacuity.
+- Parallelism: read-only research ran in parallel; every Julia agent (impl/review/bench) ran strictly serial (Rule 9).
+
+---
+
 ## 2026-06-01 — Session: C3 (20xa) cached `gpu_render_volume(::GPUNanoGrid)` — orchestrated
 
 **Stop reason:** C3 GREEN, committed (`491a335`), pushed. User requested wrap-up. This **completes** the 20xa attempt that the 2026-05-15 session started and reverted (see that session's orchestration addendum — it was stopped before a green bar; this session redid it cleanly end-to-end).

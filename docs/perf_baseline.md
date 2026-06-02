@@ -1,9 +1,10 @@
 # Lyr.jl Performance Baseline + WebGL Target
 
-**Bead**: path-tracer-jgjq (A4)
-**Date**: 2026-04-19
-**Hardware reference**: NVIDIA GeForce RTX 3090, Julia 1.12.3, CUDABackend.
-**Author**: research task output. No code was executed to produce this document.
+**Bead**: path-tracer-jgjq (A4); §1.1 / §1.4 refreshed under path-tracer-hk1f (A3) + path-tracer-ug5k (C6)
+**Date**: 2026-04-19 (original); §1.1 baseline + §1.4 orbit re-measured 2026-06-02
+**Commit pinned**: `52713bb` (C5 GPURenderContext shipped) — §1.1 and §1.4 numbers below were measured at this HEAD
+**Hardware reference**: NVIDIA GeForce RTX 3090 (24 GB, driver 581.57), Julia 1.12.3, CUDABackend.
+**Author**: §2–§4 are research-task output (no code executed). §1.1 and §1.4 are MEASURED on the RTX 3090 at commit `52713bb` via `bench/perf_baseline.jl`.
 
 This document fixes a concrete, numeric WebGL target for the perf epic. Without
 this, "WebGL is faster" is rhetoric. With this, every future perf change has a
@@ -15,15 +16,23 @@ time budget to hit and a scene to reproduce.
 
 ### 1.1 Stochastic path (`gpu_render_volume`, `src/GPU.jl:1415`)
 
-Source: `bench/results/2026-04-19.json`. Config: **800 × 600, spp=8, stochastic
-delta tracking through NanoVDB, `max_bounces=0`** (primary + direct lighting
-only). This is Lyr's production GPU path, *not* the WebGL-fair comparison.
+Source: `bench/results/2026-06-02.json` (re-measured at commit `52713bb`, A3
+bead path-tracer-hk1f). Config: **800 × 600, spp=8, stochastic delta tracking
+through NanoVDB, `max_bounces=0`** (primary + direct lighting only). This is
+Lyr's production GPU path, *not* the WebGL-fair comparison.
 
 | Scene | Active voxels | Buffer (KB) | Upload (ms) | Kernel (ms) | Accum (ms) | Readback (ms) | **Total (ms)** |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| smoke.vdb (sparse fog) | 1,049,275 | 6,493 | 7.8 | 924.4 | 1.9 | 4.5 | **946.1** |
-| bunny_cloud.vdb (dense cloud) | 19,210,271 | 137,804 | 20.5 | 1,010.4 | 2.3 | 4.7 | **1,045.5** |
-| level_set_sphere (synthetic) | 55,636 | 1,004 | 2.1 | 2,388.5 | 2.1 | 0.7 | **2,397.6** |
+| smoke.vdb (sparse fog) | 1,049,275 | 6,493 | 8.9 | 957.1 | 2.3 | 4.1 | **979.8** |
+| bunny_cloud.vdb (dense cloud) | 19,210,271 | 137,804 | 63.5 | 1,025.7 | 2.1 | 3.5 | **1,101.4** |
+| level_set_sphere (synthetic) | 55,636 | 1,004 | 3.1 | 2,422.2 | 2.1 | 1.0 | **2,432.9** |
+
+These are within run-to-run noise of the 2026-04-19 capture (smoke 946→980,
+bunny 1046→1101, sphere 2398→2433 ms total): the per-phase structure is
+unchanged — **kernel is 95–99% of wall time**; the C1–C5 caching work targets
+the upload/alloc phase, which is already negligible at 800×600 (see §1.4 for
+where it matters). bunny_cloud's upload (63 ms here vs 20 ms in April) is the
+137 MB NanoVDB H2D transfer and is the noisiest single number in the table.
 
 Interpretation:
 
@@ -100,6 +109,181 @@ perfectly-grazing silhouette rays. Tightening the nudge would reopen
 `fjo9`; proper fix needs a span-width-aware DDA init. Filed as a follow-up
 bead. On production fixtures (smoke.vdb, bunny_cloud.vdb) the 40 dB target
 is met.
+
+### 1.4 Orbit render — static volume, moving camera (C6, bead path-tracer-ug5k)
+
+Source: `bench/perf_baseline.jl::bench_orbit` (`julia --project -t 2
+bench/perf_baseline.jl --orbit` for both scenes, `--orbit-bunny` for
+bunny_cloud only), measured at commit `52713bb` on the RTX 3090. The benchmark
+is **scene-parametric**: `bench_orbit(scene_name, build_fn; W, H, spp, frames)`
+runs the same rigor on **smoke.vdb** (§1.4.1) and **bunny_cloud.vdb** (§1.4.2).
+Each scene is a static volume orbited over **10 frames, camera azimuth
++36°/frame** at fixed radius/elevation derived from the scene builder's own
+framing (`build_smoke_scene` / `build_bunny_cloud_scene` — both sit the camera at
+`(cx+1.5d, cy+0.8d, cz+0.6d)`, so the orbit traces the same vetted shell, only
+azimuth varies), looking at the bbox centre. This is the canonical
+interactive/turntable use case where the upload can be amortised.
+
+#### 1.4.1 smoke.vdb orbit (6.34 MB buffer — upload too cheap for ≥5×)
+
+Scene: **smoke.vdb** (6.34 MB NanoVDB buffer, 1,049,275 active voxels).
+
+Two paths compared (the kernel cost per frame is **identical** between them —
+the only difference is the per-frame upload/alloc):
+
+- **LEGACY**: `gpu_render_volume(nano::NanoGrid, scene_k, W, H; …)` — rebuilds a
+  fresh `GPUNanoGrid` every frame (full H2D upload of the 6.34 MB NanoVDB buffer
+  + TF LUT + lights + the host-side `_estimate_density_range` leaf scan) AND
+  allocates fresh pixel buffers. **Per-frame device allocation: 7.84 MB.**
+- **CACHED**: `build_gpu_nanogrid(nano, scene)` ONCE +
+  `build_gpu_render_context(W, H)` ONCE, then
+  `gpu_render_volume(gpunano, scene_k, W, H; context=ctx)` each frame.
+  **Per-frame device allocation: 0 bytes** (`CUDA.@allocated == 0`).
+
+Both paths warm up with one untimed frame; the timed 10-frame loop is
+sync-bracketed (`CUDA.synchronize()` + `@elapsed`). The cached render is
+asserted non-vacuous (smoke fog guarantees density hits along the orbit).
+
+| Config (W×H×spp) | Legacy total (ms) | Cached total (ms) | Legacy median/frame | Cached median/frame | **Total speedup** | **Median speedup** |
+|---|---:|---:|---:|---:|---:|---:|
+| 256×256×1 | 593.6 | 304.9 | 40.65 | 30.48 | **1.95×** | **1.33×** |
+| 512×512×1 | 895.4 | 826.0 | 91.08 | 83.41 | **1.08×** | **1.09×** |
+| 256×256×8 | 2421.5 | 2384.6 | 242.25 | 239.89 | **1.02×** | **1.01×** |
+
+**Honest finding: the bead's ≥5× acceptance is NOT met at any fair config.**
+The true speedup decomposes into two distinct effects:
+
+1. **Steady-state (median, kernel-bound) speedup: ~1.0×–1.3×.** Once warm and
+   absent allocator stalls, the per-frame cost is dominated by the *shared*
+   delta-tracking kernel. The amortised work — a one-time 6.34 MB H2D upload +
+   density scan (~3–5 ms steady-state) + pixel-buffer alloc — is small relative
+   to a 17–240 ms kernel. So the speedup is large only when the render size is
+   small enough that the kernel is cheap, and it shrinks toward 1× as W×H×spp
+   grows. At 256² spp=1 the median is 1.33×; at 512² it is 1.09×; at 256² spp=8
+   it is 1.01×. **This is the regime story: the cached path helps most for small
+   previews and helps essentially not at all once the kernel dominates.** The
+   smoke.vdb upload is just too cheap relative to its kernel to yield 5×.
+
+2. **Tail-latency / allocation-churn speedup: highly variable, up to ~4× mean
+   (single-frame spikes up to ~1.9 s observed).** The legacy path's per-frame
+   7.84 MB device allocation churns the CUDA memory pool; under pressure this
+   periodically triggers a multi-hundred-ms-to-second allocator/GC stall. In a
+   30-frame steady-state probe at 256² spp=1, legacy frame time was median 33 ms
+   but **mean 109 ms with a max of 1923 ms**, while cached was a rock-steady
+   28–36 ms (mean 29 ms, max 36 ms) — a *mean* speedup of 3.76× driven entirely
+   by the eliminated stalls. The `--orbit` table above also shows it: legacy max
+   frame 144 ms vs cached max 37 ms at 256² spp=1.
+
+**The real, defensible win of the cached path is therefore NOT a 5× kernel
+speedup — it is (a) zero per-frame device allocation and (b) eliminated
+frame-time spikes, i.e. smooth interactive latency.** For a turntable/interactive
+viewer this is the property that matters (no multi-hundred-ms hitches), but it
+is not what a single "≥5× orbit speedup" number captures. We recommend
+re-framing the C6 acceptance around *steady-state per-frame latency variance /
+zero-alloc* rather than a raw total-time multiplier; the honest total-time
+speedup at a representative preview config (256×256, spp=1) is **~1.3–2×**, not
+≥5× (Lyr Rule 1: measured, not manufactured).
+
+Why not chase 5× by shrinking the render? At 64×64 spp=1 the kernel is ~17 ms
+and the steady-state upload ~3–4 ms, so even a vacuum-tight config tops out
+around 1.2–1.3× steady-state (the occasional total-time win above that is the
+stall effect, not amortisation). There is no fair fixed config of smoke.vdb at
+which the *steady-state* upload+alloc is ≥4× the kernel, so ≥5× cannot be hit
+honestly on this scene. A grid with a much larger buffer relative to its kernel
+work (e.g. a very dense grid rendered at tiny resolution) would show a larger
+upload-amortisation ratio, but that is not the representative smoke.vdb orbit
+the bead specifies. **bunny_cloud.vdb is exactly that larger-buffer case —
+§1.4.2.**
+
+#### 1.4.2 bunny_cloud.vdb orbit (137 MB buffer — where re-upload genuinely hurts)
+
+Scene: **bunny_cloud.vdb** (134.6 MB / ~137 MB NanoVDB buffer, **19,210,271
+active voxels**, 66,212 leaf nodes). This is the scene where the legacy path's
+per-frame re-upload + host density-scan is *genuinely* expensive: every legacy
+frame re-runs `build_gpu_nanogrid`, which is a **137 MB H2D transfer PLUS a
+host-side `_estimate_density_range` scan over all 19.2 M active voxels**, both
+eliminated entirely by the device cache. Same rigor as §1.4.1: one untimed
+warm-up frame per path, per-frame `@elapsed` bracketed by `CUDA.synchronize()`,
+total + stall-resistant median speedup, cached render asserted non-vacuous
+(bunny_cloud dense fog hits density on every orbit frame).
+
+| Config (W×H×spp) | Legacy total (ms) | Cached total (ms) | Legacy median/frame | Cached median/frame | Legacy max/frame | Cached max/frame | **Total speedup** | **Median speedup** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 128×128×1 | 1113.0 | 299.7 | 88.64 | 29.41 | 304 | 34 | **3.71×** | **3.01×** |
+| 256×256×1 | 1097.6 | 385.3 | 100.47 | 38.12 | 163 | 45 | **2.85×** | **2.64×** |
+| 512×512×1 | 1636.8 | 1066.5 | 164.69 | 109.22 | 187 | 129 | **1.53×** | **1.51×** |
+| 512×512×8 | 8922.9 | 8395.2 | 909.05 | 859.06 | 1069 | 1016 | **1.06×** | **1.06×** |
+
+(128² and 256² reproduce within noise across two independent runs: 128² median
+2.99–3.01×, total 3.48–3.71×; 256² median 2.49–2.64×, total 2.48–2.85×.)
+
+**Honest finding: even on bunny_cloud — the fairest possible scene for the
+device cache — ≥5× is NOT met at any config a real turntable user would pick.**
+The best honest result is **3.71× total / 3.01× median at 128×128 spp=1**. The
+regime is fully explained by a single per-frame fixed cost that the cache
+amortises away.
+
+Per-frame cost decomposition (profiled single frame, `profile=true` on both
+paths — `bench_orbit`'s `upload_scan_delta_ms`):
+
+| Config | Legacy `upload_ms` | Cached `upload_ms` | **upld Δ (amortised away)** | Kernel (leg/cac, ms) |
+|---|---:|---:|---:|---:|
+| 128×128×1 | 54.19 | 0.22 | **53.96** | 31.0 / 30.5 |
+| 256×256×1 | 55.08 | 0.11 | **54.97** | 34.3 / 35.0 |
+| 512×512×1 | 55.94 | 0.22 | **55.72** | 105.9 / 106.4 |
+| 512×512×8 | 55.55 | 0.24 | **55.31** | 849.4 / 845.3 |
+
+Two things to read off this table:
+
+1. **The per-frame amortised cost is a flat ~54–56 ms — independent of render
+   resolution.** It is the `build_gpu_nanogrid` cost (137 MB H2D + 19.2 M-voxel
+   host scan + LUT/lights), which does not depend on W×H×spp. The cached
+   `upload_ms` is ~0.1–0.2 ms (just the pixel-buffer re-zero; **zero device
+   allocation** with a `GPURenderContext`).
+2. **The kernel is identical between paths** (e.g. 31.0 vs 30.5 ms at 128²) —
+   confirming the *only* difference measured is the eliminated upload+scan.
+
+So the median speedup is exactly `(kernel + 54 ms) / kernel`: at 128² (kernel
+~30 ms) that is ~2.8× (measured 3.0×, the extra from eliminated allocator-stall
+tail latency — legacy max frame 304 ms vs cached 34 ms); at 512²×8 (kernel
+~850 ms) the 54 ms is noise and the speedup collapses to 1.06×. **To reach 5×
+the fixed ~54 ms would have to be ≥4× the kernel, i.e. kernel ≤ ~13.5 ms — but
+bunny_cloud is dense fog, so its kernel never drops that low at a real render
+size (it is already ~30 ms at 128²).** Hitting 5× would require a degenerate
+≤64² render no interactive user would choose; that would be gaming the config
+(Lyr Rule 1), not a fair measurement.
+
+**Decomposing the ~54 ms `upld Δ` further (the interesting finding).** Measured
+in isolation on the 137 MB buffer:
+
+| Component | Median (ms) | Eliminated by cache? |
+|---|---:|:---:|
+| Host `_estimate_density_range` scan (19.2 M voxels, 66,212 leaves) | **42.2** | yes (one-time) |
+| 137 MB `Adapt.adapt` H2D upload (sync-bracketed) | **39.3** | yes (one-time) |
+
+**The host-side density-scan is a co-equal cost with the 137 MB H2D transfer —
+they are roughly 1:1, ~42 ms vs ~39 ms.** This is a legitimately surprising,
+load-bearing result: the cache value on a large grid is *not* dominated by PCIe
+transfer alone; nearly half of the amortised per-frame cost is a pure-CPU loop
+over every active voxel (`src/GPU.jl:1536` `_estimate_density_range`, a scalar
+512-value scan per leaf). The isolated sum (~81 ms) exceeds the ~54 ms the
+profiler attributes inside the orbit because the orbit's `build_gpu_nanogrid`
+overlaps the async H2D copy with host work and benefits from a warm cache; the
+~54 ms is the synchronized steady-state delta. Either way, **both halves are
+real and both are amortised to zero by the device cache** — confirming the C5
+cache's value is largest precisely on large, dense grids, just not large enough
+to clear an arbitrary 5× bar at a fair render size.
+
+**Conclusion across §1.4.1 + §1.4.2.** The honest amortisation speedup scales
+with `buffer-cost / kernel-cost`: smoke.vdb (6.34 MB, cheap upload) tops out
+~1.3× median; bunny_cloud.vdb (137 MB, ~54 ms upload+scan) reaches **3.0×
+median / 3.7× total at 128² spp=1** and shrinks toward 1× as the kernel grows.
+**≥5× is honestly unreachable at any fair config on either scene** — the device
+cache's defensible win is (a) zero per-frame device allocation, (b) eliminated
+multi-hundred-ms allocator-stall spikes (legacy max 304 ms → cached 34 ms on
+bunny_cloud 128²), and (c) on large grids, amortising a ~54 ms upload+host-scan
+that is otherwise paid *every frame* — i.e. smooth interactive latency, not a
+raw 5× throughput multiplier.
 
 ---
 
