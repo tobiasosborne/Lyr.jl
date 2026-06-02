@@ -8,6 +8,8 @@ import Lyr: _gpu_get_value, _gpu_get_value_trilinear,
              NanoValueAccessor, nano_background, nano_bbox,
              _gpu_get_value_with_leaf, _gpu_get_value_cached,
              _gpu_get_value_trilinear_cached, _gpu_leaf_read
+import Lyr: GPUNanoGrid, build_gpu_nanogrid,
+             GPURenderContext, build_gpu_render_context
 
 const CUDA_AVAILABLE = try
     using CUDA
@@ -221,6 +223,55 @@ end
             mem_final = CUDA.available_memory()
             # Allow 10MB tolerance for CUDA runtime fluctuation
             @test abs(Int64(mem_final) - Int64(mem_after)) < 10_000_000
+        end
+
+        @testset "GPURenderContext zero-alloc reuse on CUDA (C5 acceptance)" begin
+            # ACCEPTANCE CRITERION (bead path-tracer-a7wt): repeated renders
+            # through the same GPURenderContext allocate ZERO new device memory.
+            # Ground truth: CUDA.jl memory model — fill!(::CuArray, isbits) is an
+            # in-place kernel (0 device pool bytes); Adapt.adapt(backend,
+            # fill(z,n)) allocates a fresh device array. CUDA.@allocated measures
+            # DEVICE pool bytes only (the host Array(acc_buf) readback in the
+            # render does NOT count).
+            #
+            # Use the proven smoke.vdb fog scene (a real volume the camera hits)
+            # so the render is non-vacuous — an all-black render would make the
+            # bit-identity assertion below pass for the wrong reason (fjo9 /
+            # vacuous-render-test lesson).
+            vdb  = parse_vdb(smoke_path)
+            grid = vdb.grids[1]
+            nano = build_nanogrid(grid.tree)
+            cam  = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+            mat  = VolumeMaterial(tf_smoke(); sigma_scale=5.0)
+            vol  = VolumeEntry(grid, nano, mat)
+            scene = Scene(cam, DirectionalLight((0.577, 0.577, 0.577)), vol)
+            backend = CUDABackend()
+            W = 16; H = 16; SEED = UInt64(7)
+
+            gpunano = build_gpu_nanogrid(nano, scene; backend=backend)
+            ctx     = build_gpu_render_context(W, H; backend=backend)
+
+            # Untimed WARM-UP render with the context: the first call JIT-
+            # specializes the fill!/kernel paths and may allocate. Without this
+            # warm-up the @allocated==0 assertion false-fails (the #1 trip-wire).
+            warm = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED, context=ctx)
+            # Non-vacuous: the warm render must hit density.
+            @test any(p -> p != (0.0f0, 0.0f0, 0.0f0), warm)
+
+            # ACCEPTANCE: a steady-state context render allocates 0 device bytes.
+            bytes = CUDA.@allocated gpu_render_volume(gpunano, scene, W, H;
+                                                       spp=2, seed=SEED, context=ctx)
+            @test bytes == 0
+
+            # Bit-identity (fjo9): a context render must equal a no-context
+            # render for the same seed.
+            base = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED)
+            reused = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED, context=ctx)
+            @test reused == base
+
+            # Fail-loud on a context/dimension mismatch.
+            @test_throws ErrorException gpu_render_volume(gpunano, scene, 32, 32;
+                                                           spp=2, seed=SEED, context=ctx)
         end
     end
 end

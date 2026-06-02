@@ -120,6 +120,50 @@ struct GPUNanoGrid{B, BUF, TF, L}
     header_T_size::Int32                                 # Int32(sizeof(T))
 end
 
+"""
+    GPURenderContext{B, BUF}
+
+Preallocated, reusable device pixel buffers for the cached
+`gpu_render_volume(::GPUNanoGrid, ...)` overload. Holds the per-call
+`output`/`acc_buf` NTuple{3,Float32} device vectors so that repeated renders
+at a fixed resolution allocate **zero** new device memory: the render path
+re-zeroes them in place (`fill!`, an in-place kernel) instead of allocating a
+fresh pair via `Adapt.adapt(backend, fill(...))` every call.
+
+This closes the last per-call allocation in the cached path. C3
+(`path-tracer-20xa`) amortised the grid/TF/lights H2D upload into
+`build_gpu_nanogrid`; C5 amortises the pixel-buffer allocation into the
+context. A context is **grid-agnostic** — it depends only on `(width, height,
+backend)`, so one context may be reused across different `GPUNanoGrid`s of
+equal dimensions on the same backend.
+
+Fully parametric so the compiler sees the concrete device-array type (a
+`CuArray{NTuple{3,Float32}}` under CUDA vs an `Array` under the CPU backend).
+
+# Fields
+- `backend::B`  — the `KernelAbstractions.Backend` these buffers live on
+- `output::BUF` — device `Vector{NTuple{3,Float32}}`, length `width*height`,
+                  the per-spp kernel render target
+- `acc_buf::BUF`— device `Vector{NTuple{3,Float32}}`, the progressive
+                  accumulator; MUST be zeroed at render start (the
+                  accumulation kernel does `acc += output`)
+- `width::Int`  — image width the buffers were sized for
+- `height::Int` — image height the buffers were sized for
+
+# Ref
+- bead `path-tracer-a7wt` (C5), EPIC `path-tracer-ooul`
+- Ground truth: CUDA.jl memory model — `fill!(::CuArray, ::isbits)` is an
+  in-place kernel (0 device alloc); `Adapt.adapt(backend, fill(z, n))`
+  allocates a fresh device array.
+"""
+struct GPURenderContext{B, BUF}
+    backend::B
+    output::BUF    # device Vector{NTuple{3,Float32}}, length width*height
+    acc_buf::BUF
+    width::Int
+    height::Int
+end
+
 # ============================================================================
 # Device-side buffer operations
 # ============================================================================
@@ -1564,10 +1608,43 @@ function build_gpu_nanogrid(nanogrid::NanoGrid{T}, scene::Scene;
 end
 
 """
+    build_gpu_render_context(width::Int, height::Int;
+                             backend=_default_gpu_backend()) -> GPURenderContext
+
+Allocate the reusable device pixel buffers (`output`, `acc_buf`) for the cached
+`gpu_render_volume(::GPUNanoGrid, ...)` overload, sized `width*height`. Build
+one per (resolution, backend) and pass it as the `context` kwarg to render with
+**zero** per-call device allocation — the render re-zeroes these buffers in
+place rather than allocating a fresh pair every call.
+
+The two `Adapt.adapt(backend, fill(z3, npixels))` allocations happen ONCE here,
+mirroring how `build_gpu_nanogrid` uploads the grid/TF/lights once. A context
+is grid-agnostic: reuse it across any `GPUNanoGrid` of matching `width`,
+`height`, and `backend`.
+
+Errors loudly (Rule 6) if either dimension is non-positive.
+
+# Ref
+- bead `path-tracer-a7wt` (C5), EPIC `path-tracer-ooul`
+- Ground truth: CUDA.jl memory model (see `GPURenderContext`).
+"""
+function build_gpu_render_context(width::Int, height::Int;
+                                  backend=_default_gpu_backend())
+    (width > 0 && height > 0) ||
+        error("build_gpu_render_context: width/height must be positive, got ($width, $height)")
+    npixels = width * height
+    z3 = (0.0f0, 0.0f0, 0.0f0)
+    output  = Adapt.adapt(backend, fill(z3, npixels))   # allocate ONCE
+    acc_buf = Adapt.adapt(backend, fill(z3, npixels))
+    GPURenderContext(backend, output, acc_buf, width, height)
+end
+
+"""
     gpu_render_volume(gpunano::GPUNanoGrid, scene::Scene,
                        width::Int, height::Int;
                        spp=1, seed=UInt64(42), hdda=true,
-                       max_bounces=0, profile=false) -> Matrix{NTuple{3, Float32}}
+                       max_bounces=0, profile=false,
+                       context=nothing) -> Matrix{NTuple{3, Float32}}
 
 Cached render path: render using the PRE-LOADED device buffers held by
 `gpunano`, skipping the per-call H2D upload of the NanoVDB buffer, TF LUT, and
@@ -1575,6 +1652,16 @@ lights AND the host-side `_estimate_density_range` leaf scan that the legacy
 `gpu_render_volume(::NanoGrid, ...)` repeats on every call. Build one
 `GPUNanoGrid` per (grid, material, lights) tuple via `build_gpu_nanogrid` and
 reuse it across renders.
+
+Pass an optional `context::GPURenderContext` (built with
+`build_gpu_render_context(width, height; backend)`) to also eliminate the
+per-call pixel-buffer allocation: the render then REUSES the context's
+preallocated `output`/`acc_buf`, re-zeroing them in place with `fill!`. With a
+matching context, repeated renders allocate **zero** new device memory
+(`CUDA.@allocated == 0`; bead `path-tracer-a7wt`, C5). The context is
+grid-agnostic — it only needs to match `width`, `height`, and `backend`, and
+errors loudly on a mismatch. When `context === nothing` (the default) the path
+is byte-for-byte identical to before (fjo9).
 
 What is **baked** in `gpunano` (uploaded/computed once at build time):
 - `buffer`     — device NanoVDB byte buffer
@@ -1614,7 +1701,8 @@ function gpu_render_volume(gpunano::GPUNanoGrid, scene::Scene,
                             spp::Int=1, seed::UInt64=UInt64(42),
                             hdda::Bool=true,
                             max_bounces::Int=0,
-                            profile::Bool=false)
+                            profile::Bool=false,
+                            context::Union{Nothing, GPURenderContext}=nothing)
     backend = gpunano.backend
     mat = scene.volumes[1].material
     cam = scene.camera
@@ -1657,20 +1745,58 @@ function gpu_render_volume(gpunano::GPUNanoGrid, scene::Scene,
     kernel_ns = zero(UInt64)
     accum_ns  = zero(UInt64)
 
+    # When a GPURenderContext is supplied, validate it BEFORE the timed window
+    # so a fail-loud error (Rule 6) isn't conflated with buffer-prep timing.
+    # A context is grid-agnostic (C5): it must match this render's dimensions
+    # and backend, but is deliberately NOT tied to grid identity, so one
+    # context can be reused across GPUNanoGrids of equal dims+backend.
+    if context !== nothing
+        (context.width == width && context.height == height) ||
+            error("gpu_render_volume: context dimensions $(context.width)×$(context.height) " *
+                  "do not match requested $(width)×$(height)")
+        # Backend equality (==, not ===): two CUDABackend() instances compare
+        # equal but need not be identical — see C5 bead notes.
+        context.backend == backend ||
+            error("gpu_render_volume: context backend $(typeof(context.backend)) " *
+                  "does not match gpunano backend $(typeof(backend))")
+    end
+
     # --- UPLOAD phase -------------------------------------------------------
     # Cached path: grid/TF/lights are already on-device. The only per-call
-    # allocation is the pixel output/accumulator pair, so upload_ms counts
+    # cost is preparing the pixel output/accumulator pair, so upload_ms counts
     # JUST that (sync-bracketed when profiling).
+    #
+    # context === nothing: allocate a fresh pair (verbatim legacy lines —
+    #   preserves bit-identity and the profile sync-bracket; fjo9).
+    # context provided:    REUSE the preallocated buffers and re-zero them in
+    #   place via fill! (an in-place kernel → 0 device allocation). acc_buf
+    #   MUST start at zero because _accumulate_kernel! does acc += output, and
+    #   output is overwritten by the render kernel each spp so it need not be
+    #   pre-cleared, but we zero it too for a clean, deterministic state.
     if profile
         KernelAbstractions.synchronize(backend)
         t0 = time_ns()
-        output     = Adapt.adapt(backend, fill(z3, npixels))
-        acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
+        if context === nothing
+            output     = Adapt.adapt(backend, fill(z3, npixels))
+            acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
+        else
+            output  = context.output
+            acc_buf = context.acc_buf
+            fill!(output, z3)
+            fill!(acc_buf, z3)
+        end
         KernelAbstractions.synchronize(backend)
         upload_ns = time_ns() - t0
     else
-        output     = Adapt.adapt(backend, fill(z3, npixels))
-        acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
+        if context === nothing
+            output     = Adapt.adapt(backend, fill(z3, npixels))
+            acc_buf    = Adapt.adapt(backend, fill(z3, npixels))
+        else
+            output  = context.output
+            acc_buf = context.acc_buf
+            fill!(output, z3)
+            fill!(acc_buf, z3)
+        end
     end
 
     kernel!     = hdda ? delta_tracking_hdda_kernel!(backend) : delta_tracking_kernel!(backend)

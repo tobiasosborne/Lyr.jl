@@ -190,6 +190,7 @@ export NanoGrid, build_nanogrid
 export gpu_available, gpu_info, gpu_render_volume, gpu_render_volume_preview,
        gpu_render_multi_volume, gpu_gr_render
 export GPUNanoGrid, build_gpu_nanogrid
+export GPURenderContext, build_gpu_render_context
 
 # --- Field Protocol ---
 export ScalarField3D, VectorField3D, ComplexScalarField3D

@@ -19,6 +19,7 @@ using KernelAbstractions
 
 import Lyr: GPUNanoGrid, build_gpu_nanogrid, _estimate_density_range
 import Lyr: gpu_render_volume
+import Lyr: GPURenderContext, build_gpu_render_context
 
 @testset "GPUNanoGrid struct (C1)" begin
     backend = KernelAbstractions.CPU()
@@ -308,6 +309,77 @@ end
 
             @test total_cached_upload <= legacy_t.upload_ms
         end
+    end
+end
+
+# ============================================================================
+# GPURenderContext (C5, path-tracer-a7wt): preallocated device pixel buffers
+# reused across renders. CPU-backend coverage here; the device-allocation
+# acceptance (CUDA.@allocated == 0) lives in test_gpu_cuda.jl.
+# Part of EPIC path-tracer-ooul.
+# ============================================================================
+@testset "GPURenderContext struct + constructor (C5)" begin
+    backend = KernelAbstractions.CPU()
+
+    @testset "struct shape + field access" begin
+        ctx = build_gpu_render_context(8, 16; backend=backend)
+        @test ctx isa GPURenderContext
+        @test ctx.backend === backend
+        @test ctx.width == 8
+        @test ctx.height == 16
+        @test length(ctx.output)  == 8 * 16
+        @test length(ctx.acc_buf) == 8 * 16
+        @test eltype(ctx.output)  == NTuple{3, Float32}
+        @test eltype(ctx.acc_buf) == NTuple{3, Float32}
+    end
+
+    @testset "fail-loud on non-positive dims" begin
+        @test_throws ErrorException build_gpu_render_context(0, 16; backend=backend)
+        @test_throws ErrorException build_gpu_render_context(16, 0; backend=backend)
+        @test_throws ErrorException build_gpu_render_context(-4, 16; backend=backend)
+    end
+end
+
+@testset "GPURenderContext reuse: bit-identity + non-vacuous (C5)" begin
+    # Reuse the proven smoke.vdb fog scene (criterion 1 above): a real volume
+    # the camera actually hits, so renders are non-background and the
+    # bit-identity check is not vacuous (fjo9 / vacuous-render-test lesson).
+    smoke_path = joinpath(@__DIR__, "fixtures", "samples", "smoke.vdb")
+    if !isfile(smoke_path)
+        @test_skip "fixture not found: $smoke_path"
+    else
+        vdb  = parse_vdb(smoke_path)
+        grid = vdb.grids[1]
+        nano = build_nanogrid(grid.tree)
+        cam  = Camera((150.0, 50.0, 150.0), (50.0, 50.0, 50.0), (0.0, 1.0, 0.0), 60.0)
+        mat  = VolumeMaterial(tf_smoke(); sigma_scale=5.0)
+        vol  = VolumeEntry(grid, nano, mat)
+        scene = Scene(cam, DirectionalLight((0.577, 0.577, 0.577)), vol)
+        backend = KernelAbstractions.CPU()
+        W = 16; H = 16; SEED = UInt64(7)
+
+        gpunano = build_gpu_nanogrid(nano, scene; backend=backend)
+
+        # Baseline: no-context render. Assert it is non-background (else a
+        # context render returning all-black would match it vacuously).
+        base = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED)
+        @test any(p -> p != (0.0f0, 0.0f0, 0.0f0), base)
+
+        ctx = build_gpu_render_context(W, H; backend=backend)
+
+        # Render repeatedly through the SAME context. Each must equal the
+        # no-context baseline: this proves (a) buffer reuse stays
+        # bit-identical and (b) the per-render zeroing of acc_buf is correct
+        # (a stale acc would make render #2 brighter than #1).
+        for _ in 1:5
+            reused = gpu_render_volume(gpunano, scene, W, H; spp=2, seed=SEED, context=ctx)
+            @test reused == base
+            @test size(reused) == (H, W)
+        end
+
+        # Fail-loud on a dimension mismatch between context and requested size.
+        @test_throws ErrorException gpu_render_volume(gpunano, scene, 32, 32;
+                                                       spp=2, seed=SEED, context=ctx)
     end
 end
 
