@@ -2,7 +2,7 @@
 
 **Physically correct volume rendering in pure Julia.**
 
-Lyr is a from-scratch implementation of the [OpenVDB](https://www.openvdb.org/) file format and a Monte Carlo volume renderer, written entirely in Julia. No C++ bindings, no external renderers — just Julia, from file parsing to final pixel.
+Lyr is a from-scratch implementation of the [OpenVDB](https://www.openvdb.org/) file format and a Monte Carlo volume renderer (CPU and CUDA GPU), written entirely in Julia. No C++ bindings, no external renderers — just Julia, from file parsing to final pixel.
 
 <p align="center">
   <img src="docs/images/smoke_render.png" alt="Smoke volume rendered with Monte Carlo delta tracking" width="720"/>
